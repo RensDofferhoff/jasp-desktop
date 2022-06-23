@@ -34,11 +34,11 @@ public:
 	void saveDataSet(const std::string &path, boost::function<void (int)> progressCallback) override;
 
 private:
-	static void saveDataArchive(archive *a, boost::function<void (int)> progressCallback);
-	static void saveJASPArchive(archive *a, boost::function<void (int)> progressCallback);
+	static void createManifest(archive *a);
+	static void saveResults(		archive * a);
+	static void saveAnalyses(		archive * a);
+	static void saveDatabase(		archive * a);
 
-	static void createJARContents(archive *a);
-	static std::string getColumnTypeName(columnType columnType);
 
 	JASPTIMER_CLASS(JASPExporter);
 };

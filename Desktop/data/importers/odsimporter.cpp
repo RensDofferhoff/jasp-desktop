@@ -16,7 +16,6 @@
 //
 
 #include "odsimporter.h"
-#include "sharedmemory.h"
 
 #include "ods/odsxmlmanifesthandler.h"
 #include "ods/odsxmlcontentshandler.h"

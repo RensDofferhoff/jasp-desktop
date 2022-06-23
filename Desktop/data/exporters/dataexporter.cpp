@@ -17,7 +17,6 @@
 
 #include "dataexporter.h"
 #include <sys/stat.h>
-#include "dataset.h"
 #include <fstream>
 #include "stringutils.h"
 #include "utilenums.h"

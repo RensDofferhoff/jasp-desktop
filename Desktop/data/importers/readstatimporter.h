@@ -3,7 +3,6 @@
 
 #include "importer.h"
 #include <string>
-#include "column.h"
 
 ///
 /// Uses ReadStat to import SPSS/SAS/STATA files and perhaps others.

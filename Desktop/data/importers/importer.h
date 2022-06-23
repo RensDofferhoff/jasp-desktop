@@ -41,7 +41,6 @@ protected:
 	bool						initColumnAsScale(				QVariant colID,			std::string newName, const std::vector<double>		& values)							{ return DataSetPackage::pkg()->initColumnAsScale(colID, newName, values);										}
 
 	void						storeInEmptyValues(std::string columnName, std::map<int, std::string> emptyValues)																{ DataSetPackage::pkg()->storeInEmptyValues(columnName, emptyValues);											}
-	void						resetEmptyValues()																																{ DataSetPackage::pkg()->resetEmptyValues();																		}
 
 private:
 	void _syncPackage(

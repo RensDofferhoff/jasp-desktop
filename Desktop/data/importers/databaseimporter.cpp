@@ -56,6 +56,8 @@ ImportDataSet * DatabaseImporter::loadFile(const std::string &locator, boost::fu
 
 void DatabaseImporter::initColumn(QVariant colId, ImportColumn *importColumn)
 {
+	JASPTIMER_SCOPE(DatabaseImporter::initColumn);
+	
 	typedef QMetaType::Type MT;
 	
 	DatabaseImportColumn * col = static_cast<DatabaseImportColumn*>(importColumn);

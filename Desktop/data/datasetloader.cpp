@@ -19,12 +19,9 @@
 
 #include <boost/algorithm/string.hpp>
 
-#include "sharedmemory.h"
-#include "dataset.h"
-
 #include "importers/databaseimporter.h"
 #include "importers/csvimporter.h"
-#include "importers/jaspimporter.h"
+#include "importers/jaspimporterold.h"
 #include "importers/odsimporter.h"
 #include "importers/readstatimporter.h"
 
@@ -32,11 +29,10 @@
 
 #include "timers.h"
 #include "utils.h"
+#include "log.h"
 
 using namespace std;
 using namespace ods;
-using namespace boost::interprocess;
-using namespace boost;
 
 string DataSetLoader::getExtension(const string &locator, const string &extension)
 {
@@ -69,9 +65,14 @@ void DataSetLoader::loadPackage(const string &locator, const string &extension, 
 	{
 		importer->loadDataSet(locator, progress);
 		delete importer;
+
+		//for testing purposes:
+		Log::log() <<"LOADING TESTING COPY DataSet!" << std::endl;
+		DataSet temp(DataSetPackage::pkg()->dataSet()->id());
+		Log::log() << "Found " << temp.columnCount() << " columns\n";
 	}
 	else if(extension == ".jasp" || extension == "jasp")
-		JASPImporter::loadDataSet(locator, progress);
+		JASPImporterOld::loadDataSet(locator, progress);
 	else
 		throw std::runtime_error("JASP does not support loading the file-type \"" + extension + '"');
 
@@ -90,9 +91,3 @@ void DataSetLoader::syncPackage(const string &locator, const string &extension, 
 		delete importer;
 	}
 }
-
-void DataSetLoader::freeDataSet(DataSet *dataSet)
-{
-	SharedMemory::deleteDataSet(dataSet);
-}
-

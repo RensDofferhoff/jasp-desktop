@@ -15,7 +15,7 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-#include "jaspimporter.h"
+#include "jaspimporterold.h"
 #include "columnutils.h"
 #include <fstream>
 
@@ -34,7 +34,9 @@
 #include "resultstesting/compareresults.h"
 #include "log.h"
 
-void JASPImporter::loadDataSet(const std::string &path, boost::function<void(int)> progressCallback)
+const Version JASPImporterOld::maxSupportedJaspArchiveVersion = Version("3.1.0");
+
+void JASPImporterOld::loadDataSet(const std::string &path, boost::function<void(int)> progressCallback)
 {	
 	JASPTIMER_RESUME(JASPImporter::loadDataSet INIT);
 
@@ -46,8 +48,8 @@ void JASPImporter::loadDataSet(const std::string &path, boost::function<void(int
 
 	Compatibility compatibility = isCompatible();
 
-	if (compatibility == JASPImporter::NotCompatible)	throw std::runtime_error("The file version is too new.\nPlease update to the latest version of JASP to view this file.");
-	else if (compatibility == JASPImporter::Limited)	packageData->setWarningMessage("This file was created by a newer version of JASP and may not have complete functionality.");
+	if (compatibility == JASPImporterOld::NotCompatible)	throw std::runtime_error("The file version is too new.\nPlease update to the latest version of JASP to view this file.");
+	else if (compatibility == JASPImporterOld::Limited)	packageData->setWarningMessage("This file was created by a newer version of JASP and may not have complete functionality.");
 
 	JASPTIMER_STOP(JASPImporter::loadDataSet INIT);
 
@@ -58,7 +60,7 @@ void JASPImporter::loadDataSet(const std::string &path, boost::function<void(int
 }
 
 
-void JASPImporter::loadDataArchive(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporterOld::loadDataArchive(const std::string &path, boost::function<void(int)> progressCallback)
 {
 	if (DataSetPackage::pkg()->dataArchiveVersion().major() == 1)
 		loadDataArchive_1_00(path, progressCallback);
@@ -66,7 +68,7 @@ void JASPImporter::loadDataArchive(const std::string &path, boost::function<void
 		throw std::runtime_error("The file version is not supported.\nPlease update to the latest version of JASP to view this file.");
 }
 
-void JASPImporter::loadDataArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporterOld::loadDataArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
 {
 	JASPTIMER_SCOPE(JASPImporter::loadDataArchive_1_00);
 
@@ -219,7 +221,7 @@ void JASPImporter::loadDataArchive_1_00(const std::string &path, boost::function
 	packageData->setFilterShouldRunInit(filterShouldBeRun);
 }
 
-void JASPImporter::loadJASPArchive(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporterOld::loadJASPArchive(const std::string &path, boost::function<void(int)> progressCallback)
 {
 	if (DataSetPackage::pkg()->archiveVersion().major() >= 1 && DataSetPackage::pkg()->archiveVersion().major() <= 3) //2.x version have a different analyses.json structure but can be loaded using the 1_00 loader. 3.x adds computed columns
 		loadJASPArchive_1_00(path, progressCallback);
@@ -227,7 +229,7 @@ void JASPImporter::loadJASPArchive(const std::string &path, boost::function<void
 		throw std::runtime_error("The file version is not supported.\nPlease update to the latest version of JASP to view this file.");
 }
 
-void JASPImporter::loadJASPArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporterOld::loadJASPArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
 {
 	JASPTIMER_SCOPE(JASPImporter::loadJASPArchive_1_00 read analyses.json);
 	Json::Value analysesData;
@@ -300,7 +302,7 @@ void JASPImporter::loadJASPArchive_1_00(const std::string &path, boost::function
 }
 
 
-void JASPImporter::readManifest(const std::string &path)
+void JASPImporterOld::readManifest(const std::string &path)
 {
 	bool		foundVersion		= false,
 				foundDataVersion	= false;
@@ -347,7 +349,7 @@ void JASPImporter::readManifest(const std::string &path)
 	manifest.close();
 }
 
-bool JASPImporter::parseJsonEntry(Json::Value &root, const std::string &path,  const std::string &entry, bool required)
+bool JASPImporterOld::parseJsonEntry(Json::Value &root, const std::string &path,  const std::string &entry, bool required)
 {
 	//Not particularly happy about the way we need to add a delete at every return here. Would be better to not use `new` and just instantiate a scoped var
 	//But that would require removing some `std::runtime_error` from `openEntry` in the `ArchiveReader` constructor. 
@@ -404,15 +406,15 @@ bool JASPImporter::parseJsonEntry(Json::Value &root, const std::string &path,  c
 	return true;
 }
 
-JASPImporter::Compatibility JASPImporter::isCompatible()
+JASPImporterOld::Compatibility JASPImporterOld::isCompatible()
 {
-	if (DataSetPackage::pkg()->archiveVersion().major()		> JASPExporter::jaspArchiveVersion.major() )
-		return JASPImporter::NotCompatible;
+	if (DataSetPackage::pkg()->archiveVersion().major()		> maxSupportedJaspArchiveVersion.major() )
+		return JASPImporterOld::NotCompatible;
 
-	if (DataSetPackage::pkg()->archiveVersion().minor()		> JASPExporter::jaspArchiveVersion.minor() )
-		return JASPImporter::Limited;
+	if (DataSetPackage::pkg()->archiveVersion().minor()		> maxSupportedJaspArchiveVersion.minor() )
+		return JASPImporterOld::Limited;
 
-	return JASPImporter::Compatible;
+	return JASPImporterOld::Compatible;
 }
 
 

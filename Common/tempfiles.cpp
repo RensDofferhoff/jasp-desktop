@@ -85,7 +85,7 @@ void TempFiles::clearSessionDir()
 		for (const std::filesystem::path & pp : it.path())
 		{
 			std::string pathComp = pp.generic_string();
-			if(pathComp.find("tmp") != std::string::npos || pathComp == "status")
+			if(pathComp.find("tmp") != std::string::npos || pathComp == "status" || pathComp == "internal.sqlite")
 				leaveMeBe = true;
 		}
 
@@ -93,7 +93,7 @@ void TempFiles::clearSessionDir()
 			deleteUs.push_back(it.path());
 	}
 
-	for(auto dir : deleteUs)
+	for(auto & dir : deleteUs)
 		std::filesystem::remove_all(dir);
 }
 

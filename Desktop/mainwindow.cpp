@@ -33,12 +33,10 @@
 
 #include "log.h"
 #include "dirs.h"
-#include "column.h"
 #include "timers.h"
 #include "appinfo.h"
 #include "tempfiles.h"
 #include "processinfo.h"
-#include "sharedmemory.h"
 #include "columnutils.h"
 #include "mainwindow.h"
 
@@ -199,7 +197,10 @@ MainWindow::MainWindow(QApplication * application) : QObject(application), _appl
 
 	QString missingvaluestring = _settings.value("MissingValueList", "").toString();
 	if (missingvaluestring != "")
-		ColumnUtils::setEmptyValues(fromQstringToStdVector(missingvaluestring, "|"));
+	{
+		stringvec emptyV = fromQstringToStdVector(missingvaluestring, "|");
+		ColumnUtils::setEmptyValues(stringset(emptyV.begin(), emptyV.end()));
+	}
 
 	_engineSync->start(_preferences->plotPPI());
 
@@ -234,13 +235,12 @@ MainWindow::~MainWindow()
 
 	try
 	{
-		_engineSync->stopEngines();
 		_odm->clearAuthenticationOnExit(OnlineDataManager::OSF);
 
 		delete _resultsJsInterface;
 
 		if (_package->hasDataSet())
-			_package->reset();
+			_package->reset(false);
 
 		//delete _engineSync; it will be deleted by Qt!
 	}
@@ -286,11 +286,11 @@ void MainWindow::makeConnections()
 
 	connect(_package,				&DataSetPackage::datasetChanged,					_filterModel,			&FilterModel::datasetChanged,								Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::datasetChanged,					_computedColumnsModel,	&ComputedColumnsModel::datasetChanged,						Qt::QueuedConnection);
+	connect(_package,				&DataSetPackage::checkForDependentColumnsToBeSent,	_computedColumnsModel,	&ComputedColumnsModel::checkForDependentColumnsToBeSentSlot	);
 	connect(_package,				&DataSetPackage::datasetChanged,					_columnsModel,			&ColumnsModel::datasetChanged,								Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::isModifiedChanged,					this,					&MainWindow::packageChanged									);
 	connect(_package,				&DataSetPackage::windowTitleChanged,				this,					&MainWindow::windowTitleChanged								);
 	connect(_package,				&DataSetPackage::columnDataTypeChanged,				_computedColumnsModel,	&ComputedColumnsModel::recomputeColumn						);
-	connect(_package,				&DataSetPackage::freeDatasetSignal,					_loader,				&AsyncLoader::free											);
 	connect(_package,				&DataSetPackage::checkDoSync,						_loader,				&AsyncLoader::checkDoSync,									Qt::DirectConnection); //Force DirectConnection because the signal is called from Importer which means it is running in AsyncLoaderThread...
 	connect(_package,				&DataSetPackage::synchingIntervalPassed,			this,					&MainWindow::syncKeyPressed									);
 	connect(_package,				&DataSetPackage::newDataLoaded,						this,					&MainWindow::populateUIfromDataSet							);
@@ -1191,7 +1191,6 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 		if (event->isSuccessful())
 		{
 			_analyses->setVisible(false);
-			_package->setDataSet(nullptr); // Prevent analyses to change the dataset if they have computed columns.
 			_analyses->clear();
 			_package->reset();
 			_ribbonModel->showStatistics();
@@ -1242,8 +1241,6 @@ void MainWindow::populateUIfromDataSet()
 	if (_package->warningMessage() != "")	MessageForwarder::showWarning(_package->warningMessage());
 	else if (errorFound)					MessageForwarder::showWarning(errorMsg.str());
 
-	matchComputedColumnsToAnalyses();
-
 	_package->setLoaded(true);
 	checkUsedModules();
 
@@ -1257,13 +1254,6 @@ void MainWindow::checkUsedModules()
 		if(_ribbonModel->isModuleName(analysis->module()))
 			_ribbonModel->ribbonButtonModel(analysis->module())->setEnabled(true);
 	});
-}
-
-void MainWindow::matchComputedColumnsToAnalyses()
-{
-	for(ComputedColumn * col : *ComputedColumns::singleton())
-		if(col->analysisId() != -1)
-			col->setAnalysis(_analyses->get(col->analysisId()));
 }
 
 void MainWindow::qmlLoaded()

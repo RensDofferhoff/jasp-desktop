@@ -76,9 +76,9 @@ public:
 
     inline static std::vector<std::string> splitString(const std::string & str, const char sep = ',')
     {
-        std::vector<std::string>	vecString;
-        std::string					item;
-        std::stringstream			stringStream(str);
+        stringvec			vecString;
+        std::string			item;
+        std::stringstream	stringStream(str);
 
         while (std::getline(stringStream, item, sep))
             vecString.push_back(item);

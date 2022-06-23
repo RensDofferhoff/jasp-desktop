@@ -3,7 +3,8 @@
 #include "log.h"
 #include "utilities/qutils.h"
 
-ColumnsModel* ColumnsModel::_singleton = nullptr;
+ColumnsModel * ColumnsModel::_singleton = nullptr;
+VariableInfo * ColumnsModel::_info		= nullptr;
 
 ColumnsModel::ColumnsModel(DataSetTableModel *tableModel) : QTransposeProxyModel(tableModel), _tableModel(tableModel)
 {
@@ -15,13 +16,14 @@ ColumnsModel::ColumnsModel(DataSetTableModel *tableModel) : QTransposeProxyModel
 
 	if (_singleton == nullptr)
 	{
-		_singleton = this;
-		VariableInfo* info = new VariableInfo(this);
-		connect(this, &ColumnsModel::namesChanged,		info, &VariableInfo::namesChanged		);
-		connect(this, &ColumnsModel::columnsChanged,	info, &VariableInfo::columnsChanged		);
-		connect(this, &ColumnsModel::columnTypeChanged, info, &VariableInfo::columnTypeChanged	);
-		connect(this, &ColumnsModel::labelsChanged,		info, &VariableInfo::labelsChanged		);
-		connect(this, &ColumnsModel::labelsReordered,	info, &VariableInfo::labelsReordered	);
+		_singleton	= this;
+		_info		= new VariableInfo(this);
+		
+		connect(this, &ColumnsModel::namesChanged,		_info, &VariableInfo::namesChanged		);
+		connect(this, &ColumnsModel::columnsChanged,	_info, &VariableInfo::columnsChanged	);
+		connect(this, &ColumnsModel::columnTypeChanged, _info, &VariableInfo::columnTypeChanged	);
+		connect(this, &ColumnsModel::labelsChanged,		_info, &VariableInfo::labelsChanged		);
+		connect(this, &ColumnsModel::labelsReordered,	_info, &VariableInfo::labelsReordered	);
 	}
 }
 
@@ -135,7 +137,6 @@ QVariant ColumnsModel::provideInfo(VariableInfo::InfoType info, const QString& c
 		case VariableInfo::VariableNames:				return	getColumnNames();
 		}
 	}
-	catch(columnNotFound & e) {} //just return an empty QVariant right?
 	catch(std::exception & e)
 	{
 		Log::log() << "AnalysisForm::requestInfo had an exception! " << e.what() << std::flush;

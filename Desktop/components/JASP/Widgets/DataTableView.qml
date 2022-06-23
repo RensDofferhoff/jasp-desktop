@@ -304,9 +304,6 @@ FocusScope
 								{
 									if(!shiftPressed)	dataTableView.view.selectionStart   = dataTableView.view.model.index(rowIndex, columnIndex);
 									else				dataTableView.view.selectionEnd		= dataTableView.view.model.index(rowIndex, columnIndex);
-
-								
-									forceActiveFocus();
 								}
 							}
 						}
@@ -372,7 +369,7 @@ FocusScope
 					//					GradientStop { position: 0.77;	color: "#DDDDDD" }	GradientStop { position: 1.0;	color: "#DDDDDD" }	}
 					color:	jaspTheme.uiBackground
 					Text {
-						text:				rowIndex + 1
+						text:				rowNumber
 						font:				jaspTheme.font
 						anchors.centerIn:	parent
 						color:				jaspTheme.textEnabled
@@ -395,7 +392,7 @@ FocusScope
 					anchors.left:			parent.left
 					anchors.margins:		4
 
-					source: jaspTheme.iconPath + dataSetModel.getColumnTypesWithCorrespondingIcon()[columnType]
+					source: jaspTheme.iconPath + dataSetModel.getColumnTypesWithIcons()[columnType]
 					width:	headerRoot.__iconDim
 					height: headerRoot.__iconDim
 

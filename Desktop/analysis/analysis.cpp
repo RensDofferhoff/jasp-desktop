@@ -475,7 +475,7 @@ void Analysis::boundValueChangedHandler()
 
 void Analysis::requestComputedColumnCreationHandler(const std::string& columnName)
 {
-	ComputedColumn *result = requestComputedColumnCreation(columnName, this);
+	Column *result = requestComputedColumnCreation(columnName, this);
 
 	if (result)
 		addOwnComputedColumn(columnName);
@@ -1010,6 +1010,11 @@ void Analysis::analysisQMLFileChanged()
 	else if(qmlError() != "")				createForm(); //Last time it failed apparently
 	else
 		Log::log() << "Form (" << form() << ") wasn't complete " << ( form() ? std::to_string(form()->formCompleted()) : " because there was no form...") << " yet, and also did not have a QML error set yet, so ignoring it." << std::endl;
+}
+
+void Analysis::onUsedVariablesChanged()
+{
+	DataSetPackage::pkg()->checkComputedColumnDependenciesForAnalysis(this);
 }
 
 void Analysis::checkForRSources()

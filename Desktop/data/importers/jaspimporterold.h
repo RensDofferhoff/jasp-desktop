@@ -15,8 +15,8 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-#ifndef JASPIMPORTER_H
-#define JASPIMPORTER_H
+#ifndef JASPIMPORTEROLD_H
+#define JASPIMPORTEROLD_H
 
 
 #include "../datasetpackage.h"
@@ -30,9 +30,10 @@
 
 ///
 /// Loads a jasp file
-/// From 0.18 onwards this is simplified by having an sqlite file as the main container of data.
-/// For loading older files (jaspArchiveVersion < 4.0.0) see JASPImporterOld
-class JASPImporter
+/// We generally try to make sure to always stay backwards compatible as far as we can.
+/// Which as of 0.17.2 is still all the way back to 0.8.? something like that at least
+/// In 0.18 a new class is added for saving workspaces with sqlite in there, this class is kept for backwards compatibility
+class JASPImporterOld
 {
 	Q_DECLARE_TR_FUNCTIONS(JASPImporter)
 public:
@@ -53,4 +54,4 @@ private:
 	static const Version maxSupportedJaspArchiveVersion;
 };
 
-#endif // JASPIMPORTER_H
+#endif // JASPIMPORTEROLD_H
