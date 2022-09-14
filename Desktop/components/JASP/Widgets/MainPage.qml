@@ -139,7 +139,7 @@ Item
 			AnalysisForms
 			{
 				id:						analyses
-				z:						-1
+                z:						2000
 				visible:				mainWindow.analysesAvailable
 				width:					visible ? implicitWidth : 0
 				anchors.top:			parent.top
