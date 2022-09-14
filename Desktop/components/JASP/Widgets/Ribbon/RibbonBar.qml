@@ -26,7 +26,7 @@ FocusScope
 	height	: ribbonMenu.height
 
 	// This property is required to show filemenu button press in KeyNavigation
-	property bool isFileMenuPressed: false
+    property bool isFileMenuPressed: true
 
 	function focusOnRibbonMenu()
 	{
@@ -154,6 +154,7 @@ FocusScope
 		buttonType	: MenuArrowButton.ButtonType.Hamburger
 		z			: 2
 		width		: 0.75 * height
+        focus       : true
 
 		onClicked:
 		{
@@ -183,6 +184,7 @@ FocusScope
 	{
 		id	: ribbonMenu
 		z	: 0
+        focus: true
 
 		anchors
 		{

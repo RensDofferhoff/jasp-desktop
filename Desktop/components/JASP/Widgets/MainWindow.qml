@@ -29,7 +29,7 @@ Window
 	width:				1248
 	height:				768
 	flags:				Qt.Window | Qt.WindowFullscreenButtonHint
-	color:				jaspTheme.white
+    color:				jaspTheme.white
 
 	minimumWidth:		800
 	minimumHeight:		600
@@ -83,7 +83,6 @@ Window
 	Item
 	{
 		anchors.fill:	parent
-		focus:			true
 
 		Shortcut { onActivated: mainWindow.showEnginesWindow();					sequences: ["Ctrl+Alt+Shift+E"];								context: Qt.ApplicationShortcut; }
 		Shortcut { onActivated: mainWindow.saveKeyPressed();					sequences: ["Ctrl+S", Qt.Key_Save];								context: Qt.ApplicationShortcut; }
@@ -103,7 +102,8 @@ Window
 		RibbonBar
 		{
 			id	: ribbon
-			z	: 6
+            z	: 6
+            focus: true
 
 			anchors
 			{
