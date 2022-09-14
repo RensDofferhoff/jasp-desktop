@@ -63,6 +63,8 @@ RadioButtonBase
 		focus:				true
 
 		onCheckedChanged:	if (buttonGroup && checked) buttonGroup.clicked(control)
+        Keys.onReturnPressed: (event)=>	checked = !checked
+        Keys.onEnterPressed:	checked = !checked
 
 		indicator: Rectangle
 		{
