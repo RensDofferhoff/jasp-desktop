@@ -38,6 +38,8 @@ const std::string	jaspExtension		= ".jasp",
 					junctionArg			= "--junctions",
 					removeJunctionsArg	= "--removeJunctions";
 
+
+
 #ifdef _WIN32
 
 #include "utilities/processhelper.h"
@@ -313,6 +315,33 @@ void recursiveFileOpener(QFileInfo file, int & failures, int & total, int & time
 		}
 	}
 }
+
+#ifdef linux
+#include "utilities/appdirs.h"
+#include <QtGlobal>
+#include <QStringList>
+
+void prepareQMLCacheDir() {
+    QDir cacheDir = AppDirs::qmlCacheDir();
+    bool set = qputenv("QML_DISK_CACHE_PATH", cacheDir.absolutePath().toLocal8Bit());
+    if(!set) {
+        throw std::runtime_error("Could not set qml cache directory in environment");
+    }
+
+    //delete stale caches
+    QDir parent = cacheDir;
+    parent.cdUp();
+    QStringList staleCaches = parent.entryList(QStringList() << "qmlcache_*", QDir::NoDot | QDir::NoDotDot | QDir::Dirs);
+    for(auto& cacheName: staleCaches) {
+        QDir staleCache = parent;
+        staleCache.cd(cacheName);
+        if(cacheDir.absolutePath() != staleCache.absolutePath()) {
+           staleCache.removeRecursively();
+        }
+    }
+    Log::log() << "QML cache directory: " + cacheDir.absolutePath() << std::endl;
+}
+#endif
 
 int main(int argc, char *argv[])
 {

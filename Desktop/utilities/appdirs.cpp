@@ -209,3 +209,22 @@ QString AppDirs::renvCacheLocations()
 	return dynamicCache + separator + staticCache;
 	
 }
+
+#ifdef linux
+#include <QtGlobal>
+
+QDir AppDirs::qmlCacheDir() {
+    QString commit = tq(AppInfo::gitCommit);
+    QString basePath = qEnvironmentVariable("QML_DISK_CACHE_PATH", QStandardPaths::writableLocation(QStandardPaths::CacheLocation));
+    QString path = basePath + "/qmlcache_" + commit;
+    QDir cacheDir(path);
+    if(!cacheDir.exists()) {
+        bool succes = cacheDir.mkpath(".");
+        if(!succes) {
+            throw std::runtime_error("Could not create qml cache directory: " + fq(cacheDir.absolutePath()));
+        }
+    }
+    cacheDir.refresh();
+    return cacheDir;
+}
+#endif

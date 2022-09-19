@@ -47,7 +47,9 @@ public:
 	static QDir    programDir();
 	static QString renvRootLocation();
 	static QString renvCacheLocations();
-	
+#ifdef linux
+    static QDir    qmlCacheDir();
+#endif
 private:
 	static QString processPath(const QString & path);
 
