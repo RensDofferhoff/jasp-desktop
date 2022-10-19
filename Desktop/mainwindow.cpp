@@ -115,6 +115,7 @@ MainWindow::MainWindow(QApplication * application) : QObject(application), _appl
 	_languageModel			= new LanguageModel(application, _qml, this);
 	_loader					= new AsyncLoader(nullptr);
 	_preferences			= new PreferencesModel(this);
+	_altNavigationModel		= new AltNavigationModel(this);
 	_package				= new DataSetPackage(this);
 	_dynamicModules			= new DynamicModules(this);
 	_upgrader				= new Upgrader(this);
@@ -425,6 +426,7 @@ void MainWindow::loadQML()
 	_qml->rootContext()->setContextProperty("dynamicModules",			_dynamicModules			);
 	_qml->rootContext()->setContextProperty("plotEditorModel",			_plotEditorModel		);
 	_qml->rootContext()->setContextProperty("preferencesModel",			_preferences			);
+	_qml->rootContext()->setContextProperty("altNavigationModel",		_altNavigationModel		);
 	_qml->rootContext()->setContextProperty("resultsJsInterface",		_resultsJsInterface		);
 	_qml->rootContext()->setContextProperty("computedColumnsInterface",	_computedColumnsModel	);
 	_qml->rootContext()->setContextProperty("ribbonModelFiltered",		_ribbonModelFiltered	);
@@ -760,6 +762,12 @@ void MainWindow::zoomResetKeyPressed()
 void MainWindow::syncKeyPressed()
 {
 	_fileMenu->sync();
+}
+
+void MainWindow::altKeyPressed()
+{
+	_altNavigationModel->setAltNavEnabled(true);
+	qApp->installEventFilter(_altNavigationModel);
 }
 
 void MainWindow::packageChanged()

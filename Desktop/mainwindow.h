@@ -40,6 +40,7 @@
 #include "gui/aboutmodel.h"
 #include "gui/columntypesmodel.h"
 #include "gui/preferencesmodel.h"
+#include "gui/tabnavigationmodel.h"
 #include "modules/dynamicmodule.h"
 #include "modules/ribbonbutton.h"
 #include "modules/ribbonmodelfiltered.h"
@@ -125,6 +126,7 @@ public slots:
 	void saveKeyPressed();
 	void openKeyPressed();
 	void syncKeyPressed();
+	void altKeyPressed();
 	void refreshKeyPressed();
 	void zoomInKeyPressed();
 	void zoomOutKeyPressed();
@@ -265,6 +267,7 @@ private:
 	HelpModel					*	_helpModel				= nullptr;
 	AboutModel					*	_aboutModel				= nullptr;
 	PreferencesModel			*	_preferences			= nullptr;
+	AltNavigationModel			*	_altNavigationModel		= nullptr;
 	ResultMenuModel				*	_resultMenuModel		= nullptr;
 	LanguageModel				*	_languageModel			= nullptr;
 	ColumnTypesModel			*	_columnTypesModel		= nullptr;

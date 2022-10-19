@@ -1,0 +1,140 @@
+#include "tabnavigationmodel.h"
+#include "log.h"
+
+#include <QApplication>
+#include <QEvent>
+#include <QKeyEvent>
+
+const QList<QString> AltNavigationModel::postfixOptions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"};
+
+AltNavigationModel::AltNavigationModel(QObject *parent) : QObject(parent)
+{
+	_addTag(nullptr, "");
+	altNavEnabled = false;
+}
+
+
+
+QString AltNavigationModel::getTagString(QObject* tagObject)
+{
+	auto tag = objectTagMap.find(tagObject);
+	if(tag != objectTagMap.end())
+		return *tag;
+	return "";
+}
+
+
+bool AltNavigationModel::addTag(QObject* tagObject, QObject* parentTagObject, QString requestedPostFix)
+{
+	auto res = objectTagMap.find(parentTagObject);
+	if (res == objectTagMap.end())
+		return false;
+
+	QString parentTag = *res;
+
+	return addTag(tagObject, parentTag, requestedPostFix);
+}
+
+bool AltNavigationModel::addTag(QObject* tagObject, QString prefix, QString requestedPostFix)
+{
+
+	//handle postfix preference case
+	if (requestedPostFix != "" && !tagObjectMap.contains(prefix + requestedPostFix))
+	{
+		_addTag(tagObject, prefix + requestedPostFix);
+		return true;
+	}
+	else
+		return false;
+
+	//no postfix preference case
+	for (const QString& postfix : postfixOptions)
+	{
+		if (!tagObjectMap.contains(prefix + postfix))
+		{
+			_addTag(tagObject, prefix + postfix);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void AltNavigationModel::removeTag(QObject* tagObject)
+{
+	auto tagIt = objectTagMap.find(tagObject);
+	if(tagIt != objectTagMap.end())
+	{
+		QString tag = *tagIt;
+		tagObjectMap.remove(tag);
+	}
+	objectTagMap.remove(tagObject);
+}
+
+void AltNavigationModel::updateAltNavInput(QString addedPostFix)
+{
+	if(altNavEnabled)
+	{
+		currentInput += addedPostFix;
+		emit altNavInputChanged();
+	}
+}
+
+void AltNavigationModel::resetAltNavInput()
+{
+	currentInput = "";
+	if(altNavEnabled)
+		emit altNavInputChanged();
+}
+
+QString AltNavigationModel::getCurrentAltNavInput()
+{
+	return currentInput;
+}
+
+void AltNavigationModel::setAltNavEnabled(bool value)
+{
+	altNavEnabled = value;
+	emit altNavEnabledChanged();
+}
+
+bool AltNavigationModel::isAltNavEnabled()
+{
+	return altNavEnabled;
+}
+
+//this filter is only active globally once alt has been pressed and disengages upon ESC/ALT press
+bool AltNavigationModel::eventFilter(QObject *object, QEvent *event)
+{
+
+	//shortcut is not an input event according to Qt...
+	if (event->type() == QEvent::Shortcut)
+		return true;
+	if (!event->isInputEvent())
+		return false;
+
+	if (event->type() == QEvent::KeyPress)
+	{
+		QKeyEvent* keyEvent = static_cast<QKeyEvent *>(event);
+		int key = keyEvent->key();
+		if (key == Qt::Key_Escape || key == Qt::Key_Alt)
+		{
+			qApp->removeEventFilter(this);
+			resetAltNavInput();
+			setAltNavEnabled(false);
+		}
+		else if ((key >= Qt::Key_A && key <= Qt::Key_Z) || (key >= Qt::Key_0 && key <= Qt::Key_9))
+			updateAltNavInput(keyEvent->text().toUpper());
+
+	}
+	return true;
+}
+
+
+void AltNavigationModel::_addTag(QObject* tagObject, QString tag)
+{
+	objectTagMap.insert(tagObject, tag);
+	tagObjectMap.insert(tag, tagObject);
+}
+
+
