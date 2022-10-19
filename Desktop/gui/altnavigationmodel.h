@@ -8,8 +8,8 @@ class AltNavigationModel : public QObject
 {
 	Q_OBJECT
 
-	Q_PROPERTY( bool	altNavEnabled		READ	isAltNavEnabled			NOTIFY		altNavEnabledChanged	)
-	Q_PROPERTY( QString	currentAltNavInput	READ	getCurrentAltNavInput	NOTIFY		altNavInputChanged		)
+	Q_PROPERTY( bool	altNavEnabled		READ	isAltNavEnabled			WRITE	setAltNavEnabled	NOTIFY		altNavEnabledChanged	)
+	Q_PROPERTY( QString	currentAltNavInput	READ	getCurrentAltNavInput								NOTIFY		altNavInputChanged		)
 
 public:
 	explicit AltNavigationModel(QObject *parent = nullptr);

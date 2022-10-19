@@ -86,6 +86,13 @@ Item
 		visible:				hasData
 		width:					hasAnalysis ? handleDataAnalyses.x + 1 : parent.width // -1 is for the border to the right
 		height:					parent.height
+
+
+		ALTNavTag
+		{
+			requestPostfix: "D"
+			matchActionFunc: function () { maximizeDataPanel(); dataPanel.forceActiveFocus(); }
+		}
 	}
 
 	JASPSplitHandle
@@ -125,6 +132,12 @@ Item
 		anchors.left:	handleDataAnalyses.right
 		width:			analysesForm.width + extraBorder.width
 		height:			parent.height
+
+		ALTNavTag
+		{
+			requestPostfix: "A"
+			matchActionFunc: function () { analysesForm.forceActiveFocus(); }
+		}
 
 		Rectangle
 		{
@@ -223,6 +236,12 @@ Item
 		}
 		visible:				hasAnalysis
 		color:					analysesModel.currentAnalysisIndex !== -1 ? jaspTheme.uiBackground : jaspTheme.white
+
+		ALTNavTag
+		{
+			requestPostfix: "R"
+			matchActionFunc: function () {  }
+		}
 
 		WebEngineView
 		{

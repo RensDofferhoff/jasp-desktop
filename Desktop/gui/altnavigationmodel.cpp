@@ -1,4 +1,4 @@
-#include "tabnavigationmodel.h"
+#include "altnavigationmodel.h"
 #include "log.h"
 
 #include <QApplication>
@@ -76,6 +76,8 @@ void AltNavigationModel::updateAltNavInput(QString addedPostFix)
 	if(altNavEnabled)
 	{
 		currentInput += addedPostFix;
+		if (!tagObjectMap.contains(currentInput))
+			setAltNavEnabled(false);
 		emit altNavInputChanged();
 	}
 }
@@ -95,6 +97,11 @@ QString AltNavigationModel::getCurrentAltNavInput()
 void AltNavigationModel::setAltNavEnabled(bool value)
 {
 	altNavEnabled = value;
+	if (!altNavEnabled)
+	{
+		qApp->removeEventFilter(this);
+		resetAltNavInput();
+	}
 	emit altNavEnabledChanged();
 }
 
@@ -110,24 +117,24 @@ bool AltNavigationModel::eventFilter(QObject *object, QEvent *event)
 	//shortcut is not an input event according to Qt...
 	if (event->type() == QEvent::Shortcut)
 		return true;
-	if (!event->isInputEvent())
-		return false;
-
-	if (event->type() == QEvent::KeyPress)
+	else if (event->type() == QEvent::MouseButtonPress)
+		return true;
+	else if (event->type() == QEvent::KeyPress)
 	{
 		QKeyEvent* keyEvent = static_cast<QKeyEvent *>(event);
 		int key = keyEvent->key();
 		if (key == Qt::Key_Escape || key == Qt::Key_Alt)
 		{
-			qApp->removeEventFilter(this);
 			resetAltNavInput();
-			setAltNavEnabled(false);
+			setAltNavEnabled(false); //removes this filter
 		}
 		else if ((key >= Qt::Key_A && key <= Qt::Key_Z) || (key >= Qt::Key_0 && key <= Qt::Key_9))
 			updateAltNavInput(keyEvent->text().toUpper());
 
+		return true;
+
 	}
-	return true;
+	return false;
 }
 
 

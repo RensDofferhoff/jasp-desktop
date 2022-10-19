@@ -34,3 +34,4 @@ ImageInverter               1.0 ImageInverter.qml
 PlotEditor                  1.0 PlotEditor/PlotEditor.qml
 ErrorMessage				1.0 ErrorMessage.qml
 EnginesWindow				1.0 EnginesWindow.qml
+ALTNavTag					1.0	ALTNavTag.qml

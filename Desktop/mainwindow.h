@@ -40,7 +40,7 @@
 #include "gui/aboutmodel.h"
 #include "gui/columntypesmodel.h"
 #include "gui/preferencesmodel.h"
-#include "gui/tabnavigationmodel.h"
+#include "gui/altnavigationmodel.h"
 #include "modules/dynamicmodule.h"
 #include "modules/ribbonbutton.h"
 #include "modules/ribbonmodelfiltered.h"
