@@ -35,6 +35,8 @@ signals:
 
 private:
 	void _addTag(QObject* tagObject, QString tag);
+	void _fillTagTree(QString perfix);
+	bool _tagFree (QString tag);
 
 	QString currentInput;
 	bool altNavEnabled;

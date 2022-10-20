@@ -133,11 +133,6 @@ Item
 		width:			analysesForm.width + extraBorder.width
 		height:			parent.height
 
-		ALTNavTag
-		{
-			requestPostfix: "A"
-			matchActionFunc: function () { analysesForm.forceActiveFocus(); }
-		}
 
 		Rectangle
 		{
@@ -240,7 +235,7 @@ Item
 		ALTNavTag
 		{
 			requestPostfix: "R"
-			matchActionFunc: function () {  }
+			matchActionFunc: function () { resultsView.forceActiveFocus(); }
 		}
 
 		WebEngineView

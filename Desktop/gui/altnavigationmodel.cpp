@@ -1,5 +1,6 @@
-#include "altnavigationmodel.h"
+﻿#include "altnavigationmodel.h"
 #include "log.h"
+#include "utilities/qutils.h"
 
 #include <QApplication>
 #include <QEvent>
@@ -38,19 +39,27 @@ bool AltNavigationModel::addTag(QObject* tagObject, QObject* parentTagObject, QS
 bool AltNavigationModel::addTag(QObject* tagObject, QString prefix, QString requestedPostFix)
 {
 
+	_fillTagTree(prefix);
+
 	//handle postfix preference case
-	if (requestedPostFix != "" && !tagObjectMap.contains(prefix + requestedPostFix))
+	if (requestedPostFix != "")
 	{
-		_addTag(tagObject, prefix + requestedPostFix);
-		return true;
+		if (_tagFree(prefix + requestedPostFix))
+		{
+			_addTag(tagObject, prefix + requestedPostFix);
+			return true;
+		}
+		else
+		{
+			Log::log() << "Tag: " + fq(prefix + requestedPostFix) + " is not available. Please request a different postfix" << std::endl;
+			return false;
+		}
 	}
-	else
-		return false;
 
 	//no postfix preference case
 	for (const QString& postfix : postfixOptions)
 	{
-		if (!tagObjectMap.contains(prefix + postfix))
+		if (_tagFree(prefix + postfix))
 		{
 			_addTag(tagObject, prefix + postfix);
 			return true;
@@ -138,10 +147,25 @@ bool AltNavigationModel::eventFilter(QObject *object, QEvent *event)
 }
 
 
-void AltNavigationModel::_addTag(QObject* tagObject, QString tag)
+void AltNavigationModel::_addTag (QObject* tagObject, QString tag)
 {
 	objectTagMap.insert(tagObject, tag);
 	tagObjectMap.insert(tag, tagObject);
 }
 
+
+bool AltNavigationModel::_tagFree (QString tag)
+{
+	auto it =  tagObjectMap.find(tag);
+	return it == tagObjectMap.end() || *it == nullptr;
+}
+
+void AltNavigationModel::_fillTagTree (QString prefix)
+{
+	for (int i = 1; i <= prefix.length(); i++) {
+		QString part = prefix.first(i);
+		if(!tagObjectMap.contains(part))
+			tagObjectMap.insert(part, nullptr);
+	}
+}
 

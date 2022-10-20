@@ -30,6 +30,7 @@ FocusScope
 
 	function focusOnRibbonMenu()
 	{
+		focus = true;
 		ribbonMenu.focus = true;
 		ribbonMenu.setCurrentIndex('first');
 	}
@@ -155,7 +156,9 @@ FocusScope
 		z			: 2
 		width		: 0.75 * height
 
-		onClicked:
+		onClicked:	{ open(); }
+
+		function open ()
 		{
 			fileMenuModel.visible = !fileMenuModel.visible;
 
@@ -176,6 +179,12 @@ FocusScope
 			top:			parent.top
 			left:			parent.left
 			bottom:			parent.bottom
+		}
+
+		ALTNavTag
+		{
+			requestPostfix: "F"
+			matchActionFunc: function () { fileMenuOpenButton.open(); }
 		}
 	}
 
@@ -203,7 +212,9 @@ FocusScope
 		showPressed	: modulesMenu.opened
 		z			: 2
 
-		onClicked	:
+		onClicked	: { open(); }
+
+		function open ()
 		{
 			modulesMenu.opened = !modulesMenu.opened;
 
@@ -223,6 +234,12 @@ FocusScope
 			top		: parent.top
 			right	: parent.right
 			bottom	: parent.bottom
+		}
+
+		ALTNavTag
+		{
+			requestPostfix: "L"
+			matchActionFunc: function () { modulesPlusButton.open(); }
 		}
 	}
 	

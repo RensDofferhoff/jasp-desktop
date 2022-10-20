@@ -32,6 +32,12 @@ DropArea
 
 	Component.onCompleted: myAnalysis.expandAnalysis.connect(toggleExpander)
 
+	ALTNavTag
+	{
+		prefix: "A"
+		matchActionFunc: function () { toggleExpander(); draggableItem.focus = true; }
+	}
+
 	Rectangle
 	{
 		id:				bottomLine
@@ -47,6 +53,7 @@ DropArea
 	{
 		id:					draggableItem
 		height:				loaderAndError.y
+		activeFocusOnTab:	false
 
 
 		property int		myIndex:			-1

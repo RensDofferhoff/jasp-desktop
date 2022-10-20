@@ -263,4 +263,10 @@ Rectangle
 			}
 		}
 	}
+
+	ALTNavTag
+	{
+		prefix: "M"
+		matchActionFunc: function () { ribbon.focusOnRibbonMenu(); ribbon.goToRibbonIndex(listIndex); }
+	}
 }
