@@ -100,7 +100,18 @@ Window
 		Shortcut { onActivated: mainWindow.setLanguage(0);						sequences: ["Ctrl+1"];											context: Qt.ApplicationShortcut; }
 		Shortcut { onActivated: mainWindow.setLanguage(1);						sequences: ["Ctrl+2"];											context: Qt.ApplicationShortcut; }
 
-		Keys.onPressed: (event)=> { if (event.key === Qt.Key_Alt) { mainWindow.altKeyPressed(); event.accepted = true} }
+		Keys.onPressed: (event)=>
+		{
+			if (event.key === Qt.Key_Alt)
+			{
+				mainWindow.altKeyPressed();
+				event.accepted = true;
+			}
+			else if (event.key === Qt.Key_Escape)
+			{
+				event.accepted = true;
+			}
+		}
 
 		RibbonBar
 		{

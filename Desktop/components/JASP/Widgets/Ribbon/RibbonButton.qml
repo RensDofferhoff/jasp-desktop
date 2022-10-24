@@ -267,6 +267,14 @@ Rectangle
 	ALTNavTag
 	{
 		prefix: "M"
-		matchActionFunc: function () { ribbon.focusOnRibbonMenu(); ribbon.goToRibbonIndex(listIndex); }
+		matchActionFunc: function ()
+		{
+			ribbon.focusOnRibbonMenu();
+			if(ribbonButton.enabled && ribbonButton.ready)
+			{
+				ribbon.goToRibbonIndex(listIndex);
+				ribbonButton.showMyMenu();
+			}
+		}
 	}
 }
