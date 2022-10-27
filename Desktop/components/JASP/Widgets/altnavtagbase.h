@@ -7,8 +7,8 @@ class AltNavTagBase : public QQuickItem
 {
 	Q_PROPERTY( bool		show				READ	show														NOTIFY		showChanged				)
 	Q_PROPERTY( QString		tagString			READ	getCurrentAltNavTag											NOTIFY		tagStringChanged		)
-	Q_PROPERTY( QString		requestedPrefix		MEMBER	_requestedPrefix																				)
-	Q_PROPERTY( QString		requestedPostfix	MEMBER	_requestedPostfix																				)
+	Q_PROPERTY( QString		requestPrefix		MEMBER	_requestedPrefix																				)
+	Q_PROPERTY( QString		requestPostfix		MEMBER	_requestedPostfix																				)
 
 	Q_OBJECT
 

@@ -34,8 +34,8 @@ DropArea
 
 	ALTNavTag
 	{
-//		prefix: "A"
-//		matchActionFunc: function () { toggleExpander(); draggableItem.focus = true; }
+		requestPrefix: "A"
+		onTagMatch: { toggleExpander(); draggableItem.focus = true; }
 	}
 
 	Rectangle

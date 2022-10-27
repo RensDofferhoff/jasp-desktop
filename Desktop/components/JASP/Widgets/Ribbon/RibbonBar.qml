@@ -19,7 +19,6 @@
 import QtQuick 2.11
 import JASP.Widgets 1.0
 
-
 FocusScope
 {
 	id		: ribbonBar
@@ -183,8 +182,8 @@ FocusScope
 
 		ALTNavTag
 		{
-//			requestPostfix: "F"
-//			matchActionFunc: function () { fileMenuOpenButton.open(); }
+			requestPostfix: "F"
+			onTagMatch: { fileMenuOpenButton.open(); }
 		}
 	}
 
@@ -238,8 +237,8 @@ FocusScope
 
 		ALTNavTag
 		{
-//			requestPostfix: "L"
-//			matchActionFunc: function () { modulesPlusButton.open(); }
+			requestPostfix: "L"
+			onTagMatch: { modulesPlusButton.open(); }
 		}
 	}
 	

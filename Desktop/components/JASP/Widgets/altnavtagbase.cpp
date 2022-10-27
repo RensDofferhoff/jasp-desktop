@@ -24,13 +24,14 @@ void AltNavTagBase::updateVisibility()
 	}
 }
 
+
 void AltNavTagBase::updateTagString()
 {
 	QString totalTag = AltNavigationModel::getInstance()->getTagString(this);
 	QString altNavInput = AltNavigationModel::getInstance()->getCurrentAltNavInput();
 
 	//partial match at least
-	if (totalTag.length() > 0 && totalTag.first(altNavInput.length()) == altNavInput)
+	if (totalTag.length() > 0 && totalTag.length() >= altNavInput.length() && totalTag.first(altNavInput.length()) == altNavInput)
 	{
 		//check for exact match
 		if (altNavInput.length() == totalTag.length())

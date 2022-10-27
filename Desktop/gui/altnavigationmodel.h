@@ -14,8 +14,8 @@ class AltNavigationModel : public QObject
 public:
 	static AltNavigationModel* getInstance();
 
-	bool registerTag(AltNavTagBase* tagObject, AltNavTagBase* parentTagObject = nullptr, QString requestedPostFix = "");
-	bool registerTag(AltNavTagBase* tagObject, QString prefix, QString requestedPostFix = "");
+	bool registerTag(AltNavTagBase* tagObject, AltNavTagBase* parentTagObject = nullptr, QString requestPostfix = "");
+	bool registerTag(AltNavTagBase* tagObject, QString prefix, QString requestPostfix = "");
 	void removeTag(AltNavTagBase* tagObject);
 
 	QString getTagString(AltNavTagBase* tagObject);

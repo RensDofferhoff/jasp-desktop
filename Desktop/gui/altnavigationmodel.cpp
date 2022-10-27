@@ -31,7 +31,7 @@ QString AltNavigationModel::getTagString(AltNavTagBase* tagObject)
 }
 
 
-bool AltNavigationModel::registerTag(AltNavTagBase* tagObject, AltNavTagBase* parentTagObject, QString requestedPostFix)
+bool AltNavigationModel::registerTag(AltNavTagBase* tagObject, AltNavTagBase* parentTagObject, QString requestPostfix)
 {
 	auto res = objectTagMap.find(parentTagObject);
 	if (res == objectTagMap.end())
@@ -39,25 +39,25 @@ bool AltNavigationModel::registerTag(AltNavTagBase* tagObject, AltNavTagBase* pa
 
 	QString parentTag = *res;
 
-	return registerTag(tagObject, parentTag, requestedPostFix);
+	return registerTag(tagObject, parentTag, requestPostfix);
 }
 
-bool AltNavigationModel::registerTag(AltNavTagBase* tagObject, QString prefix, QString requestedPostFix)
+bool AltNavigationModel::registerTag(AltNavTagBase* tagObject, QString prefix, QString requestPostfix)
 {
 
 	_fillTagTree(prefix);
 
 	//handle postfix preference case
-	if (requestedPostFix != "")
+	if (requestPostfix != "")
 	{
-		if (_tagFree(prefix + requestedPostFix))
+		if (_tagFree(prefix + requestPostfix))
 		{
-			_addTag(tagObject, prefix + requestedPostFix);
+			_addTag(tagObject, prefix + requestPostfix);
 			return true;
 		}
 		else
 		{
-			Log::log() << "Tag: " + fq(prefix + requestedPostFix) + " is not available. Please request a different postfix" << std::endl;
+			Log::log() << "Tag: " + fq(prefix + requestPostfix) + " is not available. Please request a different postfix" << std::endl;
 			return false;
 		}
 	}
