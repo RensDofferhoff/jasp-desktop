@@ -14,6 +14,7 @@ class AltNavTagBase : public QQuickItem
 
 public:
 	explicit AltNavTagBase(QQuickItem *parent = nullptr);
+	~AltNavTagBase();
 
 
 	bool show() { return _show; };

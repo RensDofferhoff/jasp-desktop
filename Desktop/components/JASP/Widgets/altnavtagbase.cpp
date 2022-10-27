@@ -14,6 +14,12 @@ AltNavTagBase::AltNavTagBase(QQuickItem *parent)
 	connect(AltNavigationModel::getInstance(),		&AltNavigationModel::altNavEnabledChanged,		this,		&AltNavTagBase::updateVisibility	);
 }
 
+AltNavTagBase::~AltNavTagBase()
+{
+	disconnect();
+	_removeTag();
+}
+
 
 void AltNavTagBase::updateVisibility()
 {
