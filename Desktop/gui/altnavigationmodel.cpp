@@ -6,17 +6,23 @@
 #include <QEvent>
 #include <QKeyEvent>
 
+AltNavigationModel* AltNavigationModel::instance = nullptr;
 const QList<QString> AltNavigationModel::postfixOptions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"};
 
-AltNavigationModel::AltNavigationModel(QObject *parent) : QObject(parent)
+AltNavigationModel::AltNavigationModel(QObject* parent) : QObject{parent}
 {
 	_addTag(nullptr, "");
 	altNavEnabled = false;
 }
 
+AltNavigationModel* AltNavigationModel::getInstance()
+{
+	if (instance == nullptr)
+		instance = new AltNavigationModel;
+	return instance;
+}
 
-
-QString AltNavigationModel::getTagString(QObject* tagObject)
+QString AltNavigationModel::getTagString(AltNavTagBase* tagObject)
 {
 	auto tag = objectTagMap.find(tagObject);
 	if(tag != objectTagMap.end())
@@ -25,7 +31,7 @@ QString AltNavigationModel::getTagString(QObject* tagObject)
 }
 
 
-bool AltNavigationModel::addTag(QObject* tagObject, QObject* parentTagObject, QString requestedPostFix)
+bool AltNavigationModel::registerTag(AltNavTagBase* tagObject, AltNavTagBase* parentTagObject, QString requestedPostFix)
 {
 	auto res = objectTagMap.find(parentTagObject);
 	if (res == objectTagMap.end())
@@ -33,10 +39,10 @@ bool AltNavigationModel::addTag(QObject* tagObject, QObject* parentTagObject, QS
 
 	QString parentTag = *res;
 
-	return addTag(tagObject, parentTag, requestedPostFix);
+	return registerTag(tagObject, parentTag, requestedPostFix);
 }
 
-bool AltNavigationModel::addTag(QObject* tagObject, QString prefix, QString requestedPostFix)
+bool AltNavigationModel::registerTag(AltNavTagBase* tagObject, QString prefix, QString requestedPostFix)
 {
 
 	_fillTagTree(prefix);
@@ -69,7 +75,7 @@ bool AltNavigationModel::addTag(QObject* tagObject, QString prefix, QString requ
 	return false;
 }
 
-void AltNavigationModel::removeTag(QObject* tagObject)
+void AltNavigationModel::removeTag(AltNavTagBase* tagObject)
 {
 	auto tagIt = objectTagMap.find(tagObject);
 	if(tagIt != objectTagMap.end())
@@ -147,7 +153,7 @@ bool AltNavigationModel::eventFilter(QObject *object, QEvent *event)
 }
 
 
-void AltNavigationModel::_addTag (QObject* tagObject, QString tag)
+void AltNavigationModel::_addTag (AltNavTagBase* tagObject, QString tag)
 {
 	objectTagMap.insert(tagObject, tag);
 	tagObjectMap.insert(tag, tagObject);

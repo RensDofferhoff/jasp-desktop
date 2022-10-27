@@ -4,20 +4,21 @@
 #include <QObject>
 #include <QMap>
 
+#include "components/JASP/Widgets/altnavtagbase.h"
+
 class AltNavigationModel : public QObject
 {
+
 	Q_OBJECT
 
-	Q_PROPERTY( bool	altNavEnabled		READ	isAltNavEnabled			WRITE	setAltNavEnabled	NOTIFY		altNavEnabledChanged	)
-	Q_PROPERTY( QString	currentAltNavInput	READ	getCurrentAltNavInput								NOTIFY		altNavInputChanged		)
-
 public:
-	explicit AltNavigationModel(QObject *parent = nullptr);
+	static AltNavigationModel* getInstance();
 
-	Q_INVOKABLE QString getTagString(QObject* tagObject);
-	Q_INVOKABLE bool addTag(QObject* tagObject, QObject* parentTagObject = nullptr, QString requestedPostFix = "");
-	Q_INVOKABLE bool addTag(QObject* tagObject, QString prefix, QString requestedPostFix = "");
-	Q_INVOKABLE void removeTag(QObject* tagObject);
+	bool registerTag(AltNavTagBase* tagObject, AltNavTagBase* parentTagObject = nullptr, QString requestedPostFix = "");
+	bool registerTag(AltNavTagBase* tagObject, QString prefix, QString requestedPostFix = "");
+	void removeTag(AltNavTagBase* tagObject);
+
+	QString getTagString(AltNavTagBase* tagObject);
 
 	QString getCurrentAltNavInput();
 	void updateAltNavInput(QString addedPostFix);
@@ -26,23 +27,31 @@ public:
 	void setAltNavEnabled(bool value);
 	bool isAltNavEnabled();
 
+	bool eventFilter(QObject* object, QEvent* event);
 
-	bool eventFilter(QObject *object, QEvent *event);
+	//singleton stuff
+	AltNavigationModel(AltNavigationModel& other) = delete;
+	void operator=(const AltNavigationModel&) = delete;
 
 signals:
 	void altNavInputChanged();
 	void altNavEnabledChanged();
 
+protected:
+	AltNavigationModel(QObject* parent = nullptr);
+
+
 private:
-	void _addTag(QObject* tagObject, QString tag);
+	void _addTag(AltNavTagBase* tagObject, QString tag);
 	void _fillTagTree(QString perfix);
 	bool _tagFree (QString tag);
 
 	QString currentInput;
 	bool altNavEnabled;
-	QMap<QObject*, QString> objectTagMap;
-	QMap<QString, QObject*> tagObjectMap;
+	QMap<AltNavTagBase*, QString> objectTagMap;
+	QMap<QString, AltNavTagBase*> tagObjectMap;
 
+	static AltNavigationModel* instance;
 	static const QList<QString> postfixOptions;
 
 };

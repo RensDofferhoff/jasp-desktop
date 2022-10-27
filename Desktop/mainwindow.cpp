@@ -65,6 +65,7 @@
 #include "gui/jaspversionchecker.h"
 #include "gui/preferencesmodel.h"
 #include "utilities/messageforwarder.h"
+#include "components/JASP/Widgets/altnavtagbase.h"
 
 #include "modules/activemodules.h"
 #include "modules/dynamicmodules.h"
@@ -115,7 +116,6 @@ MainWindow::MainWindow(QApplication * application) : QObject(application), _appl
 	_languageModel			= new LanguageModel(application, _qml, this);
 	_loader					= new AsyncLoader(nullptr);
 	_preferences			= new PreferencesModel(this);
-	_altNavigationModel		= new AltNavigationModel(this);
 	_package				= new DataSetPackage(this);
 	_dynamicModules			= new DynamicModules(this);
 	_upgrader				= new Upgrader(this);
@@ -177,6 +177,9 @@ MainWindow::MainWindow(QApplication * application) : QObject(application), _appl
 	qmlRegisterType<ResultsJsInterface>							("JASP",		1, 0, "ResultsJsInterface"				);
 	qmlRegisterType<LabelModel>									("JASP",		1, 0, "LabelModel"						);
 	qmlRegisterType<FormulaBase>								("JASP",		1, 0, "Formula"							);
+
+	qmlRegisterType<AltNavTagBase>								("JASP.Widgets",		1, 0, "AltNavTagBase"					);
+
 
 
 	qmlRegisterUncreatableType<PlotEditor::AxisModel>			("JASP.PlotEditor",	1, 0, "AxisModel",					"Can't make it");
@@ -426,7 +429,6 @@ void MainWindow::loadQML()
 	_qml->rootContext()->setContextProperty("dynamicModules",			_dynamicModules			);
 	_qml->rootContext()->setContextProperty("plotEditorModel",			_plotEditorModel		);
 	_qml->rootContext()->setContextProperty("preferencesModel",			_preferences			);
-	_qml->rootContext()->setContextProperty("altNavigationModel",		_altNavigationModel		);
 	_qml->rootContext()->setContextProperty("resultsJsInterface",		_resultsJsInterface		);
 	_qml->rootContext()->setContextProperty("computedColumnsInterface",	_computedColumnsModel	);
 	_qml->rootContext()->setContextProperty("ribbonModelFiltered",		_ribbonModelFiltered	);
@@ -766,8 +768,8 @@ void MainWindow::syncKeyPressed()
 
 void MainWindow::altKeyPressed()
 {
-	_altNavigationModel->setAltNavEnabled(true);
-	qApp->installEventFilter(_altNavigationModel);
+	AltNavigationModel::getInstance()->setAltNavEnabled(true);
+	qApp->installEventFilter(AltNavigationModel::getInstance());
 }
 
 void MainWindow::packageChanged()

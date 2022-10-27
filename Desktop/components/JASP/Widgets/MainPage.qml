@@ -90,8 +90,8 @@ Item
 
 		ALTNavTag
 		{
-			requestPostfix: "D"
-			matchActionFunc: function () { maximizeDataPanel(); dataPanel.forceActiveFocus(); }
+//			requestPostfix: "D"
+//			matchActionFunc: function () { maximizeDataPanel(); dataPanel.forceActiveFocus(); }
 		}
 	}
 
@@ -234,8 +234,8 @@ Item
 
 		ALTNavTag
 		{
-			requestPostfix: "R"
-			matchActionFunc: function () { resultsView.forceActiveFocus(); }
+//			requestPostfix: "R"
+//			matchActionFunc: function () { resultsView.forceActiveFocus(); }
 		}
 
 		WebEngineView

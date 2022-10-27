@@ -183,8 +183,8 @@ FocusScope
 
 		ALTNavTag
 		{
-			requestPostfix: "F"
-			matchActionFunc: function () { fileMenuOpenButton.open(); }
+//			requestPostfix: "F"
+//			matchActionFunc: function () { fileMenuOpenButton.open(); }
 		}
 	}
 
@@ -238,8 +238,8 @@ FocusScope
 
 		ALTNavTag
 		{
-			requestPostfix: "L"
-			matchActionFunc: function () { modulesPlusButton.open(); }
+//			requestPostfix: "L"
+//			matchActionFunc: function () { modulesPlusButton.open(); }
 		}
 	}
 	

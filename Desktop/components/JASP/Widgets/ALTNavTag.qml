@@ -1,81 +1,32 @@
-import QtQuick
+import QtQuick 2.11
 import QtQuick.Controls
+import JASP.Widgets
 
 //Text tag shown when alt navigation mode is enabled.
 
-Rectangle
+AltNavTagBase
 {
 	id:					tagRoot
-	activeFocusOnTab:	false
-	visible:			false
+	visible:			show && parent.visible
 	width:				tagText.contentWidth + jaspTheme.contentMargin
 	height:				tagText.contentHeight
 	z:					99999
-	color:				"black"
 
-	required	property	var			matchActionFunc
-				property	var			parentTagObject		:	null
-				property	string		requestPostfix		:	""
-				property	string		prefix				:	""
-
-	Component.onCompleted:
+	Rectangle
 	{
-		if (prefix !== "")
-			altNavigationModel.addTag(this, prefix, requestPostfix)
-		else
-			altNavigationModel.addTag(this, parentTagObject, requestPostfix);
-	}
-	Component.onDestruction:	{ altNavigationModel.removeTag(this); }
+		color:				"black"
+		anchors.fill:		parent
 
-	Connections
-	{
-		target:	altNavigationModel
-		function onAltNavInputChanged()
+		Text
 		{
-			if (altNavigationModel.altNavEnabled)
-				setState();
+			id:							tagText
+			text:						tagString
+			color:						"white"
+			font:						jaspTheme.fontLabel
+			anchors.centerIn:			parent
+			horizontalAlignment:		Text.AlignHCenter
+			verticalAlignment:			Text.AlignVCenter
 		}
-		function onAltNavEnabledChanged()
-		{
-			tagRoot.visible = altNavigationModel.altNavEnabled;
-			if (altNavigationModel.altNavEnabled)
-				setState();
-		}
+
 	}
-
-
-	function setState()
-	{
-		var tag = altNavigationModel.getTagString(this);
-		var altNavInput = altNavigationModel.currentAltNavInput;
-
-		//partial match
-		if (tag.length > 0 && tag.slice(0, altNavInput.length) === altNavInput)
-		{
-			//exact match perform actions
-			if (altNavInput.length === tag.length)
-			{
-				matchActionFunc();
-				altNavigationModel.altNavEnabled = false;
-			}
-			else
-			{
-				tagText.text = tag.slice(altNavInput.length);
-				return;
-			}
-		}
-		tagRoot.visible = false;
-	}
-
-
-	Text
-	{
-		id:							tagText
-		color:						"white"
-		font:						jaspTheme.fontLabel
-		anchors.centerIn:			parent
-		horizontalAlignment:		Text.AlignHCenter
-		verticalAlignment:			Text.AlignVCenter
-	}
-
 }

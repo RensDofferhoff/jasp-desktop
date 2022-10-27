@@ -266,15 +266,15 @@ Rectangle
 
 	ALTNavTag
 	{
-		prefix: "M"
-		matchActionFunc: function ()
-		{
-			ribbon.focusOnRibbonMenu();
-			if(ribbonButton.enabled && ribbonButton.ready)
-			{
-				ribbon.goToRibbonIndex(listIndex);
-				ribbonButton.showMyMenu();
-			}
-		}
+//		prefix: "M"
+//		matchActionFunc: function ()
+//		{
+//			ribbon.focusOnRibbonMenu();
+//			if(ribbonButton.enabled && ribbonButton.ready)
+//			{
+//				ribbon.goToRibbonIndex(listIndex);
+//				ribbonButton.showMyMenu();
+//			}
+//		}
 	}
 }
