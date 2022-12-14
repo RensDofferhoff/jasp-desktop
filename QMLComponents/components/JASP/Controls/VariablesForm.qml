@@ -194,10 +194,19 @@ VariablesFormBase
 	function setTabOrder()
 	{
 		availableVariablesList.KeyNavigation.tab = assignButtonRepeater.itemAt(0);
+
 		for (var i = 0; i < allAssignedVariablesList.length - 1; i++)
 			assignButtonRepeater.itemAt(i).KeyNavigation.tab = assignButtonRepeater.itemAt(i + 1);
 
-		if(allAssignedVariablesList.length > 0)
+		if (additionalLists.length)
+		{
+			assignButtonRepeater.itemAt(allAssignedVariablesList.length - 1).KeyNavigation.tab = additionalLists[0];
+			for(var x = 0; x < additionalLists.length - 1; x++)
+				additionalLists[x].KeyNavigation.tab = additionalLists[x+1];
+			if(allAssignedVariablesList.length > 0)
+				additionalLists[additionalLists.length - 1].KeyNavigation.tab = allAssignedVariablesList[0];
+		}
+		else if(allAssignedVariablesList.length > 0)
 			assignButtonRepeater.itemAt(allAssignedVariablesList.length - 1).KeyNavigation.tab = allAssignedVariablesList[0]
 
 		for (var j = 0; j < allAssignedVariablesList.length - 1; j++)

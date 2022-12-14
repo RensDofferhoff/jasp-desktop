@@ -62,6 +62,8 @@ void VariablesFormBase::componentComplete()
 				else
 					_allAssignedVariablesList.push_back(control);
 			}
+			else if (qobject_cast<JASPListControl*>(control)) //repeated factors list etc
+				_additionalLists.push_back(control);
 			if (control != _availableVariablesList)
 				_allJASPControls.push_back(control);
 
