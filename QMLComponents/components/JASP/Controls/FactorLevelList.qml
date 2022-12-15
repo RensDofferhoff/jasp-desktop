@@ -34,6 +34,17 @@ FactorLevelListBase
 
 	readonly	property string deleteIcon: "cross.png"
 
+	Keys.onEnterPressed:	select(0);
+	Keys.onSpacePressed: 	select(0);
+	Keys.onDownPressed:		select(0);
+	Keys.onUpPressed:		select(0);
+
+	function select(index)
+	{
+			listView.currentIndex = index;
+			listView.currentItem.forceActiveFocus();
+	}
+
 	Text
 	{
 		id:				text
@@ -104,7 +115,8 @@ FactorLevelListBase
 			{
 				id:				itemRectangle
 				anchors.fill:	parent
-				focus:			true
+				border.color:	"green"
+				border.width:	activeFocus ? 2 : 0
 				color:			jaspTheme.controlBackgroundColor
 
 				TextField
@@ -121,6 +133,8 @@ FactorLevelListBase
 					selectValueOnFocus:				true
 					control.horizontalAlignment:	model.type === "level" ? TextInput.AlignLeft : TextInput.AlignHCenter
 					onEditingFinished:				itemChanged(index, value)
+					focus:			true
+					Keys.forwardTo:		[listView]
 				}
 
 				Image

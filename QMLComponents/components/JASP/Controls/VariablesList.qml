@@ -76,9 +76,6 @@ VariablesListBase
 
 	onModelChanged: if (model) model.selectedItemsChanged.connect(selectedItemsChanged);
 
-	onActiveFocusChanged:   { if (model.selectedItems().length === 0) setSelectedItem(0); }
-	onSelectedItemsChanged: { if (model.selectedItems().length === 0) setSelectedItem(0); }
-
 	function setEnabledState(source, dragging)
 	{
 		var result = !dragging;
