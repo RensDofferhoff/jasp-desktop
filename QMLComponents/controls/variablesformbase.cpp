@@ -17,6 +17,7 @@
 //
 
 #include "variablesformbase.h"
+#include "factorlevellistbase.h"
 #include "variableslistbase.h"
 #include "jasptheme.h"
 
@@ -61,6 +62,10 @@ void VariablesFormBase::componentComplete()
 				}
 				else
 					_allAssignedVariablesList.push_back(control);
+			}
+			if (qobject_cast<FactorLevelListBase*>(control))
+			{
+				_factorsList = control;
 			}
 			if (control != _availableVariablesList)
 				_allJASPControls.push_back(control);

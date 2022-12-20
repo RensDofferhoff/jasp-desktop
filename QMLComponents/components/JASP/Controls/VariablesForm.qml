@@ -198,7 +198,15 @@ VariablesFormBase
 			assignButtonRepeater.itemAt(i).KeyNavigation.tab = assignButtonRepeater.itemAt(i + 1);
 
 		if(allAssignedVariablesList.length > 0)
-			assignButtonRepeater.itemAt(allAssignedVariablesList.length - 1).KeyNavigation.tab = allAssignedVariablesList[0]
+		{
+			if(factorsList)
+			{
+				assignButtonRepeater.itemAt(allAssignedVariablesList.length - 1).KeyNavigation.tab = factorsList;
+				factorsList.KeyNavigation.tab = allAssignedVariablesList[0];
+			}
+			else
+				assignButtonRepeater.itemAt(allAssignedVariablesList.length - 1).KeyNavigation.tab = allAssignedVariablesList[0]
+		}
 
 		for (var j = 0; j < allAssignedVariablesList.length - 1; j++)
 			allAssignedVariablesList[j].KeyNavigation.tab = allAssignedVariablesList[j + 1];

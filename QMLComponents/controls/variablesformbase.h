@@ -30,6 +30,7 @@ class VariablesFormBase : public JASPControl
 	Q_PROPERTY( JASPControl*			availableVariablesList			READ availableVariablesList													NOTIFY availableVariablesListChanged		)
 	Q_PROPERTY( QList<JASPControl*>		allAssignedVariablesList		READ allAssignedVariablesList												NOTIFY allAssignedVariablesListChanged		)
 	Q_PROPERTY( QList<JASPControl*>		allJASPControls					READ allJASPControls														NOTIFY allJASPControlsChanged				)
+	Q_PROPERTY( JASPControl*			factorsList						READ factorsList															NOTIFY factorsListChanged					)
 	Q_PROPERTY( qreal					marginBetweenVariablesLists		READ marginBetweenVariablesLists	WRITE setMarginBetweenVariablesLists	NOTIFY marginBetweenVariablesListsChanged	)
 	Q_PROPERTY( qreal					minimumHeightVariablesLists		READ minimumHeightVariablesLists	WRITE setMinimumHeightVariablesLists	NOTIFY minimumHeightVariablesListsChanged	)
 
@@ -39,6 +40,7 @@ public:
 	JASPControl*			availableVariablesList()		const;
 	QList<JASPControl*>		allAssignedVariablesList()		const	{ return _allAssignedVariablesList;		}
 	QList<JASPControl*>		allJASPControls()				const	{ return _allJASPControls;				}
+	JASPControl*			factorsList()					const	{ return _factorsList;					}
 	qreal					marginBetweenVariablesLists()	const	{ return _marginBetweenVariablesLists;	}
 	qreal					minimumHeightVariablesLists()	const	{ return _minimumHeightVariablesLists;	}
 
@@ -51,6 +53,7 @@ signals:
 	void allJASPControlsChanged();
 	void marginBetweenVariablesListsChanged();
 	void minimumHeightVariablesListsChanged();
+	void factorsListChanged();
 
 protected:
 	void componentComplete() override;
@@ -67,6 +70,7 @@ private:
 								_allJASPControls,
 								_controlsWidthSetByForm,
 								_controlsHeightSetByForm;
+	JASPControl*				_factorsList = nullptr;
 	qreal						_marginBetweenVariablesLists = 8;
 	qreal						_minimumHeightVariablesLists = 25;
 

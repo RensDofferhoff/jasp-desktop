@@ -158,7 +158,8 @@ TextInputBase
 		// In this case, the error should not appear immediately (only when the user is pressing the return key, or going out of focus),
 		// so the the checkValue is called with addErrorIfNotFocussed set to true: it should not display an error if in focus.
 		// In not in focus, the acceptableInput can be changed because another control has changed the constraint of this control: in this case, the error should be displayed.
-		onAcceptableInputChanged: checkValue(false, true)
+		onAcceptableInputChanged:	checkValue(false, true)
+		Keys.forwardTo:				textField
 
 		background: Rectangle
 		{

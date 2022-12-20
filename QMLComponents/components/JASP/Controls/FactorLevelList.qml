@@ -34,6 +34,8 @@ FactorLevelListBase
 
 	readonly	property string deleteIcon: "cross.png"
 
+	onActiveFocusChanged: { if(activeFocus && listView.currentItem == null) listView.currentIndex = 0; listView.currentItem.forceActiveFocus(); }
+
 	Text
 	{
 		id:				text
@@ -87,6 +89,8 @@ FactorLevelListBase
 			anchors.margins:	4 * preferencesModel.uiScale
 			model:				repeatedMeasuresFactorsList.model
 			delegate:			itemComponent
+
+			keyNavigationEnabled: true
 		}
 	}
 
@@ -104,12 +108,12 @@ FactorLevelListBase
 			{
 				id:				itemRectangle
 				anchors.fill:	parent
-				focus:			true
 				color:			jaspTheme.controlBackgroundColor
 
 				TextField
 				{
 					id:								colName
+					focus:							true
 					isBound:						false
 					value:							model.virtual ? "" : model.name
 					placeholderText:				model.virtual ? model.name : ""
@@ -121,6 +125,7 @@ FactorLevelListBase
 					selectValueOnFocus:				true
 					control.horizontalAlignment:	model.type === "level" ? TextInput.AlignLeft : TextInput.AlignHCenter
 					onEditingFinished:				itemChanged(index, value)
+					Keys.forwardTo:					[ repeatedMeasuresFactorsList ] //let root handle the tab navigation
 				}
 
 				Image
