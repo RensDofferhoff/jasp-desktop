@@ -124,7 +124,8 @@ void TempFiles::deleteOrphans()
 	{
 
 		std::filesystem::path tempPath		= Utils::osPath(Dirs::tempDir());
-		std::filesystem::path sessionPath	= Utils::osPath(_sessionDirName);
+		std::filesystem::path sessionPath	= Utils::osPath(_sessionDirName); 
+		stringvec PIDstoBeDeleted;
 
 		std::filesystem::directory_iterator itr(tempPath, error);
 
@@ -134,6 +135,57 @@ void TempFiles::deleteOrphans()
 			return;
 		}
 
+		//find the Dirs that must be deleted and store their PIDs (name)
+		for (; itr != std::filesystem::directory_iterator(); itr++)
+		{
+			std::filesystem::path p = itr->path();
+
+			Log::log() << "looking at file " << p.string() << std::endl;
+
+			if (p.compare(sessionPath) == 0)
+				continue;
+
+			string fileName		= Utils::osPath(p.filename());
+			bool is_directory	= std::filesystem::is_directory(p, error);
+
+			if (error)
+				continue;
+
+			if (is_directory)
+			{
+				if (std::atoi(fileName.c_str()) == 0)
+					continue;
+
+				std::filesystem::path statusFile = Utils::osPath(Utils::osPath(p) + "/status");
+
+				if (std::filesystem::exists(statusFile, error))
+				{
+					long modTime	= Utils::getFileModificationTime(Utils::osPath(statusFile));
+					long now		= Utils::currentSeconds();
+
+					if (now - modTime > 70)
+					{
+						std::filesystem::remove_all(p, error);
+						PIDstoBeDeleted.push_back(p.filename().string());
+
+						if (error)
+							Log::log() << "Error when deleting directory: " << error.message() << std::endl;
+					}
+				}
+				else // no status file
+				{
+					std::filesystem::remove_all(p, error);
+					PIDstoBeDeleted.push_back(p.filename().string());
+
+					if (error)
+						Log::log() << "Error when deleting directory, had no status file and " << error.message() << std::endl;
+				}
+			}
+		}
+
+
+		//Delete IPC files in the root associated with the PIDs that have passed away
+		itr = std::filesystem::directory_iterator(tempPath, error);
 		for (; itr != std::filesystem::directory_iterator(); itr++)
 		{
 			std::filesystem::path p = itr->path();
@@ -151,12 +203,9 @@ void TempFiles::deleteOrphans()
 
 			if (!is_directory)
 			{
-				if (fileName.substr(0, 5).compare("JASP-") == 0)
+				for (std::string& pid : PIDstoBeDeleted)
 				{
-					long modTime	= Utils::getFileModificationTime(Utils::osPath(p));
-					long now		= Utils::currentSeconds();
-
-					if (now - modTime > 70)
+					if (fileName.substr(0, 5).compare("JASP-") == 0 && fileName.find(pid) != std::string::npos)
 					{
 						Log::log() << "Try to delete: " << fileName << std::endl;
 						std::filesystem::remove(p, error);
@@ -166,37 +215,7 @@ void TempFiles::deleteOrphans()
 					}
 				}
 			}
-			else
-			{
-
-				if (std::atoi(fileName.c_str()) == 0)
-					continue;
-
-				std::filesystem::path statusFile = Utils::osPath(Utils::osPath(p) + "/status");
-
-				if (std::filesystem::exists(statusFile, error))
-				{
-					long modTime	= Utils::getFileModificationTime(Utils::osPath(statusFile));
-					long now		= Utils::currentSeconds();
-
-					if (now - modTime > 70)
-					{
-						std::filesystem::remove_all(p, error);
-
-						if (error)
-							Log::log() << "Error when deleting directory: " << error.message() << std::endl;
-					}
-				}
-				else // no status file
-				{
-					std::filesystem::remove_all(p, error);
-
-					if (error)
-						Log::log() << "Error when deleting directory, had no status file and " << error.message() << std::endl;
-				}
-			}
 		}
-
 	}
 	catch (runtime_error e)
 	{
