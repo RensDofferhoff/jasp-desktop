@@ -135,7 +135,7 @@ void TempFiles::deleteOrphans()
 
 	try
 	{
-
+		long outOfDateDelta = 24 * 3600;
 		std::filesystem::path tempPath		= Utils::osPath(Dirs::tempDir());
 		std::filesystem::path sessionPath	= Utils::osPath(_sessionDirName); 
 		stringvec IDstoBeDeleted;
@@ -176,7 +176,7 @@ void TempFiles::deleteOrphans()
 					long modTime	= Utils::getFileModificationTime(Utils::osPath(statusFile));
 					long now		= Utils::currentSeconds();
 
-					if (now - modTime > 70)
+					if (now - modTime > outOfDateDelta)
 					{
 						std::filesystem::remove_all(p, error);
 						IDstoBeDeleted.push_back(p.filename().string());
