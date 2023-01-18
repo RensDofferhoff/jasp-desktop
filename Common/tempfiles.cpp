@@ -111,6 +111,19 @@ void TempFiles::deleteAll(int id)
 	std::error_code error;
 	std::filesystem::path dir = id >= 0 ? std::filesystem::path(_sessionDirName + "/resources/" + std::to_string(id)) : Utils::osPath(_sessionDirName);
 	std::filesystem::remove_all(dir, error);
+	if (id < 0)
+	{
+		try
+		{
+			_deleteAssociatedFiles(std::to_string(_sessionId));
+		}
+		catch (runtime_error e)
+		{
+			Log::log() << "Could not delete all associated files, error: " << e.what() << std::endl;
+			return;
+		}
+	}
+
 }
 
 
@@ -125,7 +138,7 @@ void TempFiles::deleteOrphans()
 
 		std::filesystem::path tempPath		= Utils::osPath(Dirs::tempDir());
 		std::filesystem::path sessionPath	= Utils::osPath(_sessionDirName); 
-		stringvec PIDstoBeDeleted;
+		stringvec IDstoBeDeleted;
 
 		std::filesystem::directory_iterator itr(tempPath, error);
 
@@ -166,7 +179,7 @@ void TempFiles::deleteOrphans()
 					if (now - modTime > 70)
 					{
 						std::filesystem::remove_all(p, error);
-						PIDstoBeDeleted.push_back(p.filename().string());
+						IDstoBeDeleted.push_back(p.filename().string());
 
 						if (error)
 							Log::log() << "Error when deleting directory: " << error.message() << std::endl;
@@ -175,7 +188,7 @@ void TempFiles::deleteOrphans()
 				else // no status file
 				{
 					std::filesystem::remove_all(p, error);
-					PIDstoBeDeleted.push_back(p.filename().string());
+					IDstoBeDeleted.push_back(p.filename().string());
 
 					if (error)
 						Log::log() << "Error when deleting directory, had no status file and " << error.message() << std::endl;
@@ -184,38 +197,10 @@ void TempFiles::deleteOrphans()
 		}
 
 
-		//Delete IPC files in the root associated with the PIDs that have passed away
-		itr = std::filesystem::directory_iterator(tempPath, error);
-		for (; itr != std::filesystem::directory_iterator(); itr++)
-		{
-			std::filesystem::path p = itr->path();
+		//Delete IPC files in the root associated with the IDs that have passed away
+		for(std::string& id : IDstoBeDeleted)
+			_deleteAssociatedFiles(id);
 
-			Log::log() << "looking at file " << p.string() << std::endl;
-
-			if (p.compare(sessionPath) == 0)
-				continue;
-
-			string fileName		= Utils::osPath(p.filename());
-			bool is_directory	= std::filesystem::is_directory(p, error);
-
-			if (error)
-				continue;
-
-			if (!is_directory)
-			{
-				for (std::string& pid : PIDstoBeDeleted)
-				{
-					if (fileName.substr(0, 5).compare("JASP-") == 0 && fileName.find(pid) != std::string::npos)
-					{
-						Log::log() << "Try to delete: " << fileName << std::endl;
-						std::filesystem::remove(p, error);
-
-						if (error)
-							Log::log() << "Error when deleting file: " << error.message() << std::endl;
-					}
-				}
-			}
-		}
 	}
 	catch (runtime_error e)
 	{
@@ -223,6 +208,8 @@ void TempFiles::deleteOrphans()
 		return;
 	}
 }
+
+
 
 
 void TempFiles::heartbeat()
@@ -358,3 +345,41 @@ void TempFiles::deleteList(const vector<string> &files)
 	}
 }
 
+void TempFiles::_deleteAssociatedFiles(const std::string& id)
+{
+	std::filesystem::path tempPath = Utils::osPath(Dirs::tempDir());
+	std::error_code error;
+	std::filesystem::directory_iterator itr(tempPath, error);
+
+	if (error)
+	{
+		Log::log() << error.message() << std::endl;
+		return;
+	}
+
+	for (; itr != std::filesystem::directory_iterator(); itr++)
+	{
+		std::filesystem::path p = itr->path();
+
+		Log::log() << "looking at file " << p.string() << std::endl;
+
+		string fileName		= Utils::osPath(p.filename());
+		bool is_directory	= std::filesystem::is_directory(p, error);
+
+		if (error)
+			continue;
+
+		if (!is_directory)
+		{
+
+			if (fileName.substr(0, 5).compare("JASP-") == 0 && fileName.find(id) != std::string::npos)
+			{
+				Log::log() << "Try to delete: " << fileName << std::endl;
+				std::filesystem::remove(p, error);
+
+				if (error)
+					Log::log() << "Error when deleting file: " << error.message() << std::endl;
+			}
+		}
+	}
+}

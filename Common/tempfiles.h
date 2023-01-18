@@ -61,6 +61,9 @@ public:
 	static void			deleteOrphans();
 
 private:
+	static void _deleteAssociatedFiles(const std::string& id);
+
+private:
 						TempFiles() {}
 	static long			_sessionId;
 	static std::string	_sessionDirName,
