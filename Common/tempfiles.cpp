@@ -111,19 +111,6 @@ void TempFiles::deleteAll(int id)
 	std::error_code error;
 	std::filesystem::path dir = id >= 0 ? std::filesystem::path(_sessionDirName + "/resources/" + std::to_string(id)) : Utils::osPath(_sessionDirName);
 	std::filesystem::remove_all(dir, error);
-	if (id < 0)
-	{
-		try
-		{
-			_deleteAssociatedFiles(std::to_string(_sessionId));
-		}
-		catch (runtime_error e)
-		{
-			Log::log() << "Could not delete all associated files, error: " << e.what() << std::endl;
-			return;
-		}
-	}
-
 }
 
 
@@ -138,7 +125,7 @@ void TempFiles::deleteOrphans()
 		long outOfDateDelta = 24 * 3600;
 		std::filesystem::path tempPath		= Utils::osPath(Dirs::tempDir());
 		std::filesystem::path sessionPath	= Utils::osPath(_sessionDirName); 
-		stringvec IDstoBeDeleted;
+		stringvec aliveIDs;
 
 		std::filesystem::directory_iterator itr(tempPath, error);
 
@@ -179,27 +166,23 @@ void TempFiles::deleteOrphans()
 					if (now - modTime > outOfDateDelta)
 					{
 						std::filesystem::remove_all(p, error);
-						IDstoBeDeleted.push_back(p.filename().string());
-
 						if (error)
 							Log::log() << "Error when deleting directory: " << error.message() << std::endl;
 					}
+					else
+						aliveIDs.push_back(p.filename().string());
 				}
 				else // no status file
 				{
 					std::filesystem::remove_all(p, error);
-					IDstoBeDeleted.push_back(p.filename().string());
-
 					if (error)
 						Log::log() << "Error when deleting directory, had no status file and " << error.message() << std::endl;
 				}
 			}
 		}
 
-
-		//Delete IPC files in the root associated with the IDs that have passed away
-		for(std::string& id : IDstoBeDeleted)
-			_deleteAssociatedFiles(id);
+		//Delete files in the root not associated with the IDs that have been active for x time
+		deleteStrayRootFiles(aliveIDs, outOfDateDelta);
 
 	}
 	catch (runtime_error e)
@@ -345,7 +328,7 @@ void TempFiles::deleteList(const vector<string> &files)
 	}
 }
 
-void TempFiles::_deleteAssociatedFiles(const std::string& id)
+void TempFiles::deleteStrayRootFiles(const stringvec& validIDs, long outOfDateDelta)
 {
 	std::filesystem::path tempPath = Utils::osPath(Dirs::tempDir());
 	std::error_code error;
@@ -370,16 +353,30 @@ void TempFiles::_deleteAssociatedFiles(const std::string& id)
 			continue;
 
 		if (!is_directory)
-		{
+		{					
+			long modTime	= Utils::getFileModificationTime(Utils::osPath(p));
+			long now		= Utils::currentSeconds();
 
-			if (fileName.substr(0, 5).compare("JASP-") == 0 && fileName.find(id) != std::string::npos)
+			if (now - modTime <= outOfDateDelta || fileName.substr(0, 5).compare("JASP-") != 0)
+				continue;
+
+			bool valid = false;
+			for (auto& id : validIDs)
 			{
-				Log::log() << "Try to delete: " << fileName << std::endl;
-				std::filesystem::remove(p, error);
-
-				if (error)
-					Log::log() << "Error when deleting file: " << error.message() << std::endl;
+				if (fileName.find(id) != std::string::npos)
+				{
+					valid = true;
+					break;
+				}
 			}
+			if (valid)
+				continue;
+
+			Log::log() << "Try to delete: " << fileName << std::endl;
+			std::filesystem::remove(p, error);
+
+			if (error)
+				Log::log() << "Error when deleting file: " << error.message() << std::endl;
 		}
 	}
 }

@@ -94,6 +94,9 @@ EngineSync::~EngineSync()
 	_moduleEngines.clear();
 	_engines.clear();
 
+	for(auto* channel : _channels)
+		delete channel;
+	_channels.clear();
 
 	delete _rCmderChannel;
 	_rCmderChannel	= nullptr;
@@ -306,7 +309,7 @@ void EngineSync::start(int )
 	connect(timerBeat,		&QTimer::timeout, this, &EngineSync::heartbeatTempFiles,	Qt::QueuedConnection);
 
 	timerProcess->start(50);
-	timerBeat->start(30000);
+	timerBeat->start(100);
 }
 
 void EngineSync::restartEngines()

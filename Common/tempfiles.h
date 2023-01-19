@@ -60,8 +60,7 @@ public:
 	static void			deleteAll(int id = -1);
 	static void			deleteOrphans();
 
-private:
-	static void _deleteAssociatedFiles(const std::string& id);
+	static void			deleteStrayRootFiles(const stringvec& validIDs, long outOfDateDelta);
 
 private:
 						TempFiles() {}
