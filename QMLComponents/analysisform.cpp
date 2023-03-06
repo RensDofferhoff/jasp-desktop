@@ -1014,6 +1014,12 @@ void AnalysisForm::toggleRSyntax()
 	pref->setShowRSyntax(!pref->showRSyntax());
 }
 
+void AnalysisForm::toggleFilters()
+{
+	_showFilters = !_showFilters;
+	emit showFiltersChanged();
+}
+
 void AnalysisForm::setActiveJASPControl(JASPControl* control, bool hasActiveFocus)
 {
 	bool emitSignal = false;

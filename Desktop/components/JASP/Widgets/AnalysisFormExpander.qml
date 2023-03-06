@@ -397,6 +397,26 @@ DropArea
 
 				MenuButton
 				{
+					id:					filterButton
+					width:				height
+					iconSource:			enabled ? jaspTheme.iconPath + "/filter.png" :  jaspTheme.iconPath + "/R-roundbutton-disabled.svg"
+					enabled:			expanderButton.expanded
+					onClicked:			if (formParent.myForm) formParent.myForm.toggleFilters();
+					toolTip:			formParent.myForm.showFilters ? qsTr("Hide filters") : qsTr("Show Filters")
+					radius:				height
+					opacity:			editButton.opacity
+					anchors
+					{
+						top:			parent.top
+						right:			rSyntaxButton.left
+						bottom:			parent.bottom
+						topMargin:		editButton.anchors.topMargin
+						bottomMargin:	editButton.anchors.bottomMargin
+					}
+				}
+
+				MenuButton
+				{
 					id:					rSyntaxButton
 					width:				height
 					iconSource:			enabled ? jaspTheme.iconPath + "/R-roundbutton.svg" :  jaspTheme.iconPath + "/R-roundbutton-disabled.svg"

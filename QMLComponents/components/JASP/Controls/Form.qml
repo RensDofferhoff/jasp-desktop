@@ -245,10 +245,51 @@ AnalysisForm
 			}
 		}
 
+
+		Item
+		{
+			id:						analysisFilter
+			anchors.top:			rSyntaxElement.bottom
+			width:					parent.width
+			height:					visible ? filterControlGroup.height : 0
+			visible:				showFilters
+
+
+			onVisibleChanged: if (visible) console.log("hi");
+
+			GroupBox
+			{
+				id: filterControlGroup
+
+				VariablesForm
+				{
+					AvailableVariablesList	{ name: "availableFilters";		title: qsTr("Available Filters");   source: [ { values: ["gender", "z < 5", "global1", "global2"] } ]}
+					AssignedVariablesList	{ name: "assignedFilters";		title: qsTr("Assigned  Filters")	}
+				}
+
+				RoundedButton
+				{
+					text: "Add more filters"
+				}
+
+				//Divider
+				Rectangle { height: 20 }
+				Rectangle
+				{
+					id: separator
+					border.width: 1
+					height: 2
+					width: analysisFilter.width
+					border.color: jaspTheme.gray
+				}
+				Rectangle { height: 20 }
+			}
+		}
+
 		GridLayout
 		{
 			id:					contentArea
-			anchors.top:		rSyntaxElement.bottom
+			anchors.top:		analysisFilter.bottom
 			anchors.margins:	warningMessagesBox.visible || errorMessagesBox.visible || rSyntaxElement.visible ? jaspTheme.generalAnchorMargin : 0
 			width:				form.implicitWidth
 		}

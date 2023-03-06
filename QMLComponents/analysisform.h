@@ -57,6 +57,7 @@ class AnalysisForm : public QQuickItem
 	Q_PROPERTY(QVariant		analysis				READ analysis												NOTIFY analysisInitialized			)
 	Q_PROPERTY(QVariantList	optionNameConversion	READ optionNameConversion	WRITE setOptionNameConversion	NOTIFY optionNameConversionChanged	)
 	Q_PROPERTY(bool			showRButton				READ showRButton											NOTIFY showRButtonChanged			)
+	Q_PROPERTY(bool			showFilters				READ showFilters											NOTIFY showFiltersChanged			)
 	Q_PROPERTY(bool			developerMode			READ developerMode											NOTIFY developerModeChanged			)
 	Q_PROPERTY(QString		rSyntaxText				READ rSyntaxText											NOTIFY rSyntaxTextChanged			)
 	Q_PROPERTY(bool			showAllROptions			READ showAllROptions		WRITE setShowAllROptions		NOTIFY showAllROptionsChanged		)
@@ -87,6 +88,7 @@ public:
 	bool					wasUpgraded()					const	{ return _analysis ? _analysis->wasUpgraded() : false;		}
 	bool					formCompleted()					const	{ return _formCompleted;	}
 	bool					showRButton()					const	{ return _showRButton;		}
+	bool					showFilters()					const	{ return _showFilters;		}
 	bool					developerMode()					const	{ return _developerMode;	}
 	QString					rSyntaxText()					const;
 	bool					showAllROptions()				const;
@@ -127,6 +129,7 @@ signals:
 	void					rSyntaxTextChanged();
 	void					showAllROptionsChanged();
 	void					activeJASPControlChanged();
+	void					showFiltersChanged();
 
 public:
 	ListModel			*	getModel(const QString& modelName)								const	{ return _modelMap.count(modelName) > 0 ? _modelMap[modelName] : nullptr;	} // Maps create elements if they do not exist yet
@@ -145,6 +148,7 @@ public:
 	Q_INVOKABLE void		runAnalysis();
 	Q_INVOKABLE bool		initialized()			const	{ return _initialized; }
 	Q_INVOKABLE QString		generateWrapper()		const;
+	Q_INVOKABLE void		toggleFilters();
 
 	void			addControlError(JASPControl* control, QString message, bool temporary = false, bool warning = false);
 	void			clearControlError(JASPControl* control);
@@ -234,6 +238,7 @@ private:
 													_developerMode					= false;
 	QString											_rSyntaxText;
 	JASPControl*									_activeJASPControl				= nullptr;
+	bool											_showFilters					= false;
 };
 
 #endif // ANALYSISFORM_H
