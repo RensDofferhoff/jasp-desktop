@@ -522,6 +522,7 @@ Analysis* Analyses::createAnalysis(const QString& module, const QString& analysi
 
 void Analyses::analysisClickedHandler(QString analysisFunction, QString analysisQML, QString analysisTitle, QString module)
 {
+	Log::log() << "!!!reached analyses" << std::endl;
 	createAnalysis(module, analysisFunction);
 }
 

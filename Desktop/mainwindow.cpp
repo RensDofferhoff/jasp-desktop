@@ -90,7 +90,7 @@
 #include "boost/iostreams/stream.hpp"
 #include <boost/iostreams/device/null.hpp>
 
-
+#include "scriptcommander/transceiver.h"
 using namespace std;
 using namespace Modules;
 
@@ -128,6 +128,8 @@ MainWindow::MainWindow(QApplication * application) : QObject(application), _appl
 	_engineSync				= new EngineSync(this);
 	_datasetTableModel		= new DataSetTableModel();
 	_labelModel				= new LabelModel();
+	_commander				= Commander::getInstance();
+
 	
 	initLog(); //initLog needs _preferences and _engineSync!
 
@@ -418,6 +420,8 @@ void MainWindow::makeConnections()
 	connect(_qml,					&QQmlApplicationEngine::warnings,					this,					&MainWindow::printQmlWarnings								);
 
 	connect(_plotEditorModel,		&PlotEditorModel::saveImage,						this,					&MainWindow::analysisSaveImageHandler						);
+
+	connect(_commander,				&Commander::startNewAnalysis,						_analyses,				&Analyses::analysisClickedHandler							);
 }
 
 void MainWindow::printQmlWarnings(const QList<QQmlError> &warnings)

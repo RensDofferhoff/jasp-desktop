@@ -50,6 +50,7 @@
 #include "results/resultsjsinterface.h"
 #include "modules/ribbonmodeluncommon.h"
 #include "results/resultmenumodel.h"
+#include "scriptcommander/commander.h"
 #include "utilities/jsonutilities.h"
 #include "utilities/helpmodel.h"
 #include "utilities/reporter.h"
@@ -308,6 +309,8 @@ private:
 									_checkAutomaticSync		= false;
 									
 	QFont							_defaultFont;
+
+	Commander*						_commander				= nullptr;
 };
 
 #endif // MAINWIDGET_H

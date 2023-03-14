@@ -135,6 +135,7 @@ target_link_libraries(
     Qt::DBus
     Qt::QmlWorkerScript
     Qt::LabsFolderListModel
+	Qt::Mqtt
     # System
     ZLIB::ZLIB
     Iconv::Iconv

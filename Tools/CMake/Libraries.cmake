@@ -108,7 +108,8 @@ if(NOT FLATPAK_USED)
                QuickControls2Impl
                QmlWorkerScript
                QuickWidgets
-               Core5Compat)
+               Core5Compat
+			   Mqtt)
 
 else()
 
