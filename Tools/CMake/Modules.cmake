@@ -43,6 +43,7 @@ set(JASP_EXTRA_MODULES
     "jaspMetaAnalysis"
     "jaspNetwork"
     "jaspQualityControl"
+	"jaspPower"
     "jaspProphet"
     "jaspReliability"
     "jaspSem"
