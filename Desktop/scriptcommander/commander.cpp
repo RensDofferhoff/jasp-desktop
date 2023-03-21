@@ -1,7 +1,6 @@
 #include "commander.h"
 #include "analysis/analyses.h"
 #include "log.h"
-#include "json/json.h"
 
 Commander* Commander::_instance = nullptr;
 
@@ -29,26 +28,36 @@ void Commander::incomingMessage(std::shared_ptr<Transceiver::Message> msg)
 	if(msg->type != Transceiver::Message::Type::JASPCommand)
 		return;
 
-	//parse
-	Json::Value root;
+	//parse command to json
+	Json::Value commandRoot;
 	Json::CharReaderBuilder readBuilder;
 	const std::unique_ptr<Json::CharReader> reader(readBuilder.newCharReader());
 	std::string err;
-	if (!reader->parse(msg->message.begin(), msg->message.begin() + msg->message.length(), &root, &err)) {
-		Log::log() << "Could not parse message: " << err << std::endl;
+	if (!reader->parse(msg->message.begin(), msg->message.begin() + msg->message.length(), &commandRoot, &err)) {
+		Log::log() << "Could not parse command: " << err << std::endl;
+		return;
+	}
+	if(!commandRoot["command"].isString() || !commandRoot["command_payload"].isObject()) {
+		Log::log() << "Could not parse command: Command or payload not present or wrong type" << std::endl;
 		return;
 	}
 
-	//start some action
-	emit startNewAnalysis("Descriptives", "", "", "jaspDescriptives");
+	//start some action and optionally create something to writeback
+	std::string response;
+	Json::Value responsePayload;
+	bool writeback = processCommand(commandRoot[""]);
 
-	//tmp test return
-	Json::Value response;
-	response["id"] = root["id"].asInt64();
-	response["response"] = "SUCCESS";
-	response["response_payload"] = Json::Value(Json::ValueType::objectValue);
-	Json::StreamWriterBuilder writeBuilder;
-	const std::string jsonString= Json::writeString(writeBuilder, response);
-	Transceiver::getInstance()->send({Transceiver::Message::Type::JASPCommandResponse, jsonString.c_str()});
+
+	//optional writeback
+	if(writeback)
+	{
+		Json::Value responseRoot;
+		responseRoot["id"] = commandRoot["id"].asInt64();
+		responseRoot["response"] = response;
+		responseRoot["response_payload"] = responsePayload;
+		Json::StreamWriterBuilder writeBuilder;
+		const std::string jsonString= Json::writeString(writeBuilder, response);
+		Transceiver::getInstance()->send({Transceiver::Message::Type::JASPCommandResponse, jsonString.c_str()});
+	}
 }
 

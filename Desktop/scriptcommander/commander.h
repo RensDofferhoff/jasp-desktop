@@ -3,6 +3,7 @@
 
 #include "qobject.h"
 #include "transceiver.h"
+#include "json/json.h"
 
 class Commander : public QObject
 {
@@ -21,7 +22,6 @@ public:
 	void operator=(const Commander&) = delete;
 
 signals:
-	void startNewAnalysis(QString analysisFunction, QString analysisQML, QString analysisTitle, QString module);
 
 private slots:
 	void incomingMessage(std::shared_ptr<Transceiver::Message> msg);
@@ -29,6 +29,8 @@ private slots:
 private:
 	void connectToTransceiver();
 //	void disconnectFromTransceiver();
+
+	bool processCommand(const std::string& command, const Json::Value& commandPayload, std::string& response, Json::Value responsePayload);
 
 private:
 	static Commander* _instance;
