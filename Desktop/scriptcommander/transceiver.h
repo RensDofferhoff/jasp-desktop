@@ -10,11 +10,9 @@ class Transceiver : public QObject
 public:
 	struct Message
 	{
-		enum class Type {JASPCommand, JASPCommandResponse} type = Type::JASPCommandResponse;
-		long long id;
+		enum class Type {JASPCommand, JASPCommandResponse};
+		Type type = Type::JASPCommandResponse;
 		QByteArray message;
-		bool send = true;
-
 	};
 
 public:

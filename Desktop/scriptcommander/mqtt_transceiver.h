@@ -24,8 +24,8 @@ private:
 	const QString hostname = "localhost";
 	const int port = 53781;
 	const int qos = 2;
-	const int keepAliveTime = 5;
-	const QMqttClient::ProtocolVersion protocolVersion = QMqttClient::MQTT_3_1_1;
+	const int keepAliveTime = 60;
+	const QMqttClient::ProtocolVersion protocolVersion = QMqttClient::MQTT_5_0;
 	const QString commandTopic = "jasp_command";
 	const QString commandResponseTopic = "jasp_command_response";
 };

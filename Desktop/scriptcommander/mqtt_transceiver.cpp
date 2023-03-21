@@ -17,7 +17,7 @@ MqttTransceiver::MqttTransceiver(QObject *parent) : Transceiver{parent}
 
 	_client.setWillTopic(commandResponseTopic);
 	_client.setWillQoS(qos);
-	_client.setWillMessage((_clientID +  "died").toUtf8());
+	_client.setWillMessage((_clientID +  " died").toUtf8());
 	_client.connectToHost();
 
 	connect(&_client, &QMqttClient::connected, this, [&]() {
@@ -37,13 +37,12 @@ MqttTransceiver::MqttTransceiver(QObject *parent) : Transceiver{parent}
 
 int MqttTransceiver::send(const Message& msg)
 {
-	if (!msg.send)
-		return 0;
 	if (msg.type == Message::Type::JASPCommandResponse)
+	{
 		_client.publish(commandResponseTopic, msg.message, qos);
+	}
 	else
 		return 0;
-
 
 	return 1;
 }
@@ -52,7 +51,7 @@ void MqttTransceiver::messageReceived(const QByteArray &message, const QMqttTopi
 {
 	if(topic.name() == commandTopic)
 	{
-		Message* msg = new Message{Message::Type::JASPCommand, 0, message, false};
+		Message* msg = new Message{Message::Type::JASPCommand, message};
 		Log::log() << "!!!" << QString(message).toStdString() << std::endl;
 		emit Transceiver::received(std::shared_ptr<Message>(msg));
 	}
