@@ -121,3 +121,6 @@
 	path = Modules/jaspPredictiveAnalytics
 	url = https://github.com/jasp-stats/jaspPredictiveAnalytics
 	branch = master
+[submodule "Modules/jaspLearnStats"]
+	path = Modules/jaspLearnStats
+	url = https://github.com/jasp-stats/jaspLearnStats
