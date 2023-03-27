@@ -420,8 +420,6 @@ void MainWindow::makeConnections()
 	connect(_qml,					&QQmlApplicationEngine::warnings,					this,					&MainWindow::printQmlWarnings								);
 
 	connect(_plotEditorModel,		&PlotEditorModel::saveImage,						this,					&MainWindow::analysisSaveImageHandler						);
-
-	connect(_commander,				&Commander::startNewAnalysis,						_analyses,				&Analyses::analysisClickedHandler							);
 }
 
 void MainWindow::printQmlWarnings(const QList<QQmlError> &warnings)
