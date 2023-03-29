@@ -109,7 +109,7 @@ bool Commander::createAnalysis(const std::string &command, const Json::Value &co
 		{
 			Json::Value responsePayload;
 			responsePayload["result"] = analysis->results();
-			responsePayload["analysisID"] = analysis->id();
+			responsePayload["analysisID"] = (int64_t) analysis->id();
 			writeBack(JaspResponse::success, responsePayload, commandID);
 			QObject::disconnect(*connection);
 		}
