@@ -1,5 +1,6 @@
 #include "commander.h"
 #include "analysis/analyses.h"
+#include "analysisform.h"
 #include "log.h"
 
 Commander* Commander::_instance = nullptr;
@@ -56,6 +57,8 @@ bool Commander::processCommand(const std::string &commandStr, const Json::Value 
 		{
 			case JaspCommand::createAnalysis:
 				return createAnalysis(commandStr, commandPayload, commandID);
+			case JaspCommand::setOptions:
+				return setOptions(commandStr, commandPayload, commandID);
 			default:
 				throw std::runtime_error("Command " + commandStr + " does not exist");
 		}
@@ -92,8 +95,13 @@ bool Commander::createAnalysis(const std::string &command, const Json::Value &co
 	std::string module = commandPayload["module"].asString();
 	std::string analysisName = commandPayload["analysis"].asString();
 
-	//do something synchronously
-	Analysis* analysis = Analyses::analyses()->createAnalysis(module.c_str(), analysisName.c_str());
+	//create analysis
+	Json::Value options = commandPayload.get("options", Json::nullValue);
+	Analysis* analysis;
+	if(options != Json::nullValue)
+		analysis = Analyses::analyses()->createAnalysis(module.c_str(), analysisName.c_str(), &options);
+	else
+		analysis = Analyses::analyses()->createAnalysis(module.c_str(), analysisName.c_str());
 	if(!analysis)
 	{
 		throw std::runtime_error("Could not create analysis " + module + ":" + analysisName);
@@ -103,20 +111,56 @@ bool Commander::createAnalysis(const std::string &command, const Json::Value &co
 	analysis->setTitle(title);
 
 	//set up an async response
+	auto writebackConnection = std::make_shared<QMetaObject::Connection>();
+	auto writebackFunc = [this, commandID, writebackConnection, analysis, options]() mutable {
+		if (analysis->status() == Analysis::Complete)
+		{
+			Json::Value responsePayload;
+			responsePayload["result"] = analysis->results();
+			responsePayload["analysisID"] = static_cast<int64_t>(analysis->id());
+			writeBack(JaspResponse::success, responsePayload, commandID);
+			QObject::disconnect(*writebackConnection);
+		}
+	};
+	*writebackConnection = connect(analysis, &Analysis::resultsChangedSignal, this, writebackFunc);
+	return true;
+}
+
+bool Commander::setOptions(const std::string &command, const Json::Value &commandPayload, int64_t commandID)
+{
+	//some more parsing of payload
+	if(!commandPayload["analysisID"].isUInt64()) {
+		throw std::runtime_error("No valid analysis ID provided");
+	}
+	uint64_t analysisID = commandPayload["analysisID"].asUInt64();
+
+
+	//do something synchronously
+	Analysis* analysis = Analyses::analyses()->get(analysisID);
+	if(!analysis)
+		throw std::runtime_error("Analysis with ID: " + std::to_string(analysisID) + " does not exist");
+
+	Json::Value options = commandPayload.get("options", Json::nullValue);
+	if(options == Json::nullValue)
+	{
+		throw std::runtime_error("no \"options\" provided");
+	}
+
+
+	//set up an async response
 	auto connection = std::make_shared<QMetaObject::Connection>();
 	*connection = connect(analysis, &Analysis::resultsChangedSignal, this, [this, commandID, connection, analysis]() {
 		if (analysis->status() == Analysis::Complete)
 		{
 			Json::Value responsePayload;
-			responsePayload["result"] = analysis->results();
-			responsePayload["analysisID"] = (int64_t) analysis->id();
+			responsePayload["result"] = analysis->boundValues();
 			writeBack(JaspResponse::success, responsePayload, commandID);
 			QObject::disconnect(*connection);
 		}
 	});
 
-	analysis->run();
-
+	//set options
+	analysis->form()->setOptions(options);
 	return true;
 }
 

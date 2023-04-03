@@ -520,9 +520,16 @@ Analysis* Analyses::createAnalysis(const QString& module, const QString& analysi
 
 }
 
+Analysis *Analyses::createAnalysis(const QString &module, const QString &analysis, Json::Value* options)
+{
+	Modules::DynamicModule * dynamicModule = Modules::DynamicModules::dynMods()->dynamicModule(module.toStdString());
+
+	if (dynamicModule)	return create(dynamicModule->retrieveCorrespondingAnalysisEntry(fq(analysis)), options);
+	else				return nullptr;
+}
+
 void Analyses::analysisClickedHandler(QString analysisFunction, QString analysisQML, QString analysisTitle, QString module)
 {
-	Log::log() << "!!!reached analyses" << std::endl;
 	createAnalysis(module, analysisFunction);
 }
 

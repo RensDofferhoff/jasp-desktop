@@ -37,6 +37,7 @@ private:
 
 	bool processCommand(const std::string& command, const Json::Value& commandPayload, int64_t commandID);
 	bool createAnalysis(const std::string& command, const Json::Value& commandPayload, int64_t commandID);
+	bool setOptions(const std::string& command, const Json::Value& commandPayload, int64_t commandID);
 
 	void writeBack(const JaspResponse repsonse, const Json::Value& responsePayload, int64_t commandID);
 

@@ -122,12 +122,7 @@ void AnalysisForm::runScriptRequestDone(const QString& result, const QString& co
 			parser.parse(fq(result), jsonResult);
 			Json::Value options = jsonResult["options"];
 			clearControlError(rSyntaxControl);
-			clearFormErrors();
-			if (_rSyntax->parseRSyntaxOptions(options))
-			{
-				bindTo(options);
-				_analysis->boundValueChangedHandler();
-			}
+			setOptions(options);
 		}
 
 		return;
@@ -149,6 +144,22 @@ void AnalysisForm::runScriptRequestDone(const QString& result, const QString& co
 		item->rScriptDoneHandler(result);
 	else
 		Log::log() << "Unknown item " << controlName.toStdString() << std::endl;
+}
+
+bool AnalysisForm::setOptions(Json::Value& options)
+{
+	if(_removed)
+		return false;
+
+	clearFormErrors();
+	if (_rSyntax->parseRSyntaxOptions(options))
+	{
+		bindTo(options);
+		_analysis->boundValueChangedHandler();
+		return true;
+	}
+
+	return false;
 }
 
 void AnalysisForm::addControl(JASPControl *control)

@@ -181,6 +181,7 @@ public:
 	bool			parseOptions(Json::Value& options);
 	void			setActiveJASPControl(JASPControl* control, bool hasActiveFocus);
 	JASPControl*	getActiveJASPControl()	{ return _activeJASPControl; }
+	bool			setOptions(Json::Value& options);
 
 	static const QString	rSyntaxControlName;
 

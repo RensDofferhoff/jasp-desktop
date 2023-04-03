@@ -4,7 +4,7 @@
 #include "enumutilities.h"
 
 
-DECLARE_ENUM(JaspCommand,	createAnalysis);
+DECLARE_ENUM(JaspCommand,	createAnalysis, setOptions);
 DECLARE_ENUM(JaspResponse,	success, failure);
 
 #endif
