@@ -68,6 +68,7 @@ class PreferencesModel : public PreferencesModelBase
 	Q_PROPERTY(bool			reportingMode			READ reportingMode				WRITE setReportingMode				NOTIFY reportingModeChanged				)
 	Q_PROPERTY(bool			showRSyntax				READ showRSyntax				WRITE setShowRSyntax				NOTIFY showRSyntaxChanged				)
 	Q_PROPERTY(bool			showAllROptions			READ showAllROptions			WRITE setShowAllROptions			NOTIFY showAllROptionsChanged			)
+	Q_PROPERTY(QString		remoteSettingsURL		READ remoteSettingsURL			WRITE setRemoteSettingsURL			NOTIFY remoteSettingsURLChanged			)
 
 
 public:
@@ -133,6 +134,7 @@ public:
 	void		zoomReset();
 	int 		maxEnginesAdmin() 						const;
 	bool		developerMode()							const;
+	QString		remoteSettingsURL()						const;
 
 public slots:
 	void setUiScale(					double		uiScale);
@@ -190,6 +192,7 @@ public slots:
 	void setShowRSyntax(				bool		showRSyntax)					override;
 	void setShowAllROptions(			bool		showAllROptions)				override;
 	void currentThemeNameHandler();
+	void setRemoteSettingsURL(			QString		URL);
 	
 signals:
 	void fixedDecimalsChanged(			bool		fixedDecimals);
@@ -238,6 +241,8 @@ signals:
 	void dataLabelNAChanged(			QString		dataLabelNA);
 	void guiQtTextRenderChanged(		bool		guiQtTextRender);
 	void reportingModeChanged(			bool		reportingMode);
+	void remoteSettingsURLChanged(		QString		remoteSettingsURL);
+
 
 private slots:
 	void dataLabelNAChangedSlot(QString label);
