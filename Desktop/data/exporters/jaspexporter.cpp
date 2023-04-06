@@ -53,6 +53,7 @@ void JASPExporter::saveDataSet(const std::string &path, boost::function<void(int
 	if (archive_write_open_filename(a, path.c_str()) != ARCHIVE_OK)
 		throw std::runtime_error("File could not be opened.");
 
+    saveManifest(a);
 	saveDatabase(a);
 	saveAnalyses(a);
 	saveResults(a);
@@ -63,6 +64,15 @@ void JASPExporter::saveDataSet(const std::string &path, boost::function<void(int
 	archive_write_free(a);
 
 	progressCallback(100);
+}
+
+void JASPExporter::saveManifest(archive * a)
+{
+    Json::Value manifest = Json::objectValue;
+
+    manifest["jaspArchiveVersion"] = jaspArchiveVersion.asString();
+
+    makeEntry(a, "manifest.json", manifest.toStyledString());
 }
 
 void JASPExporter::saveResults(archive * a)

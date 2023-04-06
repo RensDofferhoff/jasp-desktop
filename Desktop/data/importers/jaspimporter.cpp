@@ -57,15 +57,6 @@ void JASPImporter::loadDataSet(const std::string &path, boost::function<void(int
 	packageData->endLoadingData();
 }
 
-
-void JASPImporter::loadDataArchive(const std::string &path, boost::function<void(int)> progressCallback)
-{
-	if (DataSetPackage::pkg()->dataArchiveVersion().major() == 1)
-		loadDataArchive_1_00(path, progressCallback);
-	else
-		throw std::runtime_error("The file version is not supported.\nPlease update to the latest version of JASP to view this file.");
-}
-
 void JASPImporter::loadDataArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
 {
 	JASPTIMER_SCOPE(JASPImporter::loadDataArchive_1_00);
@@ -73,121 +64,7 @@ void JASPImporter::loadDataArchive_1_00(const std::string &path, boost::function
 	DataSetPackage * packageData = DataSetPackage::pkg();
 	bool success = false;
 
-	Json::Value metaData,
-				xData;
-
-	int	columnCount = 0,
-		rowCount = 0;
-
-	parseJsonEntry(metaData, path, "metadata.json", true);
-
-	parseJsonEntry(xData, path, "xdata.json", false);
-
-	Json::Value &dataSetDesc			= metaData["dataSet"];
-
-	packageData->setDataFilePath(		metaData.get("dataFilePath",		"")				.asString());
-	packageData->setDataFileReadOnly(	metaData.get("dataFileReadOnly",	false)			.asBool());
-	packageData->setDataFileTimestamp(	metaData.get("dataFileTimestamp",	0)				.asUInt());
-	packageData->setDatabaseJson(		metaData.get("database",			Json::nullValue));
-
-	DataSetPackage::filter()->setRFilter(	metaData.get("filterData",			DEFAULT_FILTER)	.asString());
-
-	Json::Value jsonFilterConstructor = metaData.get("filterConstructorJSON", DEFAULT_FILTER_JSON);
-	DataSetPackage::filter()->setConstructorJson(jsonFilterConstructor.isObject() ? jsonFilterConstructor.toStyledString() : jsonFilterConstructor.asString());
-
-	Json::Value &emptyValuesJson = metaData["emptyValues"];
-	if (emptyValuesJson.isNull())
-		// Really old JASP files: the empty values were '.', 'NaN' & 'nan'
-		ColumnUtils::setEmptyValues({"NaN", "nan", "."});
-	else
-	{
-		stringset emptyValues;
-		for (const Json::Value & emptyValueJson  : emptyValuesJson)
-			emptyValues.insert(emptyValueJson.asString());
-		ColumnUtils::setEmptyValues(emptyValues);
-	}
-
-	packageData->setEmptyValues(dataSetDesc["emptyValuesMap"]);
-
-	columnCount = dataSetDesc["columnCount"].asInt();
-	rowCount	= dataSetDesc["rowCount"].asInt();
-	if (rowCount < 0 || columnCount < 0)
-		throw std::runtime_error("Data size has been corrupted.");
-
-
-	packageData->setDataSetSize(columnCount, rowCount);
-
-	unsigned long long	progress,
-						lastProgress = -1;
-
-	Json::Value &columnsDesc = dataSetDesc["fields"];
-	int i = 0;
-	std::map<std::string, std::map<int, int> > mapNominalTextValues;
-
-	for (const Json::Value & columnDesc : columnsDesc)
-	{
-		packageData->columnLabelsFromJsonForJASPFile(xData, columnDesc, i, mapNominalTextValues);
-
-		progress = (33.0 * i) / columnCount;
-		if (progress != lastProgress)
-		{
-			progressCallback(progress); //fq(tr("Loading Data Set Description")),
-			lastProgress = progress;
-		}
-
-		i += 1;
-	}
-
-	std::string entryName = "data.bin";
-	ArchiveReader dataEntry = ArchiveReader(path, entryName);
-	if (!dataEntry.exists())
-		throw std::runtime_error("Entry " + entryName + " could not be found.");
-
-	char buff[sizeof(double) > sizeof(int) ? sizeof(double) : sizeof(int)];
-
-	std::vector<double>		dbls(rowCount);
-	std::vector<int>		ints(rowCount);
-
-	for (int c = 0; c < columnCount; c++)
-	{
-		columnType columnType			= packageData->getColumnType(c);
-		bool isScalar					= columnType == columnType::scale;
-		int typeSize					= isScalar ? sizeof(double) : sizeof(int);
-		std::map<int, int>& mapValues	= mapNominalTextValues[packageData->getColumnName(c)];
-
-		for (size_t r = 0; r < rowCount; r++)
-		{
-			int errorCode	= 0;
-			int size		= dataEntry.readData(buff, typeSize, errorCode);
-
-			if (errorCode != 0 || size != typeSize)
-				throw std::runtime_error("Could not read 'data.bin' in JASP archive.");
-
-			if (isScalar)
-				dbls[r] = *reinterpret_cast<double*>(buff);
-			else
-			{
-				int value = *reinterpret_cast<int*>(buff);
-
-				if (columnType == columnType::nominalText && value != std::numeric_limits<int>::lowest())
-					value = mapValues[value];
-
-				ints[r] = value;
-			}
-
-			progress = 33.0 + ((33.0 * ((c * rowCount) + (r + 1))) / (columnCount * rowCount));
-			if (progress != lastProgress)
-			{
-				progressCallback(progress); // fq(tr("Loading Data Set")),
-				lastProgress = progress;
-			}
-		}
-
-		if(isScalar)	packageData->setColumnDataDbls(c, dbls);
-		else			packageData->setColumnDataInts(c, ints);
-	}
-
-	dataEntry.close();
+	hier moet je database uitpakken naar tempfiles
 
 	if(resultXmlCompare::compareResults::theOne()->testMode())
 	{
@@ -202,29 +79,14 @@ void JASPImporter::loadDataArchive_1_00(const std::string &path, boost::function
 
 		resultXmlCompare::compareResults::theOne()->setOriginalResult(QString::fromStdString(html));
 	}
-
-	packageData->dataSet()->loadOldComputedColumnsJson(metaData.get("computedColumns", Json::arrayValue));
-
-	std::vector<bool> filterVector;
-	for(const Json::Value & filteredRow : dataSetDesc.get("filterVector", Json::arrayValue))
-		filterVector.push_back(filteredRow.asBool());
-	packageData->setFilterVectorWithoutModelUpdate(filterVector);
-
-	//Filter should be run if filterVector was not filled and either of the filters was different from default.
-	bool filterShouldBeRun =
-			filterVector.size() == 0 &&
-			(	metaData.get("filterData",				DEFAULT_FILTER).asString()		!= DEFAULT_FILTER
-			||	metaData.get("filterConstructorJSON",	DEFAULT_FILTER_JSON).asString() != DEFAULT_FILTER_JSON	);
-
-	packageData->setFilterShouldRunInit(filterShouldBeRun);
 }
 
 void JASPImporter::loadJASPArchive(const std::string &path, boost::function<void(int)> progressCallback)
 {
-	if (DataSetPackage::pkg()->archiveVersion().major() >= 1 && DataSetPackage::pkg()->archiveVersion().major() <= 3) //2.x version have a different analyses.json structure but can be loaded using the 1_00 loader. 3.x adds computed columns
+	if (DataSetPackage::pkg()->archiveVersion().major() == 4)
 		loadJASPArchive_1_00(path, progressCallback);
 	else
-		throw std::runtime_error("The file version is not supported.\nPlease update to the latest version of JASP to view this file.");
+		throw std::runtime_error("The file version is not supported (too new).\nPlease update to the latest version of JASP to view this file.");
 }
 
 void JASPImporter::loadJASPArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
@@ -245,12 +107,10 @@ void JASPImporter::loadJASPArchive_1_00(const std::string &path, boost::function
 			std::string filename	= resourceEntry.fileName();
 			std::string dir			= resource.substr(0, resource.length() - filename.length() - 1);
 
-			JASPTIMER_RESUME(JASPImporter::loadJASPArchive_1_00 Create resource files);
-
-			JASPTIMER_RESUME(JASPImporter::loadJASPArchive_1_00 TempFiles::createSpecific);
 			std::string destination = TempFiles::createSpecific(dir, resourceEntry.fileName());
-			JASPTIMER_STOP(JASPImporter::loadJASPArchive_1_00 TempFiles::createSpecific);
-	
+
+			deze code moet naar losse functie a la JASPExporter
+
 			JASPTIMER_RESUME(JASPImporter::loadJASPArchive_1_00 Write file stream);
 			std::ofstream file(destination.c_str(),  std::ios::out | std::ios::binary);
 
@@ -302,49 +162,32 @@ void JASPImporter::loadJASPArchive_1_00(const std::string &path, boost::function
 
 void JASPImporter::readManifest(const std::string &path)
 {
-	bool		foundVersion		= false,
-				foundDataVersion	= false;
-	std::string	manifestName		= "META-INF/MANIFEST.MF";
-	ArchiveReader	manifest			= ArchiveReader(path, manifestName);
-	int			size				= manifest.bytesAvailable();
+	bool            foundVersion		= false;
+	std::string     manifestName		= "manifest.json";
+	ArchiveReader	manifestReader		= ArchiveReader(path, manifestName);
+	int             size				= manifestReader.bytesAvailable(),
+		errorCode;
 
 	if (size > 0)
 	{
-		char *	data		= new char[size];
-		int		startOffset = manifest.pos(),
-				errorCode	= 0;
+		std::string manifestStr = manifestReader.readAllData(sizeof(char), errorCode);
 
-		while (manifest.readData(&data[manifest.pos() - startOffset], 8016, errorCode) > 0 && errorCode == 0) ;
+		if (errorCode != 0)
+			throw std::runtime_error("Could not read manifest of JASP archive.");
 
-		if (errorCode < 0)
-			throw std::runtime_error("Error reading Entry 'manifest.mf' in JASP archive.");
+		Json::Reader    parser;
+		Json::Value     manifest;
+		parser.parse(manifestStr, manifest);
 
-		std::string doc(data, size);
-		delete[] data;
+		manifestStr = manifest.get("jaspArchiveVersion", "").asString();
 
-		std::stringstream st(doc);
-		std::string line;
-		while (std::getline(st, line))
-		{
-			if (line.find("JASP-Archive-Version: ") == 0)
-			{
-				foundVersion = true;
-				DataSetPackage::pkg()->setArchiveVersion(Version(line.substr(22)));
-			}
-			else if (line.find("Data-Archive-Version: ") == 0)
-			{
-				foundDataVersion = true;
-				DataSetPackage::pkg()->setDataArchiveVersion(Version(line.substr(22)));
-			}
-			if (foundDataVersion && foundVersion)
-				break;
-		}
+		foundVersion = ! manifestStr.empty();
+
+		DataSetPackage::pkg()->setArchiveVersion(Version(manifestStr));
 	}
 
-	if ( ! foundDataVersion || ! foundVersion)
+	if ( ! foundVersion)
 		throw std::runtime_error("Archive missing version information.");
-
-	manifest.close();
 }
 
 bool JASPImporter::parseJsonEntry(Json::Value &root, const std::string &path,  const std::string &entry, bool required)

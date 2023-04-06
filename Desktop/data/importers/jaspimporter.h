@@ -18,15 +18,12 @@
 #ifndef JASPIMPORTER_H
 #define JASPIMPORTER_H
 
-
-#include "../datasetpackage.h"
-
 #include <boost/function.hpp>
-
 #include <string>
 #include <vector>
 #include <QCoreApplication>
-#include "utilities/qutils.h"
+#include "version.h"
+#include <json/json.h>
 
 ///
 /// Loads a jasp file
@@ -39,6 +36,7 @@ public:
 	enum Compatibility { Compatible, Limited, NotCompatible };
 
 	static void loadDataSet(const std::string &path, boost::function<void(int)> progressCallback);
+	static Compatibility isCompatible(const std::string &path) { readManifest(path); return isCompatible(); }
 
 private:
 	static void loadDataArchive(		const std::string &path, boost::function<void(int)> progressCallback);
@@ -49,6 +47,7 @@ private:
 	static bool parseJsonEntry(Json::Value &root, const std::string &path, const std::string &entry, bool required);
 	static void readManifest(const std::string &path);
 	static Compatibility isCompatible();
+
 	
 	static const Version maxSupportedJaspArchiveVersion;
 };

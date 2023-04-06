@@ -35,6 +35,7 @@ public:
 	void saveDataSet(const std::string &path, boost::function<void (int)> progressCallback) override;
 
 private:
+    static void saveManifest(       archive * a);
 	static void saveResults(		archive * a);
 	static void saveAnalyses(		archive * a);
 	static void saveDatabase(		archive * a);

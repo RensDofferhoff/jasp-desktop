@@ -164,11 +164,9 @@ public:
 				bool				dataFileReadOnly()					const	{ return _dataFileReadOnly;						     }
 				uint				dataFileTimestamp()					const	{ return _dataFileTimestamp;					      }
 				bool				isDatabaseSynching()				const	{ return _databaseIntervalSyncher.isActive();	}
-		const	Version			&	dataArchiveVersion()				const	{ return _dataArchiveVersion;						   }
 				bool				filterShouldRunInit()				const	{ return _filterShouldRunInit;							}
 
 
-				void				setDataArchiveVersion(Version archiveVersion)		{ _dataArchiveVersion			= archiveVersion;	}
 				void				setFilterShouldRunInit(bool shouldIt)				{ _filterShouldRunInit			= shouldIt;			}
 				void				setAnalysesData(const Json::Value & analysesData)	{ _analysesData					= analysesData;		}
 				void				setArchiveVersion(Version archiveVersion)			{ _archiveVersion				= archiveVersion;	}
@@ -360,8 +358,7 @@ private:
 
 	Json::Value					_analysesData,
 								_database					= Json::nullValue;
-	Version						_archiveVersion,
-								_dataArchiveVersion;
+	Version						_archiveVersion;
 
 	uint						_dataFileTimestamp;
 

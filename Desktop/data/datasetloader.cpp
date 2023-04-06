@@ -21,6 +21,7 @@
 
 #include "importers/databaseimporter.h"
 #include "importers/csvimporter.h"
+#include "importers/jaspimporter.h"
 #include "importers/jaspimporterold.h"
 #include "importers/odsimporter.h"
 #include "importers/readstatimporter.h"
@@ -72,7 +73,10 @@ void DataSetLoader::loadPackage(const string &locator, const string &extension, 
 		Log::log() << "Found " << temp.columnCount() << " columns\n";
 	}
 	else if(extension == ".jasp" || extension == "jasp")
-		JASPImporterOld::loadDataSet(locator, progress);
+	{
+		if(JASPImporterOld::isCompatible(locator))  JASPImporterOld::loadDataSet(locator, progress);
+		else                                        JASPImporter::loadDataSet(locator, progress);
+	}
 	else
 		throw std::runtime_error("JASP does not support loading the file-type \"" + extension + '"');
 
