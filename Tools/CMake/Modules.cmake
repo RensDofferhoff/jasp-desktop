@@ -20,34 +20,34 @@ list(APPEND CMAKE_MESSAGE_CONTEXT Modules)
 
 set(JASP_COMMON_MODULES
     "jaspDescriptives"
-    "jaspTTests"
-    "jaspAnova"
-    "jaspMixedModels"
-    "jaspRegression"
-    "jaspFrequencies"
-    "jaspFactor"
+    # "jaspTTests"
+    # "jaspAnova"
+    # "jaspMixedModels"
+    # "jaspRegression"
+    # "jaspFrequencies"
+    # "jaspFactor"
     )
 
 set(JASP_EXTRA_MODULES
-    "jaspAcceptanceSampling"
-    "jaspAudit"
-    "jaspBain"
-    "jaspBsts"
-    "jaspCircular"
-    "jaspCochrane"
-    "jaspDistributions"
-    "jaspEquivalenceTTests"
-    "jaspJags"
-    "jaspLearnBayes"
-    "jaspMachineLearning"
-    "jaspMetaAnalysis"
-    "jaspNetwork"
-    "jaspQualityControl"
-    "jaspProphet"
-    "jaspReliability"
-    "jaspSem"
-    "jaspSummaryStatistics"
-    "jaspVisualModeling"
+    # "jaspAcceptanceSampling"
+    # "jaspAudit"
+    # "jaspBain"
+    # "jaspBsts"
+    # "jaspCircular"
+    # "jaspCochrane"
+    # "jaspDistributions"
+    # "jaspEquivalenceTTests"
+    # "jaspJags"
+    # "jaspLearnBayes"
+    # "jaspMachineLearning"
+    # "jaspMetaAnalysis"
+    # "jaspNetwork"
+    # "jaspQualityControl"
+    # "jaspProphet"
+    # "jaspReliability"
+    # "jaspSem"
+    # "jaspSummaryStatistics"
+    # "jaspVisualModeling"
     )
 
 list(
@@ -79,7 +79,7 @@ if(("jaspMetaAnalysis" IN_LIST JASP_EXTRA_MODULES) OR ("jaspJags" IN_LIST
     endif()
 
     message(CHECK_START "Looking for libjags.so")
-    find_file(LIBJAGS libjags.so HINTS ${jags_HOME}/lib REQUIRED)
+    find_file(LIBJAGS libjags.so HINTS ${jags_HOME}/lib ${JAGS_HOME} REQUIRED)
     if(EXISTS ${LIBJAGS})
       message(CHECK_PASS "found")
       message(STATUS "  ${LIBJAGS}")
