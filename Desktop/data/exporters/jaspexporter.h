@@ -20,6 +20,7 @@
 
 #include "exporter.h"
 #include <archive.h>
+#include <time.h>
 
 ///
 /// To export to *.JASP files
@@ -34,10 +35,13 @@ public:
 	void saveDataSet(const std::string &path, boost::function<void (int)> progressCallback) override;
 
 private:
-	static void createManifest(archive *a);
 	static void saveResults(		archive * a);
 	static void saveAnalyses(		archive * a);
 	static void saveDatabase(		archive * a);
+	static void saveTempFile(archive *a, const std::string &filePath);
+	static void makeEntry(archive * a, const std::string & filename, const std::string & data);
+
+	static time_t _now;
 
 
 	JASPTIMER_CLASS(JASPExporter);

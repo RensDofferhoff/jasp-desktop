@@ -18,6 +18,7 @@ public:
 
 				DatabaseInterface(bool create = false);
 				~DatabaseInterface();
+	std::string dbFile(bool onlyPostfix=false) const;									///< Convenience function for getting the filename where sqlite db should be
 
 	static		DatabaseInterface * singleton() { return _singleton; }
 
@@ -117,7 +118,6 @@ public:
 	void		_runStatements(				const std::string & statements,						std::function<void(sqlite3_stmt *stmt)> *	bindParameters = nullptr,	std::function<void(size_t row, sqlite3_stmt *stmt)> *	processRow = nullptr);	///< Runs several sql statements without looking at the results. Unless processRow is not NULL, then this is called for each row.
 	void		_runStatementsRepeatedly(	const std::string & statements, std::function<bool(	std::function<void(sqlite3_stmt *stmt)> **	bindParameters, size_t row)> bindParameterFactory, std::function<void(size_t row, size_t repetition, sqlite3_stmt *stmt)> * processRow = nullptr);
 
-	std::string dbFile() const;									///< Convenience function for getting the filename where sqlite db should be
 	void		create();										///< Creates a new sqlite database in sessiondir and loads it
 	void		load();											///< Loads a sqlite database from sessiondir (after loading a jaspfile)
 	void		close();										///< Closes the loaded database and disconnects

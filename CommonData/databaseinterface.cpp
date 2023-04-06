@@ -1217,12 +1217,11 @@ void DatabaseInterface::labelsWrite(Column *column)
 	transactionWriteEnd();
 }
 
-std::string DatabaseInterface::dbFile() const
+std::string DatabaseInterface::dbFile(bool onlyName) const
 {
 	JASPTIMER_SCOPE(DatabaseInterface::dbFile);
-	std::filesystem::path sessionPath = Utils::osPath(TempFiles::sessionDirName() + "/internal.sqlite");
 
-	return sessionPath.string();
+	return onlyName ? "internal.sqlite" : Utils::osPath(TempFiles::sessionDirName() + "/internal.sqlite").string();
 }
 
 void DatabaseInterface::runQuery(const std::string & query, std::function<void(sqlite3_stmt *stmt)> bindParameters, std::function<void(size_t row, sqlite3_stmt *stmt)> processRow)
