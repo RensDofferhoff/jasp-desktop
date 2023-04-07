@@ -30,7 +30,7 @@ set(JASP_COMMON_MODULES
 
 set(JASP_EXTRA_MODULES
     # "jaspAcceptanceSampling"
-    # "jaspAudit"
+    "jaspAudit"
     # "jaspBain"
     # "jaspBsts"
     # "jaspCircular"
