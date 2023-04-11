@@ -73,9 +73,11 @@ void DataSetLoader::loadPackage(const string &locator, const string &extension, 
 		Log::log() << "Found " << temp.columnCount() << " columns\n";
 	}
 	else if(extension == ".jasp" || extension == "jasp")
-	{
-		if(JASPImporterOld::isCompatible(locator))  JASPImporterOld::loadDataSet(locator, progress);
-		else                                        JASPImporter::loadDataSet(locator, progress);
+    {
+        bool useOldImporter = JASPImporterOld::isCompatible(locator) != JASPImporterOld::Compatibility::NotCompatible;
+
+        if(useOldImporter)  JASPImporterOld::loadDataSet(locator, progress);
+        else                JASPImporter::loadDataSet(locator, progress);
 	}
 	else
 		throw std::runtime_error("JASP does not support loading the file-type \"" + extension + '"');

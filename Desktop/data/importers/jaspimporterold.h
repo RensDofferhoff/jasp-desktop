@@ -37,10 +37,10 @@ class JASPImporterOld
 {
 	Q_DECLARE_TR_FUNCTIONS(JASPImporter)
 public:
-	enum Compatibility { Compatible, Limited, NotCompatible };
+    enum class Compatibility { NotCompatible, Limited, Compatible };
 
 	static void loadDataSet(const std::string &path, boost::function<void(int)> progressCallback);
-	static Compatibility isCompatible(const std::string &path) { readManifest(path); return isCompatible(); }
+    static Compatibility isCompatible(const std::string &path);
 
 private:
 	static void loadDataArchive(		const std::string &path, boost::function<void(int)> progressCallback);

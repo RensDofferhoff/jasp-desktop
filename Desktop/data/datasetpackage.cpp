@@ -115,7 +115,6 @@ void DataSetPackage::reset(bool newDataSet)
 	else			deleteDataSet();
 
 	_archiveVersion				= Version();
-	_dataArchiveVersion			= Version();
 	_analysesHTML				= QString();
 	_analysesData				= Json::arrayValue;
 	_warningMessage				= std::string();
@@ -1113,6 +1112,16 @@ void DataSetPackage::createDataSet()
 	_filterSubModel->selectNode(_dataSet->filtersNode());
 	
 	_dataSet->setModifiedCallback([&](){ setModified(true); }); //DataSet and co dont use Qt so instead we just use a callback
+}
+
+void DataSetPackage::loadDataSet()
+{
+    if(_dataSet)
+        delete _dataSet;
+
+    _dataSet = new DataSet(1); //Right now there can only be a dataSet with ID==1 so lets keep it simple
+    _dataSubModel->selectNode(_dataSet->dataNode());
+    _filterSubModel->selectNode(_dataSet->filtersNode());
 }
 
 void DataSetPackage::deleteDataSet()

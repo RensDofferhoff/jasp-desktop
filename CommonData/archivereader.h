@@ -111,6 +111,11 @@ public:
 	 */
 	std::string fileName() const;
 
+    /**
+     * @brief Saves the loaded entry as a file in tempfiles folder
+     */
+    void writeEntryToTempFiles();
+
 	/**
 	 * @brief extension The file extension of the last archive entry.
 	 * @return Extension suffice of entryPath as passed to Ctor(). Zero length if simple file.

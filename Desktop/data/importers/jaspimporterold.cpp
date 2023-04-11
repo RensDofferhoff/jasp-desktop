@@ -48,8 +48,8 @@ void JASPImporterOld::loadDataSet(const std::string &path, boost::function<void(
 
 	Compatibility compatibility = isCompatible();
 
-	if (compatibility == JASPImporterOld::NotCompatible)	throw std::runtime_error("The file version is too new.\nPlease update to the latest version of JASP to view this file.");
-	else if (compatibility == JASPImporterOld::Limited)	packageData->setWarningMessage("This file was created by a newer version of JASP and may not have complete functionality.");
+    if (compatibility == Compatibility::NotCompatible)	throw std::runtime_error("The file version is too new.\nPlease update to the latest version of JASP to view this file.");
+    else if (compatibility == Compatibility::Limited)	packageData->setWarningMessage("This file was created by a newer version of JASP and may not have complete functionality.");
 
 	JASPTIMER_STOP(JASPImporter::loadDataSet INIT);
 
@@ -59,13 +59,23 @@ void JASPImporterOld::loadDataSet(const std::string &path, boost::function<void(
 	packageData->endLoadingData();
 }
 
+JASPImporterOld::Compatibility JASPImporterOld::isCompatible(const std::string &path)
+{
+    try
+    {
+        readManifest(path);
+        return isCompatible();
+    }
+    catch(const std::runtime_error &)
+    {
+        return Compatibility::NotCompatible;
+    }
+}
+
 
 void JASPImporterOld::loadDataArchive(const std::string &path, boost::function<void(int)> progressCallback)
 {
-	if (DataSetPackage::pkg()->dataArchiveVersion().major() == 1)
-		loadDataArchive_1_00(path, progressCallback);
-	else
-		throw std::runtime_error("The file version is not supported.\nPlease update to the latest version of JASP to view this file.");
+    loadDataArchive_1_00(path, progressCallback);
 }
 
 void JASPImporterOld::loadDataArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
@@ -304,11 +314,10 @@ void JASPImporterOld::loadJASPArchive_1_00(const std::string &path, boost::funct
 
 void JASPImporterOld::readManifest(const std::string &path)
 {
-	bool		foundVersion		= false,
-				foundDataVersion	= false;
-	std::string	manifestName		= "META-INF/MANIFEST.MF";
+    bool            foundVersion		= false;
+    std::string     manifestName		= "META-INF/MANIFEST.MF";
 	ArchiveReader	manifest			= ArchiveReader(path, manifestName);
-	int			size				= manifest.bytesAvailable();
+    int             size				= manifest.bytesAvailable();
 
 	if (size > 0)
 	{
@@ -332,18 +341,12 @@ void JASPImporterOld::readManifest(const std::string &path)
 			{
 				foundVersion = true;
 				DataSetPackage::pkg()->setArchiveVersion(Version(line.substr(22)));
+                break;
 			}
-			else if (line.find("Data-Archive-Version: ") == 0)
-			{
-				foundDataVersion = true;
-				DataSetPackage::pkg()->setDataArchiveVersion(Version(line.substr(22)));
-			}
-			if (foundDataVersion && foundVersion)
-				break;
 		}
 	}
 
-	if ( ! foundDataVersion || ! foundVersion)
+    if ( ! foundVersion)
 		throw std::runtime_error("Archive missing version information.");
 
 	manifest.close();
@@ -409,12 +412,12 @@ bool JASPImporterOld::parseJsonEntry(Json::Value &root, const std::string &path,
 JASPImporterOld::Compatibility JASPImporterOld::isCompatible()
 {
 	if (DataSetPackage::pkg()->archiveVersion().major()		> maxSupportedJaspArchiveVersion.major() )
-		return JASPImporterOld::NotCompatible;
+        return Compatibility::NotCompatible;
 
 	if (DataSetPackage::pkg()->archiveVersion().minor()		> maxSupportedJaspArchiveVersion.minor() )
-		return JASPImporterOld::Limited;
+        return Compatibility::Limited;
 
-	return JASPImporterOld::Compatible;
+    return Compatibility::Compatible;
 }
 
 

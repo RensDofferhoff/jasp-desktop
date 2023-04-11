@@ -21,7 +21,8 @@
 
 #include <sstream>
 #include <filesystem>
-
+#include "tempfiles.h"
+#include <fcntl.h>
 #include <archive_entry.h>
 
 using namespace std;
@@ -40,12 +41,6 @@ ArchiveReader::~ArchiveReader()
 	close();
 }
 
-#ifdef _WIN32
-#define ARCHIVE_OPEN_FILENAME_FUNC archive_read_open_filename_w
-#else
-#define ARCHIVE_OPEN_FILENAME_FUNC archive_read_open_filename
-#endif
-
 void ArchiveReader::openEntry(const string &archivePath, const string &entryPath)
 {
 	std::filesystem::path pathArchive = archivePath;
@@ -58,17 +53,17 @@ void ArchiveReader::openEntry(const string &archivePath, const string &entryPath
 		archive_read_support_filter_all(_archive);
 		archive_read_support_format_all(_archive);
 
-		int r = ARCHIVE_OPEN_FILENAME_FUNC(_archive, pathArchive.native().c_str(), 10240);
+        int r = archive_read_open_filename(_archive, pathArchive.native().c_str(), 10240);
 
 		if (r == ARCHIVE_OK)
 		{
 					_isOpen = true;
 			bool	success = false;
 
-			struct archive_entry *entry;
+            archive_entry * entry;
 			while (archive_read_next_header(_archive, &entry) == ARCHIVE_OK)
 			{
-				if (string(archive_entry_pathname(entry)) == entryPath)//pathEntry.native())
+                if (string(archive_entry_pathname(entry)) == entryPath)
 				{
 					
 					_size	= archive_entry_size(entry);
@@ -86,6 +81,20 @@ void ArchiveReader::openEntry(const string &archivePath, const string &entryPath
 
 }
 
+void ArchiveReader::writeEntryToTempFiles()
+{
+    if(!_isOpen)
+        throw runtime_error("No archive loaded for writeEntryToTempFiles!");
+
+    if(!_exists)
+        throw runtime_error("No entry '"+_entryPath+"' loaded for writeEntryToTempFiles!");
+
+    int tempFileFD = open(TempFiles::createSpecific("", _entryPath).c_str(), O_WRONLY);
+
+    archive_read_data_into_fd(_archive, tempFileFD);
+
+    ::close(tempFileFD);
+}
 
 string ArchiveReader::fileName() const
 {
@@ -162,7 +171,6 @@ std::string ArchiveReader::readAllData(int blockSize, int &errorCode)
 }
 
 
-
 void ArchiveReader::close()
 {
 	if (_isOpen)
@@ -198,7 +206,7 @@ vector<string> ArchiveReader::getEntryPaths(const string &archivePath, const str
 		archive_read_support_filter_all(a);
 		archive_read_support_format_all(a);
 
-		int r = ARCHIVE_OPEN_FILENAME_FUNC(a, pathArchive.native().c_str(), 10240);
+        int r = archive_read_open_filename(a, pathArchive.native().c_str(), 10240);
 
 		if (r == ARCHIVE_OK)
 		{

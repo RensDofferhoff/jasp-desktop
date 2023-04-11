@@ -44,10 +44,18 @@ void JASPImporter::loadDataSet(const std::string &path, boost::function<void(int
 
 	readManifest(path);
 
-	Compatibility compatibility = isCompatible();
+    switch(isCompatible())
+    {
+    case Compatibility::NotCompatible:
+        throw std::runtime_error("The file version is too new.\nPlease update to the latest version of JASP to view this file.");
 
-	if (compatibility == JASPImporter::NotCompatible)	throw std::runtime_error("The file version is too new.\nPlease update to the latest version of JASP to view this file.");
-	else if (compatibility == JASPImporter::Limited)	packageData->setWarningMessage("This file was created by a newer version of JASP and may not have complete functionality.");
+    case Compatibility::Limited:
+            packageData->setWarningMessage("This file was created by a newer version of JASP and may not have complete functionality.");
+        break;
+
+    default:
+        break;
+    }
 
 	JASPTIMER_STOP(JASPImporter::loadDataSet INIT);
 
@@ -57,14 +65,27 @@ void JASPImporter::loadDataSet(const std::string &path, boost::function<void(int
 	packageData->endLoadingData();
 }
 
-void JASPImporter::loadDataArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
+JASPImporter::Compatibility JASPImporter::isCompatible(const std::string &path)
 {
-	JASPTIMER_SCOPE(JASPImporter::loadDataArchive_1_00);
+    try
+    {
+        readManifest(path);
+        return isCompatible();
+    }
+    catch(...)
+    {
+        return Compatibility::NotCompatible;
+    }
+}
 
-	DataSetPackage * packageData = DataSetPackage::pkg();
-	bool success = false;
+void JASPImporter::loadDataArchive(const std::string &path, boost::function<void(int)> progressCallback)
+{
+    JASPTIMER_SCOPE(JASPImporter::loadDataArchive_1_00);
 
-	hier moet je database uitpakken naar tempfiles
+    //Store sqlite into tempfiles:
+    ArchiveReader(path, DatabaseInterface::singleton()->dbFile(true)).writeEntryToTempFiles();
+
+    DataSetPackage::pkg()->loadDataSet();
 
 	if(resultXmlCompare::compareResults::theOne()->testMode())
 	{
@@ -83,15 +104,10 @@ void JASPImporter::loadDataArchive_1_00(const std::string &path, boost::function
 
 void JASPImporter::loadJASPArchive(const std::string &path, boost::function<void(int)> progressCallback)
 {
-	if (DataSetPackage::pkg()->archiveVersion().major() == 4)
-		loadJASPArchive_1_00(path, progressCallback);
-	else
-		throw std::runtime_error("The file version is not supported (too new).\nPlease update to the latest version of JASP to view this file.");
-}
+    if (DataSetPackage::pkg()->archiveVersion().major() != 4)
+        throw std::runtime_error("The file version is not supported (too new).\nPlease update to the latest version of JASP to view this file.");
 
-void JASPImporter::loadJASPArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
-{
-	JASPTIMER_SCOPE(JASPImporter::loadJASPArchive_1_00 read analyses.json);
+    JASPTIMER_SCOPE(JASPImporter::loadJASPArchive_1_00 read analyses.json);
 	Json::Value analysesData;
 
 	progressCallback(66); // "Loading Analyses",
@@ -103,13 +119,10 @@ void JASPImporter::loadJASPArchive_1_00(const std::string &path, boost::function
 		double resourceCounter = 0;
 		for (std::string resource : resources)
 		{
-			ArchiveReader resourceEntry = ArchiveReader(path, resource);
-			std::string filename	= resourceEntry.fileName();
-			std::string dir			= resource.substr(0, resource.length() - filename.length() - 1);
-
-			std::string destination = TempFiles::createSpecific(dir, resourceEntry.fileName());
-
-			deze code moet naar losse functie a la JASPExporter
+            ArchiveReader   resourceEntry = ArchiveReader(path, resource);
+            std::string     filename 	  = resourceEntry.fileName(),
+                            dir			  = resource.substr(0, resource.length() - filename.length() - 1),
+                            destination   = TempFiles::createSpecific(dir, resourceEntry.fileName());
 
 			JASPTIMER_RESUME(JASPImporter::loadJASPArchive_1_00 Write file stream);
 			std::ofstream file(destination.c_str(),  std::ios::out | std::ios::binary);
@@ -250,12 +263,12 @@ bool JASPImporter::parseJsonEntry(Json::Value &root, const std::string &path,  c
 JASPImporter::Compatibility JASPImporter::isCompatible()
 {
 	if (DataSetPackage::pkg()->archiveVersion().major()		> JASPExporter::jaspArchiveVersion.major() )
-		return JASPImporter::NotCompatible;
+        return Compatibility::NotCompatible;
 
 	if (DataSetPackage::pkg()->archiveVersion().minor()		> JASPExporter::jaspArchiveVersion.minor() )
-		return JASPImporter::Limited;
+        return Compatibility::Limited;
 
-	return JASPImporter::Compatible;
+    return Compatibility::Compatible;
 }
 
 
