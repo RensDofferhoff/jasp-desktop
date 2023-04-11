@@ -229,9 +229,9 @@ void DataSet::dbLoad(int index)
 
 	db().dataSetLoad(_dataSetID, _dataFilePath, emptyVals, _databaseJson, _revision);
 
-	if(!_filter)
-		_filter = new Filter(this);
-
+    if(!_filter)
+        _filter = new Filter(this);
+    _filter->dbLoad();
 
 	int colCount = db().dataSetColCount(_dataSetID);
 
