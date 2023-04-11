@@ -26,8 +26,8 @@ void Column::dbLoad(int id, bool getValues)
 
 	db().transactionReadBegin();
 	
-	db().columnGetBasicInfo(	_id, _name, _type, _revision);
-	db().columnGetComputedInfo(	_id, _invalidated, _codeType, _rCode, _error, _constructorJson);
+                    db().columnGetBasicInfo(	_id, _name, _type, _revision);
+    _isComputed =   db().columnGetComputedInfo(	_id, _invalidated, _codeType, _rCode, _error, _constructorJson);
 
 	db().labelsLoad(this);
 	

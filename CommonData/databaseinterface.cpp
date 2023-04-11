@@ -966,7 +966,7 @@ std::string DatabaseInterface::_wrap_sqlite3_column_text(sqlite3_stmt * stmt, in
 bool DatabaseInterface::columnGetComputedInfo(int columnId, bool &invalidated, computedColumnType &codeType, std::string &rCode, std::string &error, Json::Value &constructorJson)
 {
 	JASPTIMER_SCOPE(DatabaseInterface::columnGetComputedInfo);
-	bool isComputed = false;
+    bool isComputed = false;
 
 	std::function<void(sqlite3_stmt *stmt)>  prepare = [&](sqlite3_stmt *stmt)
 	{

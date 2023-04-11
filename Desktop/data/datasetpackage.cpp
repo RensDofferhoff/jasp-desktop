@@ -846,7 +846,6 @@ bool DataSetPackage::isColumnNameFree(const std::string & name) const
 
 bool DataSetPackage::isColumnComputed(size_t colIndex) const
 {
-	
 	const Column * normalCol = _dataSet->columns().at(colIndex);
 	
 	return normalCol->isComputed();
