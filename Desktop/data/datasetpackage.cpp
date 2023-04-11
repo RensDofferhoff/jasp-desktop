@@ -1115,12 +1115,12 @@ void DataSetPackage::createDataSet()
 
 void DataSetPackage::loadDataSet()
 {
-    if(_dataSet)
-        delete _dataSet;
+	if(_dataSet)
+		delete _dataSet;
 
-    _dataSet = new DataSet(1); //Right now there can only be a dataSet with ID==1 so lets keep it simple
-    _dataSubModel->selectNode(_dataSet->dataNode());
-    _filterSubModel->selectNode(_dataSet->filtersNode());
+	_dataSet = new DataSet(1); //Right now there can only be a dataSet with ID==1 so lets keep it simple
+	_dataSubModel->selectNode(_dataSet->dataNode());
+	_filterSubModel->selectNode(_dataSet->filtersNode());
 }
 
 void DataSetPackage::deleteDataSet()
@@ -1410,10 +1410,10 @@ Json::Value DataSetPackage::columnToJsonForJASPFile(size_t columnIndex, Json::Va
 
 void DataSetPackage::columnLabelsFromJsonForJASPFile(Json::Value xData, Json::Value columnDesc, size_t columnIndex, std::map<std::string, std::map<int, int> > & mapNominalTextValues)
 {
-	std::string name					= columnDesc["name"].asString();
-	Json::Value &orgStringValuesDesc	= columnDesc["orgStringValues"];
-	Json::Value &labelsDesc				= columnDesc["labels"];
-	std::map<int, int>& mapValues		= mapNominalTextValues[name];	// This is needed for old JASP file where factor keys where not filled in the right way
+	std::string     name				= columnDesc["name"].asString();
+	Json::Value &   orgStringValuesDesc	= columnDesc["orgStringValues"],
+				&   labelsDesc			= columnDesc["labels"];
+	intintmap   &   mapValues           = mapNominalTextValues[name];	// This is needed for *really old* JASP files where factor keys where not filled in the right way
 
 	if (labelsDesc.isNull() &&  ! xData.isNull())
 	{
@@ -1433,7 +1433,9 @@ void DataSetPackage::columnLabelsFromJsonForJASPFile(Json::Value xData, Json::Va
 	column->setName(name);
 	column->setType(columnType);
 
-	int index = 0;
+	int nomTextIndex = 0;
+
+	Log::log() << "For column '" << name << "' we get labelsDesc: '" << labelsDesc.toStyledString() << "'" << std::endl;
 
 	for (Json::Value & keyValueFilterTrip : labelsDesc)
 	{
@@ -1443,15 +1445,15 @@ void DataSetPackage::columnLabelsFromJsonForJASPFile(Json::Value xData, Json::Va
 		bool filterAllow	= keyValueFilterTrip.get(2,			true).asBool();
 		int labelValue		= key;
 
+		Log::log() << "For keyValueFilterTrip '" << keyValueFilterTrip.toStyledString() << "' we managed to extract key " << key << ", label '" << label << "' and filterAllow " << (filterAllow ? "yes" : "no") << std::endl;
+
 		if (columnType == columnType::nominalText)
 		{
-			labelValue		= index;
+			labelValue		= nomTextIndex++;
 			mapValues[key]	= labelValue;
 		}
 
 		_dataSet->columns()[columnIndex]->labelsAdd(labelValue, label, filterAllow, "", columnType == columnType::nominalText ? Json::Value(label) : Json::Value(key)); //temporarily set something as original value, later it might be a real origValue
-
-		index++;
 	}
 
 	if (!orgStringValuesDesc.isNull())
@@ -1540,6 +1542,7 @@ void DataSetPackage::setColumnDataInts(size_t columnIndex, const intvec & ints)
 	}
 
 	col->setValues(ints);
+	col->incRevision();
 }
 
 
@@ -1549,6 +1552,7 @@ void DataSetPackage::setColumnDataDbls(size_t columnIndex, const doublevec & dbl
 	Column * col = _dataSet->column(columnIndex);
 
 	col->setValues(dbls);
+	col->incRevision();
 }
 
 void DataSetPackage::emptyValuesChangedHandler()

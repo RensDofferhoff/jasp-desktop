@@ -131,8 +131,8 @@ public:
 			void					rememberOriginalColumnType();
 			
 			DataSet				*	data() const { return _data; }
-			
-			void					loadComputedColumnJsonBackwardsCompat(const Json::Value & fromJaspFile);
+
+			void					loadComputedColumnJsonBackwardsCompatibly(const Json::Value & fromJaspFile);
 			void					invalidate()																			{ setInvalidated(true);		}
 			void					validate()																				{ setInvalidated(false);	}
 			void					invalidateDependents();

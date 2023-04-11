@@ -572,6 +572,7 @@ void DatabaseInterface::columnSetValues(int columnId, const intvec &ints)
 	
 	const std::string updateStatement = "UPDATE Dataset_" + std::to_string(dataSetId)	+ " SET Column_"  + std::to_string(columnId) + "_INT=? WHERE rowNumber=?";
 
+	size_t rowOutside;
 	bindParametersType bindParamStore;
 
 	_runStatementsRepeatedly(
@@ -581,10 +582,12 @@ void DatabaseInterface::columnSetValues(int columnId, const intvec &ints)
 			if(row == ints.size())
 				return false;
 
+			rowOutside = row;
+
 			bindParamStore = [&](sqlite3_stmt * stmt)
 			{
-				sqlite3_bind_int(stmt,	1, ints[row]);
-				sqlite3_bind_int(stmt,	2, row+1);
+				sqlite3_bind_int(stmt,	1, ints[rowOutside]);
+				sqlite3_bind_int(stmt,	2, rowOutside+1);
 			};
 
 			(*bindParameters) = &bindParamStore;
@@ -966,7 +969,7 @@ std::string DatabaseInterface::_wrap_sqlite3_column_text(sqlite3_stmt * stmt, in
 bool DatabaseInterface::columnGetComputedInfo(int columnId, bool &invalidated, computedColumnType &codeType, std::string &rCode, std::string &error, Json::Value &constructorJson)
 {
 	JASPTIMER_SCOPE(DatabaseInterface::columnGetComputedInfo);
-    bool isComputed = false;
+	bool isComputed = false;
 
 	std::function<void(sqlite3_stmt *stmt)>  prepare = [&](sqlite3_stmt *stmt)
 	{
@@ -1376,7 +1379,7 @@ void DatabaseInterface::_runStatementsRepeatedly(const std::string & statements,
 {
 	JASPTIMER_SCOPE(DatabaseInterface::_runStatementsRepeatedly);
 #ifdef SIR_LOG_A_LOT
-	Log::log() << "Running statements: '" << statements << "'" << std::endl;
+	Log::log() << "Running statements repeatedly: '" << statements << "'" << std::endl;
 #endif
 
 	sqlite3_stmt * dbStmt = nullptr;

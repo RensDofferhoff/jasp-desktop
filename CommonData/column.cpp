@@ -26,8 +26,8 @@ void Column::dbLoad(int id, bool getValues)
 
 	db().transactionReadBegin();
 	
-                    db().columnGetBasicInfo(	_id, _name, _type, _revision);
-    _isComputed =   db().columnGetComputedInfo(	_id, _invalidated, _codeType, _rCode, _error, _constructorJson);
+					db().columnGetBasicInfo(	_id, _name, _type, _revision);
+	_isComputed =   db().columnGetComputedInfo(	_id, _invalidated, _codeType, _rCode, _error, _constructorJson);
 
 	db().labelsLoad(this);
 	
@@ -57,7 +57,7 @@ void Column::dbDelete()
 	_id = -1;
 }
 
-void Column::loadComputedColumnJsonBackwardsCompat(const Json::Value & json)
+void Column::loadComputedColumnJsonBackwardsCompatibly(const Json::Value & json)
 {
 	//Columnname is used to find this:
 	//_column = DataSetPackage::pkg()->dataSet()->column(json["name"].asString());

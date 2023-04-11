@@ -229,9 +229,9 @@ void DataSet::dbLoad(int index)
 
 	db().dataSetLoad(_dataSetID, _dataFilePath, emptyVals, _databaseJson, _revision);
 
-    if(!_filter)
-        _filter = new Filter(this);
-    _filter->dbLoad();
+	if(!_filter)
+		_filter = new Filter(this);
+	_filter->dbLoad();
 
 	int colCount = db().dataSetColCount(_dataSetID);
 
@@ -357,7 +357,7 @@ void DataSet::loadOldComputedColumnsJson(const Json::Value &json)
 		if(!col)
 			continue;
 
-		col->loadComputedColumnJsonBackwardsCompat(colJson);
+		col->loadComputedColumnJsonBackwardsCompatibly(colJson);
 	}
 
 	for(Column * col : computedColumns())
