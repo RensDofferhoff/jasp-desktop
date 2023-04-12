@@ -112,9 +112,9 @@ public:
 	std::string fileName() const;
 
     /**
-     * @brief Saves the loaded entry as a file in tempfiles folder
+     * @brief Saves the loaded entry as a file in tempfiles folder, progressCallback gets values from 0...1
      */
-    void writeEntryToTempFiles();
+    void writeEntryToTempFiles(std::function<void(float)> progressCallback = std::function<void(float)>());
 
 	/**
 	 * @brief extension The file extension of the last archive entry.

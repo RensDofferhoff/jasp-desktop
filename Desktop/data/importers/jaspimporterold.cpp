@@ -36,7 +36,7 @@
 
 const Version JASPImporterOld::maxSupportedJaspArchiveVersion = Version("3.1.0");
 
-void JASPImporterOld::loadDataSet(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporterOld::loadDataSet(const std::string &path, std::function<void(int)> progressCallback)
 {	
 	JASPTIMER_RESUME(JASPImporter::loadDataSet INIT);
 
@@ -73,12 +73,12 @@ JASPImporterOld::Compatibility JASPImporterOld::isCompatible(const std::string &
 }
 
 
-void JASPImporterOld::loadDataArchive(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporterOld::loadDataArchive(const std::string &path, std::function<void(int)> progressCallback)
 {
 	loadDataArchive_1_00(path, progressCallback);
 }
 
-void JASPImporterOld::loadDataArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporterOld::loadDataArchive_1_00(const std::string &path, std::function<void(int)> progressCallback)
 {
 	JASPTIMER_SCOPE(JASPImporter::loadDataArchive_1_00);
 
@@ -231,7 +231,7 @@ void JASPImporterOld::loadDataArchive_1_00(const std::string &path, boost::funct
 	packageData->setFilterShouldRunInit(filterShouldBeRun);
 }
 
-void JASPImporterOld::loadJASPArchive(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporterOld::loadJASPArchive(const std::string &path, std::function<void(int)> progressCallback)
 {
 	if (DataSetPackage::pkg()->archiveVersion().major() >= 1 && DataSetPackage::pkg()->archiveVersion().major() <= 3) //2.x version have a different analyses.json structure but can be loaded using the 1_00 loader. 3.x adds computed columns
 		loadJASPArchive_1_00(path, progressCallback);
@@ -239,7 +239,7 @@ void JASPImporterOld::loadJASPArchive(const std::string &path, boost::function<v
 		throw std::runtime_error("The file version is not supported.\nPlease update to the latest version of JASP to view this file.");
 }
 
-void JASPImporterOld::loadJASPArchive_1_00(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporterOld::loadJASPArchive_1_00(const std::string &path, std::function<void(int)> progressCallback)
 {
 	JASPTIMER_SCOPE(JASPImporter::loadJASPArchive_1_00 read analyses.json);
 	Json::Value analysesData;

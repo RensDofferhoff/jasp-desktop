@@ -503,7 +503,7 @@ void DatabaseInterface::dataSetBatchedValuesUpdate(DataSet * data)
 	transactionWriteEnd();
 }
 
-void DatabaseInterface::dataSetBatchedValuesLoad(DataSet *data)
+void DatabaseInterface::dataSetBatchedValuesLoad(DataSet *data, std::function<void(float)> progressCallback)
 {
 	JASPTIMER_SCOPE(DatabaseInterface::dataSetBatchedValuesLoad);
 
@@ -533,8 +533,13 @@ void DatabaseInterface::dataSetBatchedValuesLoad(DataSet *data)
 
 	data->filter()->setRowCount(rowCount);
 
+    size_t rowPercent = std::max(1, int(rowCount) / 100);
+
 	std::function<void(size_t, sqlite3_stmt *stmt)> processRow = [&](size_t row, sqlite3_stmt *stmt)
 	{
+        if(row % rowPercent == 0)
+            progressCallback(float(row) / float(rowCount));
+
 		int colCount = sqlite3_column_count(stmt);
 
 		assert(colCount == data->columns().size() + 1);
@@ -600,10 +605,6 @@ void DatabaseInterface::columnSetValues(int columnId, const intvec &ints)
 
 void DatabaseInterface::columnSetValues(int columnId, const doublevec &dbls)
 {
-	static intintmap howOften;
-	if(howOften[columnId]++ > 1)
-		Log::log() << "columnSetValues(" << columnId << ", dbls) called " << howOften[columnId] << " times\n";
-
 	JASPTIMER_SCOPE(DatabaseInterface::columnSetValues);
 	transactionWriteBegin();
 	

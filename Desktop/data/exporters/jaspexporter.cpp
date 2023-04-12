@@ -40,7 +40,7 @@ JASPExporter::JASPExporter()
 	_allowedFileTypes.push_back(Utils::FileType::jasp);
 }
 
-void JASPExporter::saveDataSet(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPExporter::saveDataSet(const std::string &path, std::function<void(int)> progressCallback)
 {
 	struct archive *a;
 
@@ -53,17 +53,15 @@ void JASPExporter::saveDataSet(const std::string &path, boost::function<void(int
 	if (archive_write_open_filename(a, path.c_str()) != ARCHIVE_OK)
 		throw std::runtime_error("File could not be opened.");
 
-    saveManifest(a);
-	saveDatabase(a);
-	saveAnalyses(a);
-	saveResults(a);
+    saveManifest(a);    progressCallback(10);
+    saveAnalyses(a);    progressCallback(30);
+    saveResults(a);     progressCallback(70);
+    saveDatabase(a);    progressCallback(100);
 
 	if (archive_write_close(a) != ARCHIVE_OK)
 		throw std::runtime_error("File could not be closed.");
 
 	archive_write_free(a);
-
-	progressCallback(100);
 }
 
 void JASPExporter::saveManifest(archive * a)

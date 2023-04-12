@@ -22,8 +22,10 @@
 #include <sstream>
 #include <filesystem>
 #include "tempfiles.h"
+#include <fstream>
 #include <fcntl.h>
 #include <archive_entry.h>
+#include "log.h"
 
 using namespace std;
 
@@ -44,6 +46,8 @@ ArchiveReader::~ArchiveReader()
 void ArchiveReader::openEntry(const string &archivePath, const string &entryPath)
 {
 	std::filesystem::path pathArchive = archivePath;
+
+    Log::log() << "ArchiveReader::openEntry('" << archivePath << "', '" << entryPath << "');" << std::endl;
 	
 	_archiveExists = std::filesystem::exists(pathArchive);
 
@@ -81,7 +85,7 @@ void ArchiveReader::openEntry(const string &archivePath, const string &entryPath
 
 }
 
-void ArchiveReader::writeEntryToTempFiles()
+void ArchiveReader::writeEntryToTempFiles(std::function<void(float)> progressCallback)
 {
     if(!_isOpen)
         throw runtime_error("No archive loaded for writeEntryToTempFiles!");
@@ -89,11 +93,39 @@ void ArchiveReader::writeEntryToTempFiles()
     if(!_exists)
         throw runtime_error("No entry '"+_entryPath+"' loaded for writeEntryToTempFiles!");
 
-    int tempFileFD = open(TempFiles::createSpecific("", _entryPath).c_str(), O_WRONLY);
+    float totalBytes = bytesAvailable();
 
-    archive_read_data_into_fd(_archive, tempFileFD);
+    totalBytes = 1.0 / totalBytes;
 
-    ::close(tempFileFD);
+    if (bytesAvailable() == 0)
+        throw runtime_error("Entry '"+_entryPath+"' has zero bytes data...");
+
+
+    std::ofstream file(TempFiles::createSpecific("", _entryPath).c_str(),  std::ios::out | std::ios::binary);
+
+    static char streamBuff[8192 * 32];
+    file.rdbuf()->pubsetbuf(streamBuff, sizeof(streamBuff)); //Set the buffer manually to make it much faster our issue https://github.com/jasp-stats/INTERNAL-jasp/issues/436 and solution from:  https://stackoverflow.com/a/15177770
+
+    static char copyBuff[8192 * 4];
+    int			bytes		= 0,
+                errorCode	= 0;
+    float       tallyBytes  = 0;
+    do
+    {
+        bytes = readData(copyBuff, sizeof(copyBuff), errorCode);
+
+        tallyBytes += bytes;
+
+        if(progressCallback)
+            progressCallback(tallyBytes * totalBytes);
+
+        if(bytes > 0 && errorCode == 0)		file.write(copyBuff, bytes);
+        else                                break;
+    }
+    while (true);
+
+    file.flush();
+    file.close();
 }
 
 string ArchiveReader::fileName() const

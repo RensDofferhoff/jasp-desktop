@@ -94,7 +94,8 @@ public:
 	void		columnGetValuesInts(		int columnId,	intvec		& ints);
 	void		columnGetValuesDbls(		int columnId,	doublevec	& dbls);
 	std::string columnBaseName(				int columnId) const;
-	void		dataSetBatchedValuesLoad(	DataSet * data);
+    void		dataSetBatchedValuesLoad(	DataSet * data, std::function<void(float)> progressCallback = [](float){});
+
 
 
 	//Labels

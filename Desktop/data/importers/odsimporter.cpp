@@ -29,7 +29,7 @@ namespace ods
 {
 
 // Implmemtation of Inporter base class.
-ImportDataSet* ODSImporter::loadFile(const std::string &locator, boost::function<void(int)> progressCallback)
+ImportDataSet* ODSImporter::loadFile(const std::string &locator, std::function<void(int)> progressCallback)
 {
 	JASPTIMER_RESUME(ODSImporter::loadFile);
 

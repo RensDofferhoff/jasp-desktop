@@ -1113,12 +1113,13 @@ void DataSetPackage::createDataSet()
 	_dataSet->setModifiedCallback([&](){ setModified(true); }); //DataSet and co dont use Qt so instead we just use a callback
 }
 
-void DataSetPackage::loadDataSet()
+void DataSetPackage::loadDataSet(std::function<void(float)> progressCallback)
 {
 	if(_dataSet)
 		delete _dataSet;
 
-	_dataSet = new DataSet(1); //Right now there can only be a dataSet with ID==1 so lets keep it simple
+    _dataSet = new DataSet(0);
+    _dataSet->dbLoad(1, progressCallback); //Right now there can only be a dataSet with ID==1 so lets keep it simple
 	_dataSubModel->selectNode(_dataSet->dataNode());
 	_filterSubModel->selectNode(_dataSet->filtersNode());
 }

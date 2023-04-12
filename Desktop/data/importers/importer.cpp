@@ -6,7 +6,7 @@
 
 Importer::~Importer() {}
 
-void Importer::loadDataSet(const std::string &locator, boost::function<void(int)> progressCallback)
+void Importer::loadDataSet(const std::string &locator, std::function<void(int)> progressCallback)
 {
 	DataSetPackage::pkg()->beginLoadingData();
 
@@ -30,16 +30,14 @@ void Importer::loadDataSet(const std::string &locator, boost::function<void(int)
 		int colNo = 0;
 		for (ImportColumn *importColumn : *importDataSet)
 		{
-			progressCallback(50 + 50 * colNo / columnCount);
+            progressCallback(50 + 50 * colNo / columnCount);
 			initColumn(colNo, importColumn);
 			colNo++;
 		}
 
-		DataSetPackage::pkg()->dataSet()->endBatchedToDB();
+        DataSetPackage::pkg()->dataSet()->endBatchedToDB();
 	}
 	JASPTIMER_STOP(Importer::loadDataSet createDataSetAndLoad);
-
-
 
 	delete importDataSet;
 	DataSetPackage::pkg()->endLoadingData();
@@ -51,7 +49,7 @@ void Importer::initColumn(QVariant colId, ImportColumn *importColumn)
 	initColumnWithStrings(colId, importColumn->name(),  importColumn->allValuesAsStrings());
 }
 
-void Importer::syncDataSet(const std::string &locator, boost::function<void(int)> progress)
+void Importer::syncDataSet(const std::string &locator, std::function<void(int)> progress)
 {
 	ImportDataSet *	importDataSet	= loadFile(locator, progress);
 	bool			rowCountChanged	= importDataSet->rowCount() != DataSetPackage::pkg()->dataRowCount();

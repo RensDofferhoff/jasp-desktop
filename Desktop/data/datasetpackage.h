@@ -87,7 +87,7 @@ public:
 		void				increaseDataSetColCount(size_t rowCount)			{ setDataSetSize(dataColumnCount() + 1,	rowCount); }
 
 		void				createDataSet();	///< Creates *OR* recreates a dataset in database
-        void                loadDataSet();      ///< Assumes internal.sqlite has just been loaded from a JASPFile and will init DataSet etc with it.
+        void                loadDataSet(std::function<void(float)> progressCallback = [](float){});      ///< Assumes internal.sqlite has just been loaded from a JASPFile and will init DataSet etc with it.
 		void				deleteDataSet();	///< Deletes dataset from memory but not from database
 		bool				hasDataSet() { return _dataSet; }
 

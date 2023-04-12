@@ -28,7 +28,7 @@ CSVImporter::CSVImporter() : Importer()
 	DataSetPackage::pkg()->setIsArchive(false);
 }
 
-ImportDataSet* CSVImporter::loadFile(const string &locator, boost::function<void(int)> progressCallback)
+ImportDataSet* CSVImporter::loadFile(const string &locator, std::function<void(int)> progressCallback)
 {
 	JASPTIMER_RESUME(CSVImporter::loadFile);
 

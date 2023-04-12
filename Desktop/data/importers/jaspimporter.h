@@ -35,12 +35,12 @@ class JASPImporter
 public:
 	enum class Compatibility { NotCompatible, Limited, Compatible };
 
-	static void loadDataSet(const std::string &path, boost::function<void(int)> progressCallback);
+	static void loadDataSet(const std::string &path, std::function<void(int)> progressCallback);
 	static Compatibility isCompatible(const std::string &path);
 
 private:
-	static void loadDataArchive(		const std::string &path, boost::function<void(int)> progressCallback);
-	static void loadJASPArchive(		const std::string &path, boost::function<void(int)> progressCallback);
+	static void loadDataArchive(		const std::string &path, std::function<void(int)> progressCallback);
+	static void loadJASPArchive(		const std::string &path, std::function<void(int)> progressCallback);
 
 	static bool parseJsonEntry(Json::Value &root, const std::string &path, const std::string &entry, bool required);
 	static void readManifest(const std::string &path);

@@ -34,7 +34,7 @@
 #include "resultstesting/compareresults.h"
 #include "log.h"
 
-void JASPImporter::loadDataSet(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporter::loadDataSet(const std::string &path, std::function<void(int)> progressCallback)
 {	
 	JASPTIMER_RESUME(JASPImporter::loadDataSet INIT);
 
@@ -78,14 +78,15 @@ JASPImporter::Compatibility JASPImporter::isCompatible(const std::string &path)
 	}
 }
 
-void JASPImporter::loadDataArchive(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporter::loadDataArchive(const std::string &path, std::function<void(int)> progressCallback)
 {
 	JASPTIMER_SCOPE(JASPImporter::loadDataArchive_1_00);
 
-	//Store sqlite into tempfiles:
-	ArchiveReader(path, DatabaseInterface::singleton()->dbFile(true)).writeEntryToTempFiles();
+    //Store sqlite into tempfiles:
+    ArchiveReader(path, DatabaseInterface::singleton()->dbFile(true)).writeEntryToTempFiles([&](float p){ progressCallback(33.333 * p); });
 
-	DataSetPackage::pkg()->loadDataSet();
+    DataSetPackage::pkg()->loadDataSet([&](float p){ progressCallback(33.333 + 33.333 * p); });
+
 
 	if(resultXmlCompare::compareResults::theOne()->testMode())
 	{
@@ -101,18 +102,16 @@ void JASPImporter::loadDataArchive(const std::string &path, boost::function<void
 		resultXmlCompare::compareResults::theOne()->setOriginalResult(QString::fromStdString(html));
 	}
 
-	progressCallback(33);
+
 }
 
-void JASPImporter::loadJASPArchive(const std::string &path, boost::function<void(int)> progressCallback)
+void JASPImporter::loadJASPArchive(const std::string &path, std::function<void(int)> progressCallback)
 {
 	if (DataSetPackage::pkg()->archiveVersion().major() != 4)
 		throw std::runtime_error("The file version is not supported (too new).\nPlease update to the latest version of JASP to view this file.");
 
 	JASPTIMER_SCOPE(JASPImporter::loadJASPArchive_1_00 read analyses.json);
 	Json::Value analysesData;
-
-	progressCallback(66); // "Loading Analyses",
 
 	if (parseJsonEntry(analysesData, path, "analyses.json", false))
 	{
@@ -126,6 +125,8 @@ void JASPImporter::loadJASPArchive(const std::string &path, boost::function<void
 							dir			  = resource.substr(0, resource.length() - filename.length() - 1),
 							destination   = TempFiles::createSpecific(dir, resourceEntry.fileName());
 
+            resourceEntry.writeEntryToTempFiles(); //this one doesnt really need to give feedback as the files are pretty tiny
+
 			JASPTIMER_RESUME(JASPImporter::loadJASPArchive_1_00 Write file stream);
 			std::ofstream file(destination.c_str(),  std::ios::out | std::ios::binary);
 
@@ -138,17 +139,10 @@ void JASPImporter::loadJASPArchive(const std::string &path, boost::function<void
 
 			do
 			{
-				JASPTIMER_RESUME(JASPImporter::loadJASPArchive_1_00 Write file stream - read data);
 				bytes = resourceEntry.readData(copyBuff, sizeof(copyBuff), errorCode);
-				JASPTIMER_STOP(JASPImporter::loadJASPArchive_1_00 Write file stream - read data);
 
-				if(bytes > 0 && errorCode == 0)
-				{
-					JASPTIMER_RESUME(JASPImporter::loadJASPArchive_1_00 Write file stream - write to stream);
-					file.write(copyBuff, bytes);
-					JASPTIMER_STOP(JASPImporter::loadJASPArchive_1_00 Write file stream - write to stream);
-				}
-				else break;
+                if(bytes > 0 && errorCode == 0)		file.write(copyBuff, bytes);
+                else                                break;
 			}
 			while (true);
 
@@ -161,7 +155,7 @@ void JASPImporter::loadJASPArchive(const std::string &path, boost::function<void
 
 			JASPTIMER_STOP(JASPImporter::loadJASPArchive_1_00 Create resource files);
 
-			progressCallback( 67 + int((33.0 / double(resources.size())) * ++resourceCounter));// "Loading Analyses",
+            progressCallback( 66.666 + int((33.333 / double(resources.size())) * ++resourceCounter));// "Loading Analyses",
 		}
 	}
 

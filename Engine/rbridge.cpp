@@ -37,19 +37,19 @@ ColumnEncoder				*	extraEncodings		= nullptr;
 
 
 //You cannot replace these NULL's by nullptr because then the compiler will complain about expressions that cannot be used as functions
-boost::function<DataSet *()>				rbridge_dataSetSource		= NULL;
-boost::function<size_t()>					rbridge_getDataSetRowCount	= NULL;
-boost::function<int(const std::string &)>	rbridge_getColumnTypeEngine = NULL;
+std::function<DataSet *()>				rbridge_dataSetSource		= NULL;
+std::function<size_t()>					rbridge_getDataSetRowCount	= NULL;
+std::function<int(const std::string &)>	rbridge_getColumnTypeEngine = NULL;
 
-boost::function<void(const std::string &, std::string &, std::string &)>	rbridge_fileNameSource			= NULL,
+std::function<void(const std::string &, std::string &, std::string &)>	rbridge_fileNameSource			= NULL,
 																			rbridge_specificFileNameSource	= NULL;
-boost::function<void(std::string &, std::string &)>							rbridge_stateFileSource			= NULL,
+std::function<void(std::string &, std::string &)>							rbridge_stateFileSource			= NULL,
 																			rbridge_jaspResultsFileSource	= NULL;
 
-boost::function<bool(const std::string &, const	std::vector<double>&)											> rbridge_setColumnDataAsScaleEngine		= NULL;
-boost::function<bool(const std::string &,		std::vector<int>&,			const std::map<int, std::string>&)	> rbridge_setColumnDataAsOrdinalEngine		= NULL;
-boost::function<bool(const std::string &,		std::vector<int>&,			const std::map<int, std::string>&)	> rbridge_setColumnDataAsNominalEngine		= NULL;
-boost::function<bool(const std::string &, const	std::vector<std::string>&)										> rbridge_setColumnDataAsNominalTextEngine	= NULL;
+std::function<bool(const std::string &, const	std::vector<double>&)											> rbridge_setColumnDataAsScaleEngine		= NULL;
+std::function<bool(const std::string &,		std::vector<int>&,			const std::map<int, std::string>&)	> rbridge_setColumnDataAsOrdinalEngine		= NULL;
+std::function<bool(const std::string &,		std::vector<int>&,			const std::map<int, std::string>&)	> rbridge_setColumnDataAsNominalEngine		= NULL;
+std::function<bool(const std::string &, const	std::vector<std::string>&)										> rbridge_setColumnDataAsNominalTextEngine	= NULL;
 
 char** rbridge_getLabels(const Labels &levels, size_t &nbLevels);
 char** rbridge_getLabels(const std::vector<std::string> &levels, size_t &nbLevels);
@@ -129,17 +129,17 @@ void rbridge_junctionHelper(bool collectNotRestore, const std::string & folder)
 	jaspRCPP_junctionHelper(collectNotRestore, folder.c_str());	
 }
 
-void rbridge_setDataSetSource(			boost::function<DataSet* ()> source)												{	rbridge_dataSetSource			= source; }
-void rbridge_setFileNameSource(			boost::function<void (const std::string &, std::string &, std::string &)> source)	{	rbridge_fileNameSource			= source; }
-void rbridge_setSpecificFileNameSource(	boost::function<void (const std::string &, std::string &, std::string &)> source)	{	rbridge_specificFileNameSource	= source; }
-void rbridge_setStateFileSource(		boost::function<void (std::string &, std::string &)> source)						{	rbridge_stateFileSource			= source; }
-void rbridge_setJaspResultsFileSource(	boost::function<void (std::string &, std::string &)> source)						{	rbridge_jaspResultsFileSource	= source; }
+void rbridge_setDataSetSource(			std::function<DataSet* ()> source)												{	rbridge_dataSetSource			= source; }
+void rbridge_setFileNameSource(			std::function<void (const std::string &, std::string &, std::string &)> source)	{	rbridge_fileNameSource			= source; }
+void rbridge_setSpecificFileNameSource(	std::function<void (const std::string &, std::string &, std::string &)> source)	{	rbridge_specificFileNameSource	= source; }
+void rbridge_setStateFileSource(		std::function<void (std::string &, std::string &)> source)						{	rbridge_stateFileSource			= source; }
+void rbridge_setJaspResultsFileSource(	std::function<void (std::string &, std::string &)> source)						{	rbridge_jaspResultsFileSource	= source; }
 
-void rbridge_setColumnFunctionSources(			boost::function<int (const std::string &)																		> getTypeSource,
-												boost::function<bool(const std::string &, const std::vector<double>		&)										> scaleSource,
-												boost::function<bool(const std::string &,		std::vector<int>		&,	const std::map<int, std::string>&)	> ordinalSource,
-												boost::function<bool(const std::string &,		std::vector<int>		&,	const std::map<int, std::string>&)	> nominalSource,
-												boost::function<bool(const std::string &, const std::vector<std::string>&)										> nominalTextSource)
+void rbridge_setColumnFunctionSources(			std::function<int (const std::string &)																		> getTypeSource,
+												std::function<bool(const std::string &, const std::vector<double>		&)										> scaleSource,
+												std::function<bool(const std::string &,		std::vector<int>		&,	const std::map<int, std::string>&)	> ordinalSource,
+												std::function<bool(const std::string &,		std::vector<int>		&,	const std::map<int, std::string>&)	> nominalSource,
+												std::function<bool(const std::string &, const std::vector<std::string>&)										> nominalTextSource)
 {
 	rbridge_getColumnTypeEngine					= getTypeSource;
 	rbridge_setColumnDataAsScaleEngine			= scaleSource;
@@ -148,7 +148,7 @@ void rbridge_setColumnFunctionSources(			boost::function<int (const std::string 
 	rbridge_setColumnDataAsNominalTextEngine	= nominalTextSource;
 }
 
-void rbridge_setGetDataSetRowCountSource(boost::function<int()> source)	{	rbridge_getDataSetRowCount = source;	}
+void rbridge_setGetDataSetRowCountSource(std::function<int()> source)	{	rbridge_getDataSetRowCount = source;	}
 
 extern "C" const char * STDCALL rbridge_encodeColumnName(const char * in)
 {

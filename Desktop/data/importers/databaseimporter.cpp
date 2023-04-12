@@ -4,7 +4,7 @@
 #include "database/databaseimportcolumn.h"
 #include "utils.h"
 
-ImportDataSet * DatabaseImporter::loadFile(const std::string &locator, boost::function<void(int)> progressCallback)
+ImportDataSet * DatabaseImporter::loadFile(const std::string &locator, std::function<void(int)> progressCallback)
 {
 	// locator is the result of DatabaseConnectionInfo::toJson, so:
 	Json::Value json;

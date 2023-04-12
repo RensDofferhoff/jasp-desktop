@@ -56,7 +56,7 @@ Importer* DataSetLoader::getImporter(const string & locator, const string &ext)
 	return nullptr; //If NULL then JASP will try to load it as a .jasp file (if the extension matches)
 }
 
-void DataSetLoader::loadPackage(const string &locator, const string &extension, boost::function<void(int)> progress)
+void DataSetLoader::loadPackage(const string &locator, const string &extension, std::function<void(int)> progress)
 {
 	JASPTIMER_RESUME(DataSetLoader::loadPackage);
 
@@ -66,11 +66,6 @@ void DataSetLoader::loadPackage(const string &locator, const string &extension, 
 	{
 		importer->loadDataSet(locator, progress);
 		delete importer;
-
-		//for testing purposes:
-		Log::log() <<"LOADING TESTING COPY DataSet!" << std::endl;
-		DataSet temp(DataSetPackage::pkg()->dataSet()->id());
-		Log::log() << "Found " << temp.columnCount() << " columns\n";
 	}
 	else if(extension == ".jasp" || extension == "jasp")
     {
@@ -85,7 +80,7 @@ void DataSetLoader::loadPackage(const string &locator, const string &extension, 
 	JASPTIMER_STOP(DataSetLoader::loadPackage);
 }
 
-void DataSetLoader::syncPackage(const string &locator, const string &extension, boost::function<void(int)> progress)
+void DataSetLoader::syncPackage(const string &locator, const string &extension, std::function<void(int)> progress)
 {
 	Utils::sleep(100);
 
