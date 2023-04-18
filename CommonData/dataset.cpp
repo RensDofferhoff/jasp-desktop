@@ -210,13 +210,13 @@ void DataSet::dbUpdate()
 
 void DataSet::dbLoad(int index, std::function<void(float)> progressCallback)
 {
-	Log::log() << "loadDataSet(index=" << index << "), _dataSetID="<< _dataSetID <<";" << std::endl;
+	//Log::log() << "loadDataSet(index=" << index << "), _dataSetID="<< _dataSetID <<";" << std::endl;
 
 	assert(_dataSetID == -1 || _dataSetID == index || (_dataSetID != -1 && index == -1));
 
 	if(index != -1 && !db().dataSetExists(index))
 	{
-		Log::log() << "No such DataSet!" << std::endl;
+		Log::log() << "No DataSet with id " << index << "!" << std::endl;
 		return;
 	}
 	
@@ -237,7 +237,7 @@ void DataSet::dbLoad(int index, std::function<void(float)> progressCallback)
 
 	int colCount = db().dataSetColCount(_dataSetID);
 	_rowCount		= db().dataSetRowCount(_dataSetID);
-	Log::log() << "colCount: " << colCount << ", " << "rowCount: " << rowCount() << std::endl;
+	//Log::log() << "colCount: " << colCount << ", " << "rowCount: " << rowCount() << std::endl;
 
 	float colProgressMult = 1.0 / colCount;
 			

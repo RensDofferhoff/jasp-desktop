@@ -585,11 +585,14 @@ void MainWindow::setQmlImportPaths()
 
 	_qml->setImportPathList(newImportPaths);
 
-	Log::log() << "QML has the following import paths:\n";
+	if(_preferences->developerMode())
+	{
+		Log::log() << "QML has the following import paths:\n";
 
-	for(const QString & p : _qml->importPathList())
-		Log::log() << "\t" << p << "\n";
-	Log::log() << std::endl;
+		for(const QString & p : _qml->importPathList())
+			Log::log() << "\t" << p << "\n";
+		Log::log() << std::endl;
+	}
 }
 
 QObject * MainWindow::loadQmlData(QString data, QUrl url)

@@ -138,7 +138,7 @@ void TempFiles::deleteOrphans()
 		{
 			std::filesystem::path p = itr->path();
 
-			Log::log() << "looking at file " << p.string() << std::endl;
+			//Log::log() << "looking at file " << p.string() << std::endl;
 
 			if (p.compare(sessionPath) == 0)
 				continue;
@@ -233,14 +233,14 @@ string TempFiles::createSpecific_clipboard(const string &filename)
 
 string TempFiles::createSpecific(const string &dir, const string &filename)
 {
-    std::error_code error;
-    string fullPath			= _sessionDirName + "/" + dir;
-    std::filesystem::path path	= Utils::osPath(fullPath);
+	std::error_code error;
+	string fullPath			= _sessionDirName + "/" + dir;
+	std::filesystem::path path	= Utils::osPath(fullPath);
 
-    if (!std::filesystem::exists(path, error) || error)
-         std::filesystem::create_directories(path, error);
+	if (!std::filesystem::exists(path, error) || error)
+		 std::filesystem::create_directories(path, error);
 
-    return fullPath + "/" + filename;
+	return fullPath + "/" + filename;
 }
 
 void TempFiles::createSpecific(const string &name, int id, string &root, string &relativePath)

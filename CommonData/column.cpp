@@ -158,7 +158,7 @@ bool Column::setConstructorJson(const Json::Value &constructorJson)
 {
 	JASPTIMER_SCOPE(Column::setConstructorJson);
 	
-	Log::log() << "setConstructorJson got " << constructorJson.toStyledString() << " and had: " << _constructorJson.toStyledString() << std::endl;
+	//Log::log() << "setConstructorJson got " << constructorJson.toStyledString() << " and had: " << _constructorJson.toStyledString() << std::endl;
 
 	if(_constructorJson == constructorJson)
 		return false;

@@ -1118,8 +1118,8 @@ void DataSetPackage::loadDataSet(std::function<void(float)> progressCallback)
 	if(_dataSet)
 		delete _dataSet;
 
-    _dataSet = new DataSet(0);
-    _dataSet->dbLoad(1, progressCallback); //Right now there can only be a dataSet with ID==1 so lets keep it simple
+	_dataSet = new DataSet(0);
+	_dataSet->dbLoad(1, progressCallback); //Right now there can only be a dataSet with ID==1 so lets keep it simple
 	_dataSubModel->selectNode(_dataSet->dataNode());
 	_filterSubModel->selectNode(_dataSet->filtersNode());
 }
@@ -1436,7 +1436,7 @@ void DataSetPackage::columnLabelsFromJsonForJASPFile(Json::Value xData, Json::Va
 
 	int nomTextIndex = 0;
 
-	Log::log() << "For column '" << name << "' we get labelsDesc: '" << labelsDesc.toStyledString() << "'" << std::endl;
+	//Log::log() << "For column '" << name << "' we get labelsDesc: '" << labelsDesc.toStyledString() << "'" << std::endl;
 
 	for (Json::Value & keyValueFilterTrip : labelsDesc)
 	{
@@ -1446,7 +1446,7 @@ void DataSetPackage::columnLabelsFromJsonForJASPFile(Json::Value xData, Json::Va
 		bool filterAllow	= keyValueFilterTrip.get(2,			true).asBool();
 		int labelValue		= key;
 
-		Log::log() << "For keyValueFilterTrip '" << keyValueFilterTrip.toStyledString() << "' we managed to extract key " << key << ", label '" << label << "' and filterAllow " << (filterAllow ? "yes" : "no") << std::endl;
+		//Log::log() << "For keyValueFilterTrip '" << keyValueFilterTrip.toStyledString() << "' we managed to extract key " << key << ", label '" << label << "' and filterAllow " << (filterAllow ? "yes" : "no") << std::endl;
 
 		if (columnType == columnType::nominalText)
 		{
