@@ -8,8 +8,8 @@ DataSet::DataSet(int index)
 	_dataNode		= new DataSetBaseNode(dataSetBaseNodeType::data,	this);
 	_filtersNode	= new DataSetBaseNode(dataSetBaseNodeType::filters, this);
 	
-    if(index == -1)         dbCreate();
-    else if(index > 0)		dbLoad(index);
+	if(index == -1)         dbCreate();
+	else if(index > 0)		dbLoad(index);
 }
 
 DataSet::~DataSet()
@@ -228,18 +228,18 @@ void DataSet::dbLoad(int index, std::function<void(float)> progressCallback)
 	std::string emptyVals;
 
 	db().dataSetLoad(_dataSetID, _dataFilePath, emptyVals, _databaseJson, _revision);
-    progressCallback(0.1);
+	progressCallback(0.1);
 
 	if(!_filter)
 		_filter = new Filter(this);
 	_filter->dbLoad();
-    progressCallback(0.2);
+	progressCallback(0.2);
 
 	int colCount = db().dataSetColCount(_dataSetID);
 	_rowCount		= db().dataSetRowCount(_dataSetID);
 	Log::log() << "colCount: " << colCount << ", " << "rowCount: " << rowCount() << std::endl;
 
-    float colProgressMult = 1.0 / colCount;
+	float colProgressMult = 1.0 / colCount;
 			
 	for(size_t i=0; i<colCount; i++)
 	{
@@ -248,7 +248,7 @@ void DataSet::dbLoad(int index, std::function<void(float)> progressCallback)
 
 		_columns[i]->dbLoadIndex(i, false);
 
-        progressCallback(0.2 + (i * colProgressMult * 0.3)); //should end at 0.5
+		progressCallback(0.2 + (i * colProgressMult * 0.3)); //should end at 0.5
 	}
 
 	for(size_t i=colCount; i<_columns.size(); i++)
@@ -256,7 +256,7 @@ void DataSet::dbLoad(int index, std::function<void(float)> progressCallback)
 
 	_columns.resize(colCount);
 
-    db().dataSetBatchedValuesLoad(this, [&](float p){ progressCallback(0.5 + p * 0.5); });
+	db().dataSetBatchedValuesLoad(this, [&](float p){ progressCallback(0.5 + p * 0.5); });
 
 	Json::Value emptyValsJson;
 	std::stringstream(emptyVals) >> emptyValsJson;
@@ -351,7 +351,7 @@ void DataSet::loadOldComputedColumnsJson(const Json::Value &json)
 {
 	for(const Json::Value & colJson : json)
 	{
-		const std::string name = json["name"].asString();
+		const std::string name = colJson["name"].asString();
 
 		Column * col = column(name);
 

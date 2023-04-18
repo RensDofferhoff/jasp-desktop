@@ -98,6 +98,8 @@ MainWindow::MainWindow(QApplication * application) : QObject(application), _appl
 {
 	std::cout << "MainWindow constructor started" << std::endl;
 
+	connect(this, &MainWindow::exitSignal, this, &QApplication::exit, Qt::QueuedConnection);
+
 	assert(!_singleton);
 	_singleton = this;
 	JASPTIMER_START(MainWindowConstructor);
@@ -509,7 +511,7 @@ void MainWindow::loadQML()
 		if(obj == nullptr)
 		{
 			std::cerr << "Could not load QML: " + url.toString().toStdString() << std::endl;
-			exit(10);
+			emit exitSignal(10);
 		}
 		else
 			Log::log() << "QML loaded, url: '" << url.toString() << "' and obj name: '" << obj->objectName() << "'" << std::endl;
@@ -936,9 +938,9 @@ void MainWindow::analysisImageSavedHandler(Analysis *analysis)
 void MainWindow::analysisEditImageHandler(int id, QString options)
 {
 
-    Analysis *analysis = _analyses->get(id);
-    if (analysis == nullptr)
-        return;
+	Analysis *analysis = _analyses->get(id);
+	if (analysis == nullptr)
+		return;
 
 	if (analysis->needsRefresh())
 	{
@@ -1141,7 +1143,7 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 				QTimer::singleShot(3000, this, &MainWindow::startComparingResults);
 			}
 			else if(_reporter && !_reporter->isJaspFileNotDabaseOrSynching())
-					exit(12);			
+					emit exitSignal(12);
 		}
 		else
 		{
@@ -1150,7 +1152,7 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 
 			MessageForwarder::showWarning(tr("Unable to open file because:\n%1").arg(event->message()));
 
-			if (_openedUsingArgs)	exit(3);
+			if (_openedUsingArgs)	emit exitSignal(3);
 
 		}
 	}
@@ -1170,7 +1172,7 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 				std::cerr << "Tested and saved " << event->path().toStdString() << " succesfully!" << std::endl;
 
 			if(_savingForClose)
-				exit(0);
+				emit exitSignal(0);
 
 		}
 		else
@@ -1198,7 +1200,7 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 			setWelcomePageVisible(true);
 
 			if (_applicationExiting)	
-				QApplication::exit();
+				emit exitSignal();
 			else
 			{
 				_engineSync->cleanUpAfterClose(true);
@@ -1286,14 +1288,14 @@ void MainWindow::handleDeferredFileLoad()
 
 void MainWindow::_openFile()
 {
-    _fileMenu->open(_openOnLoadFilename);
-    _openOnLoadFilename = "";
+	_fileMenu->open(_openOnLoadFilename);
+	_openOnLoadFilename = "";
 }
 
 void MainWindow::_openDbJson()
 {
-    _fileMenu->open(_openOnLoadDbJson);
-    _openOnLoadDbJson = Json::nullValue;
+	_fileMenu->open(_openOnLoadDbJson);
+	_openOnLoadDbJson = Json::nullValue;
 }
 
 void MainWindow::openGitHubBugReport() const
@@ -1356,18 +1358,17 @@ void MainWindow::openGitHubBugReport() const
 		QDesktopServices::openUrl(issueUrl);
 
 		if(openGitHubUserRegistration)
-			QTimer::singleShot(100, []()
+			QTimer::singleShot(0, []()
 			{
 				QDesktopServices::openUrl(QUrl("https://github.com/join"));
-				exit(1);
 			});
-		else
-			exit(1);
+
+		emit exitSignal(1);
 	}
 	catch(...)
 	{
 		MessageForwarder::showWarning(tr("GitHub couldn't be openend for you"), tr("Something went wrong with leading you to GitHub..\nYou can still report the bug by going to https://github.com/jasp-stats/jasp-issues/issues"));
-		exit(1);
+		emit exitSignal(1);
 	}
 }
 
@@ -1385,7 +1386,7 @@ void MainWindow::fatalError()
 			openGitHubBugReport();
 		}
 		else
-			exit(2);
+			emit exitSignal(2);
 	}
 }
 
@@ -1452,8 +1453,8 @@ void MainWindow::startDataEditorHandler()
 
 		switch(choice)
 		{
-        case MessageForwarder::DialogResponse::Save:
-        case MessageForwarder::DialogResponse::Discard:
+		case MessageForwarder::DialogResponse::Save:
+		case MessageForwarder::DialogResponse::Discard:
 		case MessageForwarder::DialogResponse::Cancel:
 			return;
 
@@ -1657,7 +1658,7 @@ void MainWindow::unitTestTimeOut()
 		return;
 
 	std::cerr << "Time out for unit test!" << std::endl;
-	exit(3);
+	emit exitSignal(3);
 }
 
 void MainWindow::startComparingResults()
@@ -1701,7 +1702,7 @@ void MainWindow::finishComparingResults()
 				emit saveJaspFile();
 		}
 		else
-			exit(resultXmlCompare::compareResults::theOne()->compareSucces() ? 0 : 1);
+			emit exitSignal(resultXmlCompare::compareResults::theOne()->compareSucces() ? 0 : 1);
 	}
 }
 
@@ -1709,7 +1710,7 @@ void MainWindow::finishSavingComparedResults()
 {
 	if(resultXmlCompare::compareResults::theOne()->testMode() && resultXmlCompare::compareResults::theOne()->shouldSave())
 	{
-		exit(resultXmlCompare::compareResults::theOne()->compareSucces() ? 0 : 1);
+		emit exitSignal(resultXmlCompare::compareResults::theOne()->compareSucces() ? 0 : 1);
 	}
 }
 
