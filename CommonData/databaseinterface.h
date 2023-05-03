@@ -11,6 +11,27 @@ class DataSet;
 class Column;
 
 ///Single point of interaction with sqlite, can later be turned into an interface for supporting other sql
+///
+/// This class represents the abstraction layer between DataSetPackage and the SQLite backend
+/// Originally the intent was to also write it agnostic towards the actual data representation
+/// So only using basic datatypes for interaction.
+/// But performance considerations changed that equation, so to make bulk datatransfer possible
+/// DataSet and Column are used directly. This could later also be done with other models of course.
+///
+/// The initial structure of a fresh database can be found in _dbConstructionSql and contains some general tables:
+/// DataSets, Filters, Columns and Labels
+/// Whenever a dataset is created it gets its own entry in DataSets describing it
+/// and also a table named as for instance: DataSet_0 is created.
+///
+/// This DataSet_# table intially only contains a default filter column (for which an entry is made in Filters)
+///
+/// Then when columns are loaded/added each gets an entry in Columns describing it.
+/// DataSet_# then also adds 2 columns for each actual column, both initially filled with NULLs
+/// An integers column for ordinal and nominal(text) columns, and basically any future column with labels
+/// A double column for scalar columns, and perhaps later monetary or time related columns
+///
+/// As values are set they can be stored value for value (during manual editing) or bulked.
+/// This is then represented in the linked column in DataSet_#
 class DatabaseInterface
 {
 public:
