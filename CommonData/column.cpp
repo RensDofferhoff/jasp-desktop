@@ -850,9 +850,9 @@ bool Column::setAsScale(const doublevec & values)
 		for(double value : values)
 		{
 			//Apparently checking a double can lead to a problem if they are both nan because nan != nan -> true
-			bool valChanged = (isnan(_dbls[i]) != isnan(value));
+			bool valChanged = (std::isnan(_dbls[i]) != std::isnan(value));
 
-			if(!valChanged && !isnan(value)) //So if they are equally nan and one is not nan they must both have a sensible value which can be compared and otherwise there was already a change
+			if(!valChanged && !std::isnan(value)) //So if they are equally nan and one is not nan they must both have a sensible value which can be compared and otherwise there was already a change
 				valChanged = _dbls[i] != value;
 			
 			_dbls[i] = value;

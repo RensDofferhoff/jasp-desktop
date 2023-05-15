@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <stdlib.h>
+#include <functional>
 
 #include <archive.h>
 
