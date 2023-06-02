@@ -167,7 +167,7 @@ bool ColumnUtils::isEmptyValue(const std::string& val)
 	if (val.empty()) 
 		return true;
 
-	return _currentEmptyValues.count(val);
+	return _currentEmptyValues.contains(val);
 }
 
 bool ColumnUtils::isEmptyValue(const double &val)
