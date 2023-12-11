@@ -36,6 +36,9 @@ CheckBoxBase
 	innerControl:		control
 	title:				text
 
+    toolTip: control.text
+    ToolTip.visible: hovered
+
 	default property alias	content:				childControlsArea.children
 			property alias	control:				control
 			property alias	childrenArea:			childControlsArea

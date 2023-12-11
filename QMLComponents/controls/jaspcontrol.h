@@ -205,6 +205,7 @@ public slots:
 	GENERIC_SET_FUNCTION(IsDependency			, _isDependency			, isDependencyChanged			, bool			)
 	GENERIC_SET_FUNCTION(ShouldShowFocus		, _shouldShowFocus		, shouldShowFocusChanged		, bool			)
 	GENERIC_SET_FUNCTION(ShouldStealHover		, _shouldStealHover		, shouldStealHoverChanged		, bool			)
+	GENERIC_SET_FUNCTION(Hover					, _hovered				, hoveredChanged				, bool			)
 	GENERIC_SET_FUNCTION(Background				, _background			, backgroundChanged				, QQuickItem*	)
 	GENERIC_SET_FUNCTION(DependencyMustContain	, _dependencyMustContain, dependencyMustContainChanged	, QStringList	)
 
@@ -213,11 +214,12 @@ private slots:
 	void	_setShouldShowFocus();
 	void	_setBackgroundColor();
 	void	_setVisible();
-	void	_hoveredChangedSlot() { emit hoveredChanged(); }
 	void	_resetBindingValue();
 	void	_setFocus();
 	void	_notifyFormOfActiveFocus();
 	void	_checkControlName();
+	void	_configureToolTip();
+
 
 signals:
 	void	setOptionBlockSignal(	bool blockSignal);
@@ -262,6 +264,9 @@ protected:
 	bool				eventFilter(QObject *watched, QEvent *event) override;
 	bool				checkOptionName(const QString& name);
 
+	void				hoverEnterEvent(QHoverEvent* event) override;
+	void				hoverLeaveEvent(QHoverEvent* event) override;
+
 protected:
 	ControlType				_controlType;
 	AnalysisForm*			_form						= nullptr;
@@ -284,7 +289,8 @@ protected:
 							_shouldStealHover			= false,
 							_nameIsOptionValue			= false,
 							_hasUserInteractiveValue	= true,
-							_hasActiveFocus				= false;
+							_hasActiveFocus				= false,
+							_hovered					= false;
 	JASPListControl		*	_parentListView				= nullptr;
 	QQuickItem			*	_childControlsArea			= nullptr,
 						*	_innerControl				= nullptr,

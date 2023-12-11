@@ -50,7 +50,6 @@ JASPControl::JASPControl(QQuickItem *parent) : QQuickItem(parent)
 	connect(this, &JASPControl::visibleChildrenChanged,	this, &JASPControl::helpMDChanged);
 	connect(this, &JASPControl::backgroundChanged,		[this] () { if (!_focusIndicator)		setFocusIndicator(_background); });
 	connect(this, &JASPControl::infoChanged,			[this] () { if (_toolTip.isEmpty())	setToolTip(_info);					});
-	connect(this, &JASPControl::toolTipChanged,			[this] () { setShouldStealHover(!_toolTip.isEmpty());					});
 	connect(this, &JASPControl::hasErrorChanged,		this, &JASPControl::_setFocusBorder);
 	connect(this, &JASPControl::hasWarningChanged,		this, &JASPControl::_setFocusBorder);
 	connect(this, &JASPControl::isDependencyChanged,	this, &JASPControl::_setFocusBorder);
@@ -63,10 +62,14 @@ JASPControl::JASPControl(QQuickItem *parent) : QQuickItem(parent)
 	connect(this, &JASPControl::indentChanged,			[this] () { QQmlProperty(this, "Layout.leftMargin", qmlContext(this)).write( (indent() && JaspTheme::currentTheme()) ? JaspTheme::currentTheme()->indentationLength() : 0); });
 	connect(this, &JASPControl::debugChanged,			[this] () { _setBackgroundColor(); _setVisible(); } );
 	connect(this, &JASPControl::parentDebugChanged,		[this] () { _setBackgroundColor(); _setVisible(); } );
-	connect(this, &JASPControl::toolTipChanged,			[this] () { QQmlProperty(this, "ToolTip.text", qmlContext(this)).write(toolTip()); } );
 	connect(this, &JASPControl::boundValueChanged,		this, &JASPControl::_resetBindingValue);
 	connect(this, &JASPControl::activeFocusChanged,		this, &JASPControl::_setFocus);
 	connect(this, &JASPControl::activeFocusChanged,		this, &JASPControl::_notifyFormOfActiveFocus);
+
+	connect(this, &JASPControl::infoChanged,				this, &JASPControl::_configureToolTip);
+	connect(this, &JASPControl::shouldStealHoverChanged,	this, &JASPControl::_configureToolTip);
+	connect(this, &JASPControl::toolTipChanged,				this, &JASPControl::_configureToolTip);
+	connect(this, &JASPControl::hoveredChanged,				[this] () { QQmlProperty(this, "ToolTip.visible", qmlContext(this)).write(hovered()); });
 }
 
 JASPControl::~JASPControl()
@@ -77,6 +80,17 @@ JASPControl::~JASPControl()
 		child->disconnect();
 
 	disconnect();
+}
+
+void JASPControl::_configureToolTip()
+{
+	setAcceptHoverEvents(_shouldStealHover && !_toolTip.isEmpty());
+	Log::log() << "!!!" << _toolTip << std::endl;
+	if(!toolTip().isEmpty())
+		if(!QQmlProperty(this, "ToolTip.text", qmlContext(this)).write(toolTip()))
+			Log::log() << "!!!" << _toolTip << std::endl;
+	else
+		QQmlProperty(this, "ToolTip.text", qmlContext(this)).write(info());
 }
 
 void JASPControl::setFocusOnTab(bool focus)
@@ -184,23 +198,9 @@ void JASPControl::componentComplete()
 	QQuickItem::componentComplete();
 	_setBackgroundColor();
 	_setVisible();
+	setAcceptHoverEvents(true);
 
 	connect(this, &JASPControl::initializedChanged, this, &JASPControl::_checkControlName);
-
-	if (_useControlMouseArea)
-	{
-		QQmlComponent* comp = getMouseAreaComponent(qmlEngine(this));
-		QVariantMap props = { {"hoverEnabled", shouldStealHover()}, {"cursorShape", cursorShape()} };
-
-		_mouseAreaObj = qobject_cast<QQuickItem*>(comp->createWithInitialProperties(props, qmlContext(this)));
-		if (_mouseAreaObj)
-		{
-			_mouseAreaObj->setParentItem(this);
-			QQuickItem::connect(_mouseAreaObj, SIGNAL(hoveredChanged()), this,  SLOT(_hoveredChangedSlot()) );
-		}
-		else
-			Log::log() << "Cannot create a Mouse Area!!!" << std::endl;
-	}
 
 	QQmlContext* context = qmlContext(this);
 	bool isDynamic = context->contextProperty("isDynamic").toBool();
@@ -521,6 +521,16 @@ bool JASPControl::checkOptionName(const QString &name)
 	return true;
 }
 
+void JASPControl::hoverEnterEvent(QHoverEvent *event)
+{
+	setHover(true);
+}
+
+void JASPControl::hoverLeaveEvent(QHoverEvent *event)
+{
+	setHover(false);
+}
+
 QString JASPControl::ControlTypeToFriendlyString(ControlType controlType)
 {
 	switch(controlType)
@@ -719,10 +729,7 @@ JASPControl *JASPControl::parentListViewEx() const
 
 bool JASPControl::hovered() const
 {
-	if (_mouseAreaObj)
-		return _mouseAreaObj->property("hovered").toBool();
-	else
-		return false;
+	return _hovered;
 }
 
 QString JASPControl::humanFriendlyLabel() const
