@@ -4550,7 +4550,7 @@ msgstr ""
 
 msgctxt "MainWindow|"
 msgid "Reload Data File"
-msgstr ""
+msgstr "Recharger le fichier de données"
 
 #, qt-format
 msgctxt "QObject|"
@@ -4584,31 +4584,31 @@ msgstr "Effacer les cellules"
 
 msgctxt "RibbonModel|"
 msgid "Undo"
-msgstr ""
+msgstr "Annuler"
 
 msgctxt "RibbonModel|"
 msgid "Redo"
-msgstr ""
+msgstr "Refaire"
 
 msgctxt "RibbonModel|"
 msgid "Analyses"
-msgstr ""
+msgstr "Analyses"
 
 msgctxt "RibbonModel|"
 msgid "Switch JASP to analyses mode"
-msgstr ""
+msgstr "Passer en mode analyses"
 
 msgctxt "RibbonModel|"
 msgid "Edit Data"
-msgstr ""
+msgstr "Éditer les données"
 
 msgctxt "RibbonModel|"
 msgid "Switch JASP to data editing mode"
-msgstr ""
+msgstr "Passer en mode édition des données"
 
 msgctxt "RibbonModel|"
 msgid "New Data"
-msgstr ""
+msgstr "Nouvelles données"
 
 msgctxt "RibbonModel|"
 msgid "Open a workspace without data"
@@ -4616,11 +4616,11 @@ msgstr ""
 
 msgctxt "RibbonModel|"
 msgid "Insert"
-msgstr ""
+msgstr "Insérer"
 
 msgctxt "RibbonModel|"
 msgid "Insert empty columns or rows"
-msgstr ""
+msgstr "Insérer des colonnes ou des lignes vides"
 
 #, fuzzy
 msgctxt "RibbonModel|"
@@ -4629,39 +4629,39 @@ msgstr "Supprimer"
 
 msgctxt "RibbonModel|"
 msgid "Remove columns or rows"
-msgstr ""
+msgstr "Supprimer des colonnes ou des lignes"
 
 msgctxt "RibbonModel|"
 msgid "Synchronisation"
-msgstr ""
+msgstr "Synchronisation"
 
 msgctxt "RibbonModel|"
 msgid "Turn external data synchronisation on"
-msgstr ""
+msgstr "Activer la synchronisation externe des données"
 
 msgctxt "RibbonModel|"
 msgid "Turn external data synchronisation off"
-msgstr ""
+msgstr "Désactiver la synchronisation externe des données"
 
 msgctxt "DataTableView|"
 msgid "Insert row above"
-msgstr ""
+msgstr "Insérer une ligne au-dessus"
 
 msgctxt "DataTableView|"
 msgid "Insert row below"
-msgstr ""
+msgstr "Insérer une ligne en-dessous"
 
 msgctxt "DataTableView|"
 msgid "Doubleclick here to change variable settings"
-msgstr ""
+msgstr "Double-cliquer ici pour changer les paramètres de la variable"
 
 msgctxt "DataTableView|"
 msgid "Doubleclick here to close variable window"
-msgstr ""
+msgstr "Double-cliquer ici pour fermer la fenêtre de la variable"
 
 msgctxt "ColorPalette|"
 msgid "Color palette"
-msgstr ""
+msgstr "Palette de couleurs"
 
 msgctxt "ColorPalette|"
 msgid "Colorblind"
@@ -4685,11 +4685,11 @@ msgstr ""
 
 msgctxt "ColorPalette|"
 msgid "Gray"
-msgstr ""
+msgstr "Gris"
 
 msgctxt "ColorPalette|"
 msgid "Blue"
-msgstr ""
+msgstr "Bleu"
 
 msgctxt "ColorPalette|"
 msgid "Sports teams: NBA"
@@ -4699,13 +4699,14 @@ msgctxt "ColorPalette|"
 msgid "Grand Budapest"
 msgstr ""
 
+#, fuzzy
 msgctxt "RibbonModel|"
 msgid "Insert row above"
-msgstr ""
+msgstr "Insérer une ligne au-dessus"
 
 msgctxt "RibbonModel|"
 msgid "Insert row below"
-msgstr ""
+msgstr "Insérer une colonne en-dessous"
 
 #, qt-format
 msgctxt "RibbonModel|"
@@ -5118,4 +5119,36 @@ msgstr "Description: "
 
 msgctxt "ColumnModel|"
 msgid "Column definition"
+msgstr ""
+
+msgctxt "ComputeColumnWindow|"
+msgid "returns a boolean vector with TRUE for each missing value in y"
+msgstr ""
+
+msgctxt "FilterWindow|"
+msgid ""
+"Combine with not-operator to filter out rows with missing values (NA) for a "
+"column."
+msgstr ""
+
+msgctxt "FilterModel|"
+msgid ""
+"# Above you see the code that JASP generates for both value filtering and "
+"the drag&drop filter.\n"
+"# This default result is stored in 'generatedFilter' and can be replaced or "
+"combined with a custom filter.\n"
+"# To combine you can append clauses using '&': 'generatedFilter & "
+"customFilter & perhapsAnotherFilter'\n"
+"# Click the (i) icon in the lower right corner for further help.\n"
+"\n"
+"generatedFilter\n"
+msgstr ""
+
+msgctxt "FilterModel|"
+msgid "No data loaded!"
+msgstr ""
+
+#, qt-format
+msgctxt "FilterModel|"
+msgid "Data has %1 rows, %2 (%3%4%) passed through filter"
 msgstr ""

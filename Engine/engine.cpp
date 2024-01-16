@@ -300,6 +300,8 @@ void Engine::runFilter(const std::string & filter, const std::string & generated
 		std::vector<bool> filterResult	= rbridge_applyFilter(strippedFilter, generatedFilter);
 		std::string RPossibleWarning	= jaspRCPP_getLastErrorMsg();
 
+		Log::log() << "Engine::runFilter ran:\n\t" << strippedFilter << "\n\tRPossibleWarning='" << RPossibleWarning << "'\n\t\tfor revision " << _dataSet->filter()->revision() << std::endl;
+
 		_dataSet->db().transactionWriteBegin();
 		_dataSet->filter()->setRFilter(filter);
 		_dataSet->filter()->setFilterVector(filterResult);
@@ -313,7 +315,14 @@ void Engine::runFilter(const std::string & filter, const std::string & generated
 	}
 	catch(filterException & e)
 	{
-		sendFilterError(filterRequestId, std::string(e.what()).length() > 0 ? e.what() : "Something went wrong with the filter but it is unclear what.");
+		std::string error = std::string(e.what()).length() > 0 ? e.what() : "Something went wrong with the filter but it is unclear what.";
+
+		_dataSet->db().transactionWriteBegin();
+		_dataSet->filter()->setErrorMsg(error);
+		_dataSet->filter()->incRevision();
+		_dataSet->db().transactionWriteEnd();
+
+		sendFilterError(filterRequestId, error);
 	}
 
 	_engineState = engineState::idle;
@@ -336,10 +345,11 @@ void Engine::sendFilterError(int filterRequestId, const std::string & errorMessa
 {
 	Json::Value filterResponse = Json::Value(Json::objectValue);
 
-        provideAndUpdateDataSet()->filter()->setErrorMsg(errorMessage);
+	Log::log() << "Engine::sendFilterError(filterRequestId=" << filterRequestId << ", errorMsg='" << errorMessage << "')" << std::endl;
 
 	filterResponse["typeRequest"]	= engineStateToString(engineState::filter);
 	filterResponse["requestId"]		= filterRequestId;
+	filterResponse["error"]			= errorMessage;
 
 	sendString(filterResponse.toStyledString());
 }
@@ -862,22 +872,19 @@ void Engine::removeNonKeepFiles(const Json::Value & filesToKeepValue)
 
 DataSet * Engine::provideAndUpdateDataSet()
 {
-	JASPTIMER_RESUME(Engine::provideDataSet());
+	JASPTIMER_RESUME(Engine::provideAndUpdateDataSet());
+	Log::log() << "Engine::provideAndUpdateDataSet()" << std::endl;
+
+	bool setColumnNames = !_dataSet;
+
+	if(!_dataSet && _db->dataSetGetId() != -1)
+		_dataSet = new DataSet(_db->dataSetGetId());
 
 	if(_dataSet)
-	{
-		Log::log() << "There is a dataset, ";
-		if(_dataSet->checkForUpdates())
-		{
-			Log::log(false) << "updates found, loading them.";
-			ColumnEncoder::columnEncoder()->setCurrentNames(_dataSet->getColumnNames());
-		}
-		else
-			Log::log(false) << "no updates found.";
+		setColumnNames |= _dataSet->checkForUpdates();
 
-		Log::log(false) << std::endl;
-	}
-	else if(_db->dataSetGetId() != -1)	_dataSet = new DataSet(_db->dataSetGetId());
+	if(_dataSet && setColumnNames)
+		ColumnEncoder::columnEncoder()->setCurrentNames(_dataSet->getColumnNames());
 
 	JASPTIMER_STOP(Engine::provideDataSet());
 
