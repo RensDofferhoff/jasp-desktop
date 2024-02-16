@@ -202,6 +202,7 @@ QString AppDirs::renvCacheLocations()
 	
 	QString dynamicCache = renvRootLocation() + "/" + renvCacheName;
 	#ifdef FLATPAK_USED
+		Log::log() << "!!!flatpak used" << std::endl;
 		QString staticCache = "/app/lib64/renv-cache/";
 	#else
 		QString staticCache = processPath(programDir().absoluteFilePath("Modules/renv-cache"));
