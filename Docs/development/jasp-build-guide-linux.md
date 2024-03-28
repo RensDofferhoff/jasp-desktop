@@ -5,26 +5,39 @@ If you have not cloned the `jasp-desktop` repository, please head back to the [b
 ## Requirements
 
 - Libraries
-	- `boost (>=1.78)`
-	- `jsoncpp (>=1.9)`
+	- `autoconf`^1
+	- `bison`^1
+	- `boost (>=1.78)`^1
+	- `cmake (>3.21)`^1
+	- `gcc`^1
+	- `gcc-fortran`^1
+	- `git`^1
+	- `glpk`
+	- `flex`^1
+	- `jags`^1,2^
+	- `jsoncpp (>=1.9)`^1
 	- `libarchive (>=3.5)`
-	- `cmake (>3.21)`
-	- `openssl (1.1.1m)`
-	- `autoconf`
-	- `zlib`
-	- `bison`
-	- `flex`
+	- `openssl (1.1.1m)`^1
+	- `patchelf`^1
+	- `readstat`^2
+	- `V8` (for `jaspProcess`)
+	- `zlib`^1
 - Qt (>= 6.2)
 	- Qt Creator 7
+
+*1: make dependencies (i.e., required for building but not for running JASP)*
+
+*2: On Linux JASP's CMake script will download and install ReadStat and JAGS
+for you when necessary.*
 
 ### Installing Dependencies
 
 Based on your system, you can install the mentioned libraries using your package manager.
 
-On Ubuntu, you can use `apt`. 
+On Ubuntu, you can use `apt`.
 
 ```
-sudo apt install boost jsoncpp libarchive autoconf zlib cmake gfortran build-essential r-base
+sudo apt install libboost-dev libjsoncpp25 libjsoncpp-dev libarchive13 libarchive-dev libxcb-xkb-dev libxcb-xkb1 libxcb-xinerama0 libxcb-cursor0 libxkbcommon-dev libxkbcommon-x11-dev autoconf zlib1g zlib1g-dev cmake gfortran build-essential flex libssl-dev libgl1-mesa-dev libsqlite3-dev r-base libglpk-dev
 ```
 
 > ⚠️ Some of these libraries might not be up-to-date and as a result JASP will complain. If this happens, you need to download, make and install those libraries individually. Alternatively, you can use the [Linux version of Homebrew](https://docs.brew.sh/Homebrew-on-Linux) and install the up-to-dated libraries locally.
@@ -32,8 +45,24 @@ sudo apt install boost jsoncpp libarchive autoconf zlib cmake gfortran build-ess
 On Manjaro / Arch
 
 ```
-sudo pacman -Syu boost jsoncpp libarchive cmake zlib libarchive make autoconf qt6 gcc gcc-gfortran r
+sudo pacman -Syu autoconf bison boost cmake gcc gcc-fortran git glpk flex jags jsoncpp libarchive openssl patchelf r readstat zlib
+# Google's V8 is only available through the aur consider using an aur helper
+# Note that only jaspProcess requires V8 and V8 takes a lot of time to compile
+# To install it using the `yay` aur helper run:
+yay -Syu v8-r
 ```
+
+On Fedora/RHEL
+
+```
+sudo dnf group install "C Development Tools and Libraries"
+sudo dnf install cairo-devel gsl-devel readline-devel readstat-devel gfortran libXt-devel libcurl-devel boost-devel lapack-devel libsqlite3x-devel openssl-devel libarchive-devel mesa-libGL-devel libxkbcommon-devel boost-static harfbuzz-devel fribidi-devel freetype-devel libpng-devel libtiff-devel libjpeg-devel cairo-devel mpfr-devel glpk-devel
+```
+
+We recommend you compile and install R from source to a location in your home folder and set this installation path in the `CUSTOM_R_PATH CMAKE` variable. 
+
+Additionally recommend you install JAGS from [source](https://mcmc-jags.sourceforge.io/) and do not make use of platform binaries which may be provided by your distro. If needed you can add the JAGS path to the `CMAKE_PREFIX_PATH` variable.
+
 
 ### Qt Framework and Qt Creator
 

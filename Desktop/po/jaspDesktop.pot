@@ -166,27 +166,15 @@ msgid "Bayes Factor"
 msgstr ""
 
 msgctxt "BayesFactorType|"
-msgid "BF₁₀"
-msgstr ""
-
-msgctxt "BayesFactorType|"
 msgid ""
 "Bayes factor to quantify evidence for the alternative hypothesis relative to "
 "the null hypothesis."
 msgstr ""
 
 msgctxt "BayesFactorType|"
-msgid "BF₀₁"
-msgstr ""
-
-msgctxt "BayesFactorType|"
 msgid ""
 "Bayes factor to quantify evidence for the null hypothesis relative to the "
 "alternative hypothesis."
-msgstr ""
-
-msgctxt "BayesFactorType|"
-msgid "Log(BF₁₀)"
 msgstr ""
 
 msgctxt "BayesFactorType|"
@@ -690,13 +678,6 @@ msgstr ""
 
 msgctxt "PrefsData|"
 msgid "Import threshold between Categorical or Scale"
-msgstr ""
-
-msgctxt "PrefsData|"
-msgid ""
-"Threshold number of unique integers before classifying a variable as "
-"'scale'.\n"
-"You need to reload your data to take effect! Check help for more info."
 msgstr ""
 
 msgctxt "PrefsMissingValues|"
@@ -3132,19 +3113,6 @@ msgctxt "EngineRepresentation|"
 msgid "Error editing plot"
 msgstr ""
 
-msgctxt "Application|"
-msgid "One time setup for JASP Modules"
-msgstr ""
-
-msgctxt "Application|"
-msgid ""
-"JASP has been installed from a zip and it needs to recreate certain paths "
-"for your analyses to work.\n"
-"\n"
-"Please be patient and wait for the application to show before attempting to "
-"start JASP again."
-msgstr ""
-
 msgctxt "PlotEditor|"
 msgid "Open Documentation"
 msgstr ""
@@ -4702,4 +4670,38 @@ msgstr ""
 #, qt-format
 msgctxt "FilterModel|"
 msgid "Data has %1 rows, %2 (%3%4%) passed through filter"
+msgstr ""
+
+msgctxt "PrefsData|"
+msgid "External spreadsheet editor (for data synchronization)"
+msgstr ""
+
+msgctxt "PrefsData|"
+msgid ""
+"If a variable has more distinct integer values than this it will be "
+"interpreted as scale."
+msgstr ""
+
+msgctxt "PrefsData|"
+msgid "Reset types of loaded variables"
+msgstr ""
+
+msgctxt "PrefsData|"
+msgid "Missing values setting"
+msgstr ""
+
+msgctxt "AboutWindow|"
+msgid "Copied to clipboard"
+msgstr ""
+
+msgctxt "AboutWindow|"
+msgid "Copy debug information"
+msgstr ""
+
+msgctxt "MainPage|"
+msgid "Search in results:"
+msgstr ""
+
+msgctxt "MainPage|"
+msgid "Close search bar"
 msgstr ""

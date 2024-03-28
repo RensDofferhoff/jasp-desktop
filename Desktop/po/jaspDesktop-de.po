@@ -173,10 +173,6 @@ msgid "Bayes Factor"
 msgstr "Bayesfaktor"
 
 msgctxt "BayesFactorType|"
-msgid "BF₁₀"
-msgstr "BF₁₀"
-
-msgctxt "BayesFactorType|"
 msgid ""
 "Bayes factor to quantify evidence for the alternative hypothesis relative to "
 "the null hypothesis."
@@ -185,20 +181,12 @@ msgstr ""
 "Nullhypothese zu quantifizieren."
 
 msgctxt "BayesFactorType|"
-msgid "BF₀₁"
-msgstr "BF₀₁"
-
-msgctxt "BayesFactorType|"
 msgid ""
 "Bayes factor to quantify evidence for the null hypothesis relative to the "
 "alternative hypothesis."
 msgstr ""
 "Bayesfaktor um die Evidenz für die Nullhypothese relativ zur "
 "Alternativhypothese zu quantifizieren."
-
-msgctxt "BayesFactorType|"
-msgid "Log(BF₁₀)"
-msgstr "Log(BF₁₀)"
 
 msgctxt "BayesFactorType|"
 msgid "Natural logarithm of BF10."
@@ -738,17 +726,6 @@ msgstr "Anderen Editor wählen"
 msgctxt "PrefsData|"
 msgid "Import threshold between Categorical or Scale"
 msgstr "Schwellwert zur Unterscheidung von nominaler & metrischer Skala"
-
-msgctxt "PrefsData|"
-msgid ""
-"Threshold number of unique integers before classifying a variable as "
-"'scale'.\n"
-"You need to reload your data to take effect! Check help for more info."
-msgstr ""
-"Anzahl von einzigartigen ganzen Zahlen, um eine Variable als metrisch zu "
-"klassifizieren.\n"
-"Sie müssen Ihre Daten neu laden, bevor hier Änderungen übernommen werden. "
-"Schauen Sie in die Hilfe für mehr Informationen."
 
 msgctxt "PrefsMissingValues|"
 msgid "Missing Value List"
@@ -3447,24 +3424,6 @@ msgctxt "EngineRepresentation|"
 msgid "Error editing plot"
 msgstr "Fehler beim Bearbeiten des Diagramms"
 
-msgctxt "Application|"
-msgid "One time setup for JASP Modules"
-msgstr "Einmalige Einrichtung für JASP-Module"
-
-msgctxt "Application|"
-msgid ""
-"JASP has been installed from a zip and it needs to recreate certain paths "
-"for your analyses to work.\n"
-"\n"
-"Please be patient and wait for the application to show before attempting to "
-"start JASP again."
-msgstr ""
-"JASP wurde aus einer Zip-Datei installiert und muss bestimmte Pfade neu "
-"erstellen, damit Ihre Analysen funktionieren.\n"
-"\n"
-"Bitte haben Sie etwas Geduld und warten Sie, bis die Anwendung angezeigt "
-"wird, bevor Sie versuchen, JASP erneut zu starten."
-
 msgctxt "PlotEditor|"
 msgid "Open Documentation"
 msgstr "Dokumentation öffnen"
@@ -4446,10 +4405,10 @@ msgctxt "QObject|"
 msgid "Paste values at row %1 column '%2'"
 msgstr "Werte einfügen in Zeile %1 Spalte '%2'"
 
-#, fuzzy, qt-format
+#, qt-format
 msgctxt "QObject|"
 msgid "Set type '%1' to column '%2'"
-msgstr "Typ '%1' auf Spalte '%2' setzen"
+msgstr "Setzen des Typs '%1' für Spalte '%2'"
 
 #, qt-format
 msgctxt "QObject|"
@@ -4504,7 +4463,7 @@ msgctxt "QObject|"
 msgid "Create a computed column with name '%1'"
 msgstr "Berechnete Spalte erstellen mit Namen '%1'"
 
-#, fuzzy, qt-format
+#, qt-format
 msgctxt "QObject|"
 msgid "Set code to computed column with name '%1'"
 msgstr "Code setzen auf berechnete Spalte mit Namen '%1'"
@@ -4784,11 +4743,10 @@ msgctxt "PrefsMissingValues|"
 msgid "Set current workspace with these values"
 msgstr "Den aktuellen Arbeitsbereich mit diesen Werten einstellen"
 
-#, fuzzy
 msgctxt "PrefsMissingValues|"
 msgid "Set the current workspace missing values with these values"
 msgstr ""
-"Die fehlenden Werte des aktuellen Arbeitsbereichs auf diese Werten einstellen"
+"Die fehlenden Werte des aktuellen Arbeitsbereichs auf diese Werte einstellen"
 
 msgctxt "LabelEditorWindow|"
 msgid "Edit the labels here or choose which values should be filtered out."
@@ -4857,7 +4815,6 @@ msgctxt "VariablesWindow|"
 msgid "Use custom values"
 msgstr "Benutzerdefinierte Werte verwenden"
 
-#, fuzzy
 msgctxt "VariablesWindow|"
 msgid "Reset missing values with the ones set in your workspace"
 msgstr ""
@@ -4883,7 +4840,6 @@ msgctxt "QObject|"
 msgid "Column added by analysis"
 msgstr "Spalte durch Analyse hinzugefügt"
 
-#, fuzzy
 msgctxt "QObject|"
 msgid "Scale"
 msgstr "Metrisch"
@@ -4952,12 +4908,10 @@ msgctxt "QObject|"
 msgid "Set workspace empty values"
 msgstr "Leere Werte des Arbeitsbereichs einstellen"
 
-#, fuzzy
 msgctxt "PrefsMissingValues|"
 msgid "Show workspace missing values"
 msgstr "Fehlende Werte des Arbeitsbereichs anzeigen"
 
-#, fuzzy
 msgctxt "PrefsMissingValues|"
 msgid "Opens the settings for workspace missing values"
 msgstr "Öffnet die Einstellungen für fehlende Werte des Arbeitsbereichs"
@@ -5073,7 +5027,6 @@ msgctxt "ActionButtons|"
 msgid "Community"
 msgstr "Gemeinschaft"
 
-#, fuzzy
 msgctxt "ColumnBasicInfo|"
 msgid "<Fill in the name of the column>"
 msgstr "<Tragen Sie den Spaltennamen ein>"
@@ -5090,10 +5043,9 @@ msgctxt "ColumnBasicInfo|"
 msgid "Computed type: "
 msgstr "Berechneter Typ: "
 
-#, fuzzy
 msgctxt "ColumnBasicInfo|"
 msgid "Show parent analysis"
-msgstr "Elternanalyse anzeigen"
+msgstr "Eltern-Analyse anzeigen"
 
 msgctxt "ColumnBasicInfo|"
 msgid "Long name: "
@@ -5117,13 +5069,15 @@ msgstr "Spaltendefinition"
 
 msgctxt "ComputeColumnWindow|"
 msgid "returns a boolean vector with TRUE for each missing value in y"
-msgstr ""
+msgstr "liefert einen booleschen Vektor mit WAHR für jeden fehlenden Wert in y"
 
 msgctxt "FilterWindow|"
 msgid ""
 "Combine with not-operator to filter out rows with missing values (NA) for a "
 "column."
 msgstr ""
+"Mit Nicht-Operator kombinieren, um Zeilen mit fehlenden Werten (NA) für eine "
+"Spalte herauszufiltern."
 
 msgctxt "FilterModel|"
 msgid ""
@@ -5137,12 +5091,58 @@ msgid ""
 "\n"
 "generatedFilter\n"
 msgstr ""
+"# Oben sehen Sie den Code, den JASP sowohl für die Wertfilterung als auch "
+"für den Drag-&-Drop-Filter generiert.\n"
+"# Dieses Standardergebnis wird in 'generatedFilter' gespeichert und kann "
+"ersetzt oder mit einem eigenen Filter kombiniert werden.\n"
+"# Zum Kombinieren können Sie Klauseln mit '&' anhängen: 'generatedFilter & "
+"eigenerFilter & ggfNochEinFilter'\n"
+"# Für weitere Hilfe, klicken Sie auf das (i)-Symbol in der unteren rechten "
+"Ecke.\n"
+"\n"
+"generatedFilter\n"
 
 msgctxt "FilterModel|"
 msgid "No data loaded!"
-msgstr ""
+msgstr "Keine Daten geladen!"
 
 #, qt-format
 msgctxt "FilterModel|"
 msgid "Data has %1 rows, %2 (%3%4%) passed through filter"
+msgstr "Daten haben %1 Zeilen, %2 (%3%4%) durch Filter gelassen"
+
+msgctxt "PrefsData|"
+msgid "External spreadsheet editor (for data synchronization)"
+msgstr "Externer Tabelleneditor (für Datensynchronisation)"
+
+msgctxt "PrefsData|"
+msgid ""
+"If a variable has more distinct integer values than this it will be "
+"interpreted as scale."
+msgstr ""
+"Falls eine Variable mehr eindeutige ganzzahlige Werte als diese hat, wird "
+"sie als metrisch interpretiert."
+
+msgctxt "PrefsData|"
+msgid "Reset types of loaded variables"
+msgstr "Die Typen geladener Variablen zurücksetzen"
+
+msgctxt "PrefsData|"
+msgid "Missing values setting"
+msgstr "Einstellung fehlender Werte"
+
+msgctxt "AboutWindow|"
+msgid "Copied to clipboard"
+msgstr "In Zwischenablage kopiert"
+
+msgctxt "AboutWindow|"
+msgid "Copy debug information"
+msgstr "Debug-Informationen kopieren"
+
+msgctxt "MainPage|"
+msgid "Search in results:"
+msgstr ""
+
+msgctxt "MainPage|"
+msgid "Close search bar"
 msgstr ""

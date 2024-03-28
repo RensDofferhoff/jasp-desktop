@@ -173,10 +173,6 @@ msgid "Bayes Factor"
 msgstr "Współczynnik Bayesa"
 
 msgctxt "BayesFactorType|"
-msgid "BF₁₀"
-msgstr "BF₁₀"
-
-msgctxt "BayesFactorType|"
 msgid ""
 "Bayes factor to quantify evidence for the alternative hypothesis relative to "
 "the null hypothesis."
@@ -185,20 +181,12 @@ msgstr ""
 "alternatywną w stosunku do hipotezy zerowej."
 
 msgctxt "BayesFactorType|"
-msgid "BF₀₁"
-msgstr "BF₀₁"
-
-msgctxt "BayesFactorType|"
 msgid ""
 "Bayes factor to quantify evidence for the null hypothesis relative to the "
 "alternative hypothesis."
 msgstr ""
 "Współczynnik Bayesa do ilościowego określenia dowodów na hipotezę zerową w "
 "stosunku do hipotezy alternatywnej."
-
-msgctxt "BayesFactorType|"
-msgid "Log(BF₁₀)"
-msgstr "Log(BF₁₀)"
 
 msgctxt "BayesFactorType|"
 msgid "Natural logarithm of BF10."
@@ -408,7 +396,7 @@ msgstr "Dodaj kolumnę obliczoną"
 
 msgctxt "ComputeColumnWindow|"
 msgid "Column computed"
-msgstr "Kolumna obliczona"
+msgstr "Kolumna wyliczona"
 
 msgctxt "ComputeColumnWindow|"
 msgid "Click to compute column"
@@ -416,7 +404,7 @@ msgstr "Kliknij, aby dodać kolumnę obliczoną"
 
 msgctxt "ComputeColumnWindow|"
 msgid "Column (in line to be) computed"
-msgstr "Kolumna obliczona, która ma zostać utworzona"
+msgstr "Kolumna wyliczona do utworzenia"
 
 msgctxt "ComputeColumnWindow|"
 msgid "Open Documentation"
@@ -465,7 +453,7 @@ msgstr "Zmodyfikuj dla %1"
 
 msgctxt "CreateComputeColumnDialog|"
 msgid "Create Computed Column"
-msgstr "Wstaw kolumnę obliczoną"
+msgstr "Wstaw kolumnę wyliczoną"
 
 msgctxt "CreateComputeColumnDialog|"
 msgid "Name:"
@@ -510,15 +498,15 @@ msgstr "Utwórz kolumnę"
 #, qt-format
 msgctxt "CreateComputeColumnDialog|"
 msgid "Click here to create your new computed column '%1'"
-msgstr "Kliknij tutaj, aby utworzyć nową kolumnę obliczoną '%1'"
+msgstr "Kliknij tutaj, aby utworzyć nową kolumnę wyliczoną '%1'"
 
 msgctxt "CreateComputeColumnDialog|"
 msgid "Enter a valid (unused) name for computed column"
-msgstr "Podaj prawidłową (nieużywaną) nazwę kolumny obliczonej"
+msgstr "Wprowadź poprawną (nieużywaną) nazwę dla kolumny wyliczonej"
 
 msgctxt "CreateComputeColumnDialog|"
 msgid "Close without creating a computed column"
-msgstr "Zamknij bez tworzenia kolumny obliczonej"
+msgstr "Zamknij bez tworzenia nowej kolumny"
 
 msgctxt "CustomContrastsTableView|"
 msgid "Add Contrast"
@@ -542,7 +530,7 @@ msgstr "Pokaż filtr"
 
 msgctxt "DataTableView|"
 msgid "Add computed column"
-msgstr "Wstaw kolumnę obliczoną"
+msgstr "Wstaw kolumnę wyliczoną"
 
 msgctxt "DataTableView|"
 msgid "Click here to change column type"
@@ -729,17 +717,6 @@ msgctxt "PrefsData|"
 msgid "Import threshold between Categorical or Scale"
 msgstr "Próg rozróżnienia pomiędzy zmienną kategorialną a ilościową"
 
-msgctxt "PrefsData|"
-msgid ""
-"Threshold number of unique integers before classifying a variable as "
-"'scale'.\n"
-"You need to reload your data to take effect! Check help for more info."
-msgstr ""
-"Maksymalna ilość unikatowych liczb całkowitych dla sklasyfikowania zmiennej "
-"jako kategorialnej.\n"
-"Należy ponownie załadować dane, aby zmiana zaczęła obowiązywać! Sprawdź "
-"pomoc, aby uzyskać więcej informacji."
-
 msgctxt "PrefsMissingValues|"
 msgid "Missing Value List"
 msgstr "Kodowanie braków danych"
@@ -910,7 +887,7 @@ msgstr "Ostatnio używane pliki"
 
 msgctxt "ComputedColumnsConstructor|"
 msgid "Computed columns code clear(ed)"
-msgstr "Kod kolumn obliczonych został usunięty"
+msgstr "Kod kolumn wyliczonych został usunięty"
 
 msgctxt "ComputedColumnsConstructor|"
 msgid "Computed columns code applied"
@@ -926,7 +903,7 @@ msgstr "Dozwolona jest tylko jedna formuła dla danej kolumny."
 
 msgctxt "ComputedColumnsConstructor|"
 msgid "Welcome to the drag and drop computed column constructor!"
-msgstr "Witamy w kreatorze kolumn obliczonych!"
+msgstr "Witamy w kreatorze kolumn wyliczonych!"
 
 msgctxt "DropTrash|"
 msgid "Dump unwanted snippets here; double-click to erase the entire slate"
@@ -957,7 +934,7 @@ msgstr ""
 
 msgctxt "FilterConstructor|"
 msgid "Welcome to the drag and drop filter!<br>"
-msgstr "Witamy w filtrze typu \"przeciągnij i upuść\"!<br>"
+msgstr "Witamy w kreatorze filtrów!<br>"
 
 msgctxt "OperatorSelector|"
 msgid "Addition"
@@ -1221,7 +1198,7 @@ msgstr "Zresetuj wszystkie znaczniki wyboru na wszystkich etykietach"
 
 msgctxt "FilterWindow|"
 msgid "Switch to the drag and drop filter"
-msgstr "Przełącz się na filtr typu \"przeciągnij i upuść\""
+msgstr "Przełącz na kreator filtrów"
 
 msgctxt "FilterWindow|"
 msgid "Reset to default filter"
@@ -1496,7 +1473,7 @@ msgstr "Semi-normalny"
 
 msgctxt "WelcomePage|"
 msgid "Welcome to JASP"
-msgstr "Witamy w JASP"
+msgstr "Witaj w JASP"
 
 msgctxt "WelcomePage|"
 msgid "A Fresh Way to Do Statistics: Free, Friendly, and Flexible"
@@ -1538,7 +1515,7 @@ msgstr ""
 
 msgctxt "WelcomePage|"
 msgid "So open a data file and take JASP for a spin!"
-msgstr "Zatem otwórz plik z danymi i zabierz JASP na przejażdżkę!"
+msgstr "Zatem otwórz plik z danymi i wyrusz w podróż z JASP!"
 
 msgctxt "WelcomePage|"
 msgid "Click to get latest version"
@@ -2619,7 +2596,7 @@ msgstr "Wstaw pole kolumny"
 
 msgctxt "TextInputBase|"
 msgid "Add Computed Column Field"
-msgstr "Wstaw pole kolumny obliczonej"
+msgstr "Wstaw pole kolumny wyliczonej"
 
 msgctxt "TextInputBase|"
 msgid "Formula Field"
@@ -3415,24 +3392,6 @@ msgctxt "EngineRepresentation|"
 msgid "Error editing plot"
 msgstr "W trakcie edycji wykresu wystąpił błąd"
 
-msgctxt "Application|"
-msgid "One time setup for JASP Modules"
-msgstr "Jednorazowa konfiguracja modułów JASP"
-
-msgctxt "Application|"
-msgid ""
-"JASP has been installed from a zip and it needs to recreate certain paths "
-"for your analyses to work.\n"
-"\n"
-"Please be patient and wait for the application to show before attempting to "
-"start JASP again."
-msgstr ""
-"JASP został zainstalowany z archiwum zip i musi odtworzyć pewne ścieżki, aby "
-"analizy działały.\n"
-"\n"
-"Prosimy o cierpliwość i poczekanie na otworzenie się aplikacji przed ponowną "
-"próbą uruchomienia JASP."
-
 msgctxt "PlotEditor|"
 msgid "Open Documentation"
 msgstr "Otwórz dokumentację"
@@ -4102,7 +4061,7 @@ msgstr "Ukryj składnię języka R"
 
 msgctxt "ComputeColumnWindow|"
 msgid "Would you like to save your changes to the Computed Column?"
-msgstr "Czy chcesz zapisać zmiany w kolumnie obliczonej?"
+msgstr "Czy chcesz zapisać zmiany w kolumnie wyliczonej?"
 
 msgctxt "ComputeColumnWindow|"
 msgid "Your changes will be lost if you don't save them."
@@ -4389,7 +4348,7 @@ msgstr "Ustaw wartość na '%1' w wierszu %2 kolumny '%3'"
 #, qt-format
 msgctxt "QObject|"
 msgid "Insert computed column '%1'"
-msgstr "Wstaw kolumnę obliczoną '%1'"
+msgstr "Wstaw kolumnę wyliczona '%1'"
 
 #, qt-format
 msgctxt "QObject|"
@@ -4463,7 +4422,7 @@ msgstr "Odwróć kolejność etykiet w kolumnie '%2'"
 
 msgctxt "QObject|"
 msgid "Change drag and drop filter"
-msgstr "Zmień filtr typu \"przeciągnij i upuść\""
+msgstr "Zmień filtr za pomocą kreatora"
 
 msgctxt "QObject|"
 msgid "Change R filter"
@@ -4472,12 +4431,12 @@ msgstr "Zmień filtr R"
 #, qt-format
 msgctxt "QObject|"
 msgid "Create a computed column with name '%1'"
-msgstr "Stwórz kolumnę obliczoną o nazwie '%1'"
+msgstr "Stwórz kolumnę wyliczoną o nazwie '%1'"
 
 #, qt-format
 msgctxt "QObject|"
 msgid "Set code to computed column with name '%1'"
-msgstr "Wprowadź kod do kolumny obliczonej o nazwie '%1'"
+msgstr "Wprowadź kod do kolumny wyliczonej o nazwie '%1'"
 
 msgctxt "MainWindow|"
 msgid ""
@@ -4900,7 +4859,7 @@ msgstr "Obliczone przy użyciu kodu R"
 
 msgctxt "QObject|"
 msgid "Computed with drag-and-drop"
-msgstr "Obliczone przy użyciu kreatora graficznego"
+msgstr "Obliczone przy użyciu kreatora"
 
 msgctxt "QObject|"
 msgid "Column generated by analysis"
@@ -4924,7 +4883,7 @@ msgstr "Nominalna"
 
 msgctxt "ColumnModel|"
 msgid "Computed column definition"
-msgstr "Definicja kolumny obliczonej"
+msgstr "Definicja kolumny wyliczonej"
 
 msgctxt "ColumnModel|"
 msgid "Label editor"
@@ -5084,13 +5043,14 @@ msgstr "Definicja kolumny"
 
 msgctxt "ComputeColumnWindow|"
 msgid "returns a boolean vector with TRUE for each missing value in y"
-msgstr ""
+msgstr "zwraca wartość TRUE dla każdej brakującej wartości w y"
 
 msgctxt "FilterWindow|"
 msgid ""
 "Combine with not-operator to filter out rows with missing values (NA) for a "
 "column."
 msgstr ""
+"Połącz z symbolem negacji, aby odfiltrować wiersze z brakami danych (NA)."
 
 msgctxt "FilterModel|"
 msgid ""
@@ -5104,12 +5064,59 @@ msgid ""
 "\n"
 "generatedFilter\n"
 msgstr ""
+"# Powyżej znajduje się kod, który JASP generuje zarówno dla filtrowania "
+"poprzez wpisanie wartości, jak i filtrów stworzonych z użyciem kreatora.\n"
+"# Domyślny wynik tego działania jest przechowywany w zmiennej "
+"'generatedFilter' i może być zastąpiony lub połączony z niestandardowym "
+"filtrem.\n"
+"# Aby połączyć, możesz dołączyć warunek za pomocą operatora '&': "
+"'generatedFilter & customFilter & perhapsAnotherFilter'\n"
+"# Kliknij ikonę (i) w prawym dolnym rogu, aby uzyskać dalszą pomoc.\n"
+"\n"
+"generatedFilter\n"
 
 msgctxt "FilterModel|"
 msgid "No data loaded!"
-msgstr ""
+msgstr "Nie wczytano danych!"
 
 #, qt-format
 msgctxt "FilterModel|"
 msgid "Data has %1 rows, %2 (%3%4%) passed through filter"
+msgstr "Dane mają %1 wierszy; %2 (%3%4%) pozostało po odfiltrowaniu"
+
+msgctxt "PrefsData|"
+msgid "External spreadsheet editor (for data synchronization)"
+msgstr "Zewnętrzny edytor arkuszy kalkulacyjnych (do synchronizacji danych)"
+
+msgctxt "PrefsData|"
+msgid ""
+"If a variable has more distinct integer values than this it will be "
+"interpreted as scale."
+msgstr ""
+"Jeśli zmienna ma więcej różnych wartości całkowitych, zostanie "
+"zidentyfikowana jako zmienna ciągła."
+
+msgctxt "PrefsData|"
+msgid "Reset types of loaded variables"
+msgstr "Zresetuj typy załadowanych zmiennych"
+
+msgctxt "PrefsData|"
+msgid "Missing values setting"
+msgstr "Ustawienia braków danych"
+
+#, fuzzy
+msgctxt "AboutWindow|"
+msgid "Copied to clipboard"
+msgstr "Skopiowano do schowka"
+
+msgctxt "AboutWindow|"
+msgid "Copy debug information"
+msgstr ""
+
+msgctxt "MainPage|"
+msgid "Search in results:"
+msgstr ""
+
+msgctxt "MainPage|"
+msgid "Close search bar"
 msgstr ""

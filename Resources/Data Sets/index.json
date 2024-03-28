@@ -777,9 +777,30 @@
         {
           "name": "BCG Vaccine",
           "path": "BCG Vaccine.jasp",
-          "description": "Test statistics from studies examining the effectiveness of a BCG vaccine. <br><br> The example JASP file demonstrates the use of a fixed-effects and random-effects meta-analysis.<br><br> <i>Data courtesy of Raoul Grasman.<\/i>",
+          "description": "Test statistics from studies examining the effectiveness of a BCG vaccine. <br><br> The example JASP file demonstrates the use of a fixed-effect and random-effects meta-analysis.<br><br> <i>Data courtesy of Raoul Grasman.<\/i>",
           "kind": "file",
           "associated_datafile": "BCG Vaccine.csv"
+        },
+        {
+          "name": "EuroSCORE II",
+          "path": "EuroSCORE II.jasp",
+          "description": "Results of studies assessing the discrimination and calibration performance of EuroSCORE II in patients undergoing coronary artery bypass grafting. <br><br> The example JASP file demonstrates the use of a meta-analysis of prediction model performance with concordance (C-) statistics. <br><br> <i> Data set retrieved from the R package metamisc. <\/i>",
+          "kind": "file",
+          "associated_datafile": "EuroSCORE II.csv"
+        },
+        {
+          "name": "Precognition",
+          "path": "Precognition.jasp",
+          "description": "Summary of estimates from the infamous 2011 article `Feeling the future: Experimental evidence for anomalous retroactive influences on cognition and affect' by Daryl J. Bem. <br><br> The example JASP file demonstrates the use of a PET-PEESE publication bias adjustment.<br><br> <i> Data set retrieved from the R package RoBMA. <\/i>",
+          "kind": "file",
+          "associated_datafile": "Precognition.csv"
+        },
+        {
+          "name": "Acculturation Mismatch and Intergenerational Cultural Conflict",
+          "path": "Acculturation Mismatch and Intergenerational Cultural Conflict.jasp",
+          "description": "A meta-analytic data set on the relationship between acculturation mismatch and intergenerational cultural conflict. <br><br> The example JASP file demonstrates the use and reporting of PET-PEESE, selection models, and Robust Bayesian meta-analysis.<br><br> <i>Data obtained from Lui (2015).<\/i>",
+          "kind": "file",
+          "associated_datafile": "Acculturation Mismatch and Intergenerational Cultural Conflict.csv"
         }
       ],
       "debug": false
@@ -1133,7 +1154,15 @@
     {
       "name": "Debug Dataset (JASP Team, 2017)",
       "path": "../debug.csv",
-      "description": "For testing. Readme: is.gd/jaspdata",
+      "description": "For testing, also for R unit-tests, comma separated data. Readme: is.gd/jaspdata",
+      "kind": "file",
+      "children": ["NULL"],
+      "debug": true
+    },
+    {
+      "name": "GUI Debug Dataset (JASP Team, 2024)",
+      "path": "../gui-debug.csv",
+      "description": "For testing csv import of JASP, it has some strange combination of comma and dot in floats, semicolon separated. Readme: is.gd/jaspdata",
       "kind": "file",
       "children": ["NULL"],
       "debug": true
