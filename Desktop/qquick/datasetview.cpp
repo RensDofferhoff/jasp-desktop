@@ -385,29 +385,22 @@ void DataSetView::storeOutOfViewItems()
 			_previousViewportRowMin < maxRows	&& _previousViewportRowMax <= maxRows	&& _previousViewportColMin < maxCols	&& _previousViewportColMax <= maxCols
 	)
 	{
+		Log::log() <<"wtf: [" << _previousViewportColMin << " " << _previousViewportColMax << "] [" << _previousViewportRowMin << " " << _previousViewportRowMax << "]" << std::endl;
 		for(int col=_previousViewportColMin; col<_previousViewportColMax; col++)
 		{
-			for(int row=_previousViewportRowMin; row < _currentViewportRowMin; row++)
-				storeTextItem(row, col);
-
-			for(int row=_currentViewportRowMax; row < _previousViewportRowMax; row++)
+			for(int row=_previousViewportRowMin; row < _previousViewportRowMax; row++)
 				storeTextItem(row, col);
 		}
 
 		for(int row=_previousViewportRowMin; row<_previousViewportRowMax; row++)
 		{
-			for(int col=_previousViewportColMin; col < _currentViewportColMin; col++)
-				storeTextItem(row, col);
-
-			for(int col=_currentViewportColMax; col < _previousViewportColMax; col++)
+			for(int col=_previousViewportColMin; col < _previousViewportColMax; col++)
 				storeTextItem(row, col);
 		}
 
-		for(int row=_previousViewportRowMin; row < _currentViewportRowMin; row++)
+		for(int row=_previousViewportRowMin; row < _previousViewportRowMax; row++)
 			storeRowNumber(row);
 
-		for(int row=_currentViewportRowMax; row < _previousViewportRowMax; row++)
-			storeRowNumber(row);
 	}
 
 	JASPTIMER_STOP(DataSetView::storeOutOfViewItems);
@@ -599,9 +592,7 @@ QQuickItem * DataSetView::createTextItem(int row, int col)
 		if(_textItemStorage.size() > 0)
 		{
 			JASPTIMER_RESUME(DataSetView::createTextItem textItemStorage has something);
-#ifdef DATASETVIEW_DEBUG_CREATION
 			Log::log() << "createTextItem("<<row<<", "<<col<<") from storage!\n" << std::flush;
-#endif
 			itemCon = _textItemStorage.top();
 			textItem = itemCon->item;
 			_textItemStorage.pop();
@@ -611,9 +602,7 @@ QQuickItem * DataSetView::createTextItem(int row, int col)
 		else
 		{
 			JASPTIMER_RESUME(DataSetView::createTextItem textItemStorage has NOTHING);
-#ifdef DATASETVIEW_DEBUG_CREATION
 			Log::log() << "createTextItem("<<row<<", "<<col<<") ex nihilo!\n" << std::flush;
-#endif
 			QQmlIncubator localIncubator(QQmlIncubator::Synchronous);
 			itemCon = new ItemContextualized(setStyleDataItem(nullptr, active, col, row));
 			_itemDelegate->create(localIncubator, itemCon->context);
@@ -681,8 +670,10 @@ void DataSetView::storeTextItem(int row, int col, bool cleanUp)
 
 	textItem->item->setVisible(false);
 
-	if (_cacheItems)		_textItemStorage.push(textItem);
-	else					delete textItem;
+_textItemStorage.push(textItem);
+Log::log() << "store" << std::endl;
+	
+
 
 	JASPTIMER_STOP(DataSetView::storeTextItem);
 }
