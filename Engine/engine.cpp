@@ -98,7 +98,7 @@ Engine::~Engine()
 
 void Engine::run()
 {
-	while(_engineState != engineState::stopped && ProcessInfo::isParentRunning())
+	while(_engineState != engineState::stopped)
 	{
 		static bool initDone = false;
 		if(!initDone && _engineState == engineState::initializing) //Do this first, otherwise receiveMessages possibly triggers some other functions
@@ -206,9 +206,9 @@ bool Engine::receiveMessages(int timeout)
 
 		_lastRequest = engineStateFromString(typeSend);
 
-#ifdef PRINT_ENGINE_MESSAGES
+// #ifdef PRINT_ENGINE_MESSAGES
 		Log::log() << "Engine received " << engineStateToString(_lastRequest) <<" message" << std::endl;
-#endif
+// #endif
 
 		if(_engineState == engineState::initializing)
 		{

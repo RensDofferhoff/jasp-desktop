@@ -75,6 +75,7 @@ string Dirs::tempDir()
 
 		dir = std::string(buffer);
 		dir += "/JASP/temp";
+		dir = "C:/Users/rdoff/AppData/Local/JASP/temp";
 #else
 
 		dir = string(getpwuid(getuid())->pw_dir);

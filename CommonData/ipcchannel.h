@@ -76,6 +76,7 @@ private:
 	void findConstructDataStrings();
 	void findConstructMutexes();
 
+	std::string										_lastReceivedMessage = "";
 	std::string										_baseName,
 													_nameControl,
 													_nameMtS,

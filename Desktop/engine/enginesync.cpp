@@ -965,11 +965,57 @@ void EngineSync::fixPATHForWindows(QProcessEnvironment & env)
 		"i386";
 #endif
 	
-	env.insert("PATH", AppDirs::programDir().absolutePath() + ";" + QDir(AppDirs::rHome()).absoluteFilePath("bin") + ";" + QDir(AppDirs::rHome()).absoluteFilePath("bin/" + R_ARCH)); // + rtoolsInPath); 
+	env.insert("PATH", AppDirs::programDir().absolutePath() + ";" + QDir(AppDirs::rHome()).absoluteFilePath("bin") + ";" + QDir(AppDirs::rHome()).absoluteFilePath("bin/" + R_ARCH) +";C:/Qt/6.8.2/msvc2022_64/bin/"); // + rtoolsInPath);
 
 	Log::log() << "Windows PATH was changed to: '" << env.value("PATH", "???") << "'" << std::endl;
 }
-#endif 
+#endif
+
+
+//###########################################################################################################################################
+
+#include "userenv.h"
+#include <atlsecurity.h>
+
+bool AllowNamedObjectAccess(PSID appContainerSid, PWSTR name, SE_OBJECT_TYPE type, ACCESS_MASK accessMask) {
+	PACL oldAcl, newAcl = nullptr;
+	DWORD status;
+	EXPLICIT_ACCESS access;
+	do {
+		access.grfAccessMode = GRANT_ACCESS;
+		access.grfAccessPermissions = FILE_ALL_ACCESS;
+		access.grfInheritance = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
+		access.Trustee.MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
+		access.Trustee.pMultipleTrustee = nullptr;
+		access.Trustee.ptstrName = (PWSTR)appContainerSid;
+		access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+		access.Trustee.TrusteeType = TRUSTEE_IS_GROUP;
+
+		status = GetNamedSecurityInfo(name, type, DACL_SECURITY_INFORMATION, nullptr, nullptr, &oldAcl, nullptr, nullptr);
+		if (status != ERROR_SUCCESS)
+			return false;
+
+		status = SetEntriesInAcl(1, &access, oldAcl, &newAcl);
+		if (status != ERROR_SUCCESS)
+			return false;
+
+		status = SetNamedSecurityInfo(name, type, DACL_SECURITY_INFORMATION, nullptr, nullptr, newAcl, nullptr);
+		if (status != ERROR_SUCCESS)
+			break;
+	} while (false);
+
+	if (newAcl)
+		::LocalFree(newAcl);
+
+	return status == ERROR_SUCCESS;
+}
+
+
+//###########################################################################################################################################
+
+
+
+
 
 //Should this function go to EngineRepresentation?
 QProcess * EngineSync::startSlaveProcess(int channel)
@@ -979,11 +1025,11 @@ QProcess * EngineSync::startSlaveProcess(int channel)
 	QString engineExe		= programDir.absoluteFilePath("JASPEngine");
 	QProcessEnvironment env = ProcessHelper::getProcessEnvironmentForJaspEngine();
 
-#ifndef JASP_DEBUG
+// #ifndef JASP_DEBUG
 #ifdef _WIN32
 	fixPATHForWindows(env);
 #endif
-#endif
+// #endif
 	
 	env.insert("GITHUB_PAT", PreferencesModel::prefs()->githubPatResolved());
 
@@ -1012,15 +1058,86 @@ QProcess * EngineSync::startSlaveProcess(int channel)
 	are not inherited.
 	*/
 
-	slave->setCreateProcessArgumentsModifier([] (QProcess::CreateProcessArguments *args)
-	{
-#ifndef QT_DEBUG
+	Log::log() << "!!!pre all " << std::endl;
+
+
+	std::wstring containerName = L"jaspEngine111";
+
+	PSID appContainerSid;
+	DeleteAppContainerProfile(containerName.c_str());
+	auto hr = ::CreateAppContainerProfile(containerName.c_str(), containerName.c_str(), containerName.c_str(), nullptr, 0, &appContainerSid);
+	if (FAILED(hr)) {
+		// see if AppContainer SID already exists
+		hr = ::DeriveAppContainerSidFromAppContainerName(containerName.c_str(), &appContainerSid);
+		if (FAILED(hr))
+			throw std::runtime_error("well fuck");
+	}
+
+
+	// build process attributes
+	// for simplicity (for now), have just one  capabilities
+
+	SECURITY_CAPABILITIES sc = { 0 };
+	sc.AppContainerSid = appContainerSid;
+
+	/*
+	SID_AND_ATTRIBUTES cap;
+	BYTE sidBuffer[SECURITY_MAX_SID_SIZE];
+	PSID inetCapability = reinterpret_cast<PSID>(sidBuffer);
+	DWORD sizeSid;
+	if (!CreateWellKnownSid(WinCapabilityInternetClientSid, nullptr, inetCapability, &sizeSid))
+		return false;
+
+	cap.Sid = inetCapability;
+	cap.Attributes = SE_GROUP_ENABLED;
+	*/
+
+	STARTUPINFOEX si = { sizeof(si) };
+	PROCESS_INFORMATION pi;
+	SIZE_T size;
+
+	::InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+	auto buffer = std::make_unique<BYTE[]>(size);
+	si.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(buffer.get());
+	if (!::InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &size))
+		throw std::runtime_error("well fuck");
+	if (!::UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, &sc, sizeof(sc), nullptr, nullptr))
+		throw std::runtime_error("well fuck");
+
+	// set security for files/folders
+	Log::log() << "!!!pre file " << std::endl;
+	std::string tmp = Dirs::tempDir();
+	std::wstring tmpDir(tmp.begin(), tmp.end());
+	std::vector<std::wstring> files = {L"D:\\test",
+										L"D:\\a",
+									   L"C:\\Users\\rdoff\\Documents",
+									   L"C:\\Qt\\6.8.2\\msvc2022_64\\bin",
+									   L"C:\\Users\\rdoff\\AppData\\Local\\JASP\\temp",
+									   L"C:\\Users\\rdoff\\AppData\\Roaming\\JASP\\JASP\\Logs",
+									   L"C:\\ProgramData\\boost_interprocess\\15000000_CA040000",
+									   L"C:\\Users\\rdoff\\trunk\\",
+									   L"C:\\ProgramData\\boost_interprocess\\1740736419",
+									   };
+	for(auto& file : files)
+		AllowNamedObjectAccess(appContainerSid, file.data(), SE_FILE_OBJECT, FILE_ALL_ACCESS);
+
+	// std::vector<std::wstring> files2 = {L"D:\\"
+	// 									};
+	// for(auto& file : files2)
+	// 	AllowNamedObjectAccess(appContainerSid, file.data(), SE_FILE_OBJECT, FILE_ALL_ACCESS);
+
+	slave->setCreateProcessArgumentsModifier([&] (QProcess::CreateProcessArguments *args) {
 		args->inheritHandles = false;
-#endif
+		args->flags = args->flags | EXTENDED_STARTUPINFO_PRESENT;
+		args->startupInfo = (LPSTARTUPINFO)&si;
 	});
+
 #endif
 
 	slave->start(engineExe, args);
+	// slave->waitForStarted(100000);
+	// Log::log() << "!!!Started" << std::endl;
+
 
 	return slave;
 }

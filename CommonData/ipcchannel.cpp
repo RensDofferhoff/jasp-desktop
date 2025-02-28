@@ -18,6 +18,9 @@
 #include "ipcchannel.h"
 #include "tempfiles.h"
 
+#include <chrono>
+#include <thread>
+
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include "log.h"
 #include "utils.h"
@@ -397,9 +400,9 @@ bool IPCChannel::receive(string &data, int timeout)
 {
 	if (tryWait(timeout))
 	{
+		Log::log() << "Mutex yo" << std::endl;
 		_mutexIn->lock();
-
-		while (tryWait()); // clear it completely
+		Log::log() << "Mutexed yo" << std::endl;
 
 		try
 		{
@@ -423,7 +426,7 @@ bool IPCChannel::receive(string &data, int timeout)
 
 bool IPCChannel::tryWait(int timeout)
 {
-	bool messageWaiting;
+	bool messageWaiting = false;
 
 #ifdef __APPLE__
 
@@ -438,7 +441,11 @@ bool IPCChannel::tryWait(int timeout)
 
 #elif defined _WIN32
 
-	messageWaiting = (WaitForSingleObject(_semaphoreIn, timeout) == WAIT_OBJECT_0);
+	std::this_thread::sleep_for(std::chrono::milliseconds(timeout));
+	std::string data(_dataIn->c_str(), _dataIn->size());
+	if(data != _lastReceivedMessage)
+		messageWaiting = true;
+	_lastReceivedMessage = data;
 
 #else
 

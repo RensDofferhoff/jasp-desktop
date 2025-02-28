@@ -21,7 +21,7 @@ QProcessEnvironment ProcessHelper::getProcessEnvironmentForJaspEngine(bool bootS
 	env.insert("JASPENGINE_LOCATION",				engineExe);
 
 	QString TZDIR		= AppDirs::rHome() + "/share/zoneinfo";
-	QString rHomePath	= AppDirs::rHome();
+	QString rHomePath	= "C:\\Users\\rdoff\\trunk\\";
 	QDir	rHome		( rHomePath );
 
 	QString custom_R_library = "";
@@ -38,24 +38,25 @@ QProcessEnvironment ProcessHelper::getProcessEnvironmentForJaspEngine(bool bootS
 #endif
 	
 			TZDIR		= shortenWinPaths(TZDIR);
-	QString PATH		= shortenWinPaths(programDir.absoluteFilePath("R/library/RInside/libs/" ARCH_SUBPATH)) + ";" + shortenWinPaths(programDir.absoluteFilePath("R/library/Rcpp/libs/" ARCH_SUBPATH)) + ";" + shortenWinPaths(programDir.absoluteFilePath("R/bin/" ARCH_SUBPATH)) + ";" + shortenWinPaths(env.value("PATH")),
-			R_HOME		= shortenWinPaths(rHome.absolutePath()),
+	QString PATH		= shortenWinPaths("C:/Qt/6.8.2/msvc2022_64/bin;" +programDir.absoluteFilePath("R/library/RInside/libs/" ARCH_SUBPATH)) + ";" + shortenWinPaths(programDir.absoluteFilePath("R/library/Rcpp/libs/" ARCH_SUBPATH)) + ";" + shortenWinPaths(programDir.absoluteFilePath("R/bin/" ARCH_SUBPATH)) + ";" + shortenWinPaths(env.value("PATH")),
+			R_HOME		= "D:\\test\\R",
 			JAGS_HOME	= shortenWinPaths(programDir.absoluteFilePath("R/opt/jags/"));
 			// JAGS_LIBDIR	= shortenWinPaths(programDir.absoluteFilePath("R/opt/jags/lib/"));
 
 	Log::log() << "R_HOME set to " << R_HOME << std::endl;
 
 	env.insert("PATH",				PATH);
-	env.insert("R_HOME",			R_HOME);
+	env.insert("R_HOME",			"C:\\Users\\rdoff\\trunk\\");
 	env.insert("JAGS_HOME",			JAGS_HOME);
 	// env.insert("JAGS_LIBDIR",		JAGS_LIBDIR);
+	env.insert("TMPDIR", "D:\\a");
 	
 #undef ARCH_SUBPATH
 
 	if(bootStrap)
-		env.insert("R_LIBS",			programDir.absoluteFilePath("Modules/Tools/junction_bootstrap_library") + ";" + R_HOME + "/library");
+		env.insert("R_LIBS",			programDir.absoluteFilePath("Modules/Tools/junction_bootstrap_library") + ";" + R_HOME + "\\library");
 	else
-		env.insert("R_LIBS",			AppDirs::bundledModulesDir() + "Tools/R_cpp_includes_library" + ";" + R_HOME + "/library");
+		env.insert("R_LIBS",			AppDirs::bundledModulesDir() + "Tools/R_cpp_includes_library" + ";" + R_HOME + "\\library");
 
 	env.insert("R_ENVIRON",			"something-which-doesn't-exist");
 	env.insert("R_PROFILE",			"something-which-doesn't-exist");

@@ -18,6 +18,10 @@
 #include "jasprcpp.h"
 #include <fstream>
 #include "tempfiles.h"
+#include <iostream>
+#include <filesystem>
+#include <fstream>
+
 
 static const	std::string NullString			= "null";
 static			std::string lastErrorMessage	= "";
@@ -82,12 +86,22 @@ void STDCALL jaspRCPP_init(const char* buildYear, const char* version, RBridgeCa
 	_systemFunc				= systemFunc;
 	_libraryFixerFunc		= libraryFixerFunc;
 
+	std::filesystem::path path{ "C:\\Users\\rdoff\\Documents\\test\\abc.txt" };
+	std::ofstream ofs(path);
+	ofs << "rccp init" << std::endl;
 	jaspRCPP_logString("Creating RInside.\n");
 
 	rinside = new RInside();
 	R_TempDir = (char*)tempDir;
 	
+
+	ofs << "post new.\n" << std::endl;
+
+
 	RInside &rInside = rinside->instance();
+
+	ofs << "post instance.\n" << std::endl;
+
 
 	requestJaspResultsFileSourceCB				= callbacks->requestJaspResultsFileSourceCB;
 	dataSetGetColumnAnalysisId					= callbacks->dataSetGetColumnAnalysisId;
@@ -153,13 +167,23 @@ void STDCALL jaspRCPP_init(const char* buildYear, const char* version, RBridgeCa
 	rInside[".requestSpecificFileNameNative"]	= Rcpp::InternalFunction(&jaspRCPP_requestSpecificFileNameSEXP);
 	
 	jaspRCPP_logString("Creating Output sink.\n");
+	ofs << "Creating Output sink" << std::endl;
 	rInside[".outputSink"]						= jaspRCPP_CreateCaptureConnection();
+
+
+	ofs << "Created Output sink" << std::endl;
+
 
 	rInside.parseEvalQNT("sink(.outputSink); print('.outputSink initialized!'); sink();");
 	Rcpp::RObject sinkObj = rInside[".outputSink"];
 	//jaspRCPP_logString(sinkObj.isNULL() ? "sink is null\n" : !sinkObj.isObject() ? " sink is not object\n" : sinkObj.isS4() ? "sink is s4\n" : "sink is obj but not s4\n");
+	ofs << "first eval" << std::endl;
+
+
 
 	rInside.parseEvalQNT("sink(.outputSink); print(.libPaths()); sink();");
+	ofs << "second eval" << std::endl;
+
 
 	// initialize everything unrelated to jaspBase
 	static const char *baseCitationFormat	= "JASP Team (%s). JASP (Version %s) [Computer software].";
@@ -184,6 +208,9 @@ void STDCALL jaspRCPP_init(const char* buildYear, const char* version, RBridgeCa
 
 	_R_HOME = jaspRCPP_parseEvalStringReturn("R.home('')");
 	jaspRCPP_logString("jaspRCPP_init is done, R_HOME is: " + _R_HOME + "\n");
+
+	ofs << "end of init!" << std::endl;
+
 
 }
 

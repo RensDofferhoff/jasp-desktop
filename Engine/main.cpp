@@ -50,8 +50,26 @@ void openConsoleOutput(unsigned long slaveNo, unsigned parentPID)
 
 
 #ifdef _WIN32
+#include <iostream>
+#include <filesystem>
+#include <fstream>
+
 int wmain( int argc, wchar_t *argv[ ], wchar_t *envp[ ] )
 {
+	const char* s = getenv("R_HOME");
+	std::filesystem::path path{ "C:\\Users\\rdoff\\Documents\\test\\abc2.txt" };
+	std::ofstream ofs(path);
+	ofs << s << std::endl;
+
+	for (wchar_t **env = envp; *env != 0; env++)
+	{
+		wchar_t *thisEnv = *env;
+		ofs << std::wstring(thisEnv) << std::endl;
+	}
+
+	std::filesystem::path cwd = std::filesystem::current_path();
+	ofs<< cwd << std::endl;
+
 	if(argc == 3)
 	{
 		std::string arg1(Utils::wstringToString(argv[1])), arg2(Utils::wstringToString(argv[2]));
@@ -81,9 +99,9 @@ int wmain( int argc, wchar_t *argv[ ], wchar_t *envp[ ] )
 						logFileWhere	= Utils::wstringToString(argv[4]);
 
 
-        if(argc > 5)
-            Dirs::setReportingDir(Utils::wstringToString(argv[5]));
-			
+		if(argc > 5)
+			Dirs::setReportingDir(Utils::wstringToString(argv[5]));
+
 #else
 int main(int argc, char *argv[])
 {
@@ -95,8 +113,8 @@ int main(int argc, char *argv[])
 						logFileWhere	= argv[4];
 
 
-        if(argc > 5)
-            Dirs::setReportingDir(argv[5]);
+		if(argc > 5)
+			Dirs::setReportingDir(argv[5]);
 
 #endif
 		static boost::iostreams::stream<boost::iostreams::null_sink> nullstream((boost::iostreams::null_sink())); //https://stackoverflow.com/questions/8243743/is-there-a-null-stdostream-implementation-in-c-or-libraries
@@ -142,9 +160,9 @@ int main(int argc, char *argv[])
 		std::cout << "Engine started in R (Module) Library Fixer mode because it received a single argument: '" << singleArg << "'." << std::endl;
 
 		Engine e(0, 0);
-		
+
 		rbridge_setEngine(&e);
-		
+
 
 		_moduleLibraryFixer(singleArg, true, true);
 
