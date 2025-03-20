@@ -29,6 +29,7 @@ PreferencesModel::PreferencesModel(QObject *parent) :
 	connect(this,					&PreferencesModel::disableAnimationsChanged,	this, &PreferencesModel::animationsOnChanged			);
 	connect(this,					&PreferencesModel::dataLabelNAChanged,			this, &PreferencesModel::dataLabelNAChangedSlot			);
 	connect(this,					&PreferencesModel::guiQtTextRenderChanged,		this, &PreferencesModel::onGuiQtTextRenderChanged,		Qt::QueuedConnection);
+	connect(this,					&PreferencesModel::developerModeChanged,		this, [&](){ this->setEngineSandbox(!this->developerMode()); } );
 	
 	connect(LanguageModel::lang(),	&LanguageModel::currentLanguageChanged,			this, &PreferencesModel::languageCodeChanged			);
 
@@ -161,6 +162,7 @@ GET_PREF_FUNC_INT(	pdfPageSize,				Settings::PDF_PAGESIZE								)
 GET_PREF_FUNC_BOOL( directLibpathEnabled,		Settings::DIRECT_LIBPATH_ENABLED					)
 GET_PREF_FUNC_STR(	directLibpathFolder,		Settings::DIRECT_LIBPATH_FOLDER						)
 GET_PREF_FUNC_STR(	directDevModName,			Settings::DIRECT_DEVMOD_NAME						)
+GET_PREF_FUNC_BOOL(	engineSandbox,				Settings::ENGINE_SANDBOX							)
 
 
 int PreferencesModel::maxEngines() const
@@ -586,5 +588,13 @@ void PreferencesModel::setDirectLibpathFolder(QString libpath)
 	{
 		Settings::setValue(Settings::DIRECT_LIBPATH_FOLDER, libpath);
 		emit directLibpathFolderChanged();
+	}
+}
+
+void PreferencesModel::setEngineSandbox(bool engineSandbox) {
+        if(engineSandbox != PreferencesModel::engineSandbox()) {
+	        Settings::setValue(Settings::ENGINE_SANDBOX, engineSandbox);
+		MessageForwarder::showWarning(tr("Engine Sandbox setting changed"), tr("The Engine Sandbox setting has been changed, this will only take full effect after JASP is restarted."));
+		emit engineSandboxChanged(engineSandbox);
 	}
 }

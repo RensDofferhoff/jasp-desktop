@@ -105,7 +105,12 @@ Engine::~Engine()
 
 void Engine::run()
 {
+#ifdef _WIN32
+	bool jaspAlive = true;
+	while(_engineState != engineState::stopped && jaspAlive)
+#else 
 	while(_engineState != engineState::stopped && ProcessInfo::isParentRunning())
+#endif
 	{
 		static bool initDone = false;
 		if(!initDone && _engineState == engineState::initializing) //Do this first, otherwise receiveMessages possibly triggers some other functions
@@ -128,6 +133,10 @@ void Engine::run()
 		default:
 			Log::log() << "Engine got stuck in engineState " << engineStateToString(_engineState) << " which is not supposed to happen..." << std::endl;
 		}
+
+#ifdef _WIN32
+		jaspAlive = _channel->jaspAlive();
+#endif
 	}
 
 	if(_engineState == engineState::stopped)
@@ -156,7 +165,6 @@ void Engine::beIdle(bool newlyIdle)
 bool Engine::receiveMessages(int timeout)
 {
 	std::string data;
-
 	if (_channel->receive(data, timeout))
 	{
 		if(data == "")
@@ -1087,11 +1095,8 @@ void Engine::receiveReloadData()
 
 	//First send state, then load data
 	sendEngineLoadingData();
-
 	provideAndUpdateDataSet(); //Also triggers loading from DB
-
 	reloadColumnNames();
-
 	sendEngineResumed();
 }
 
