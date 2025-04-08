@@ -166,3 +166,6 @@
 	path = Modules/jaspEsci
 	url = https://github.com/jasp-stats/jaspEsci
 	branch = master
+[submodule "Engine/jaspModuleBundleManager"]
+	path = Engine/jaspModuleBundleManager
+	url = https://github.com/jasp-stats/jaspModuleBundleManager.git
