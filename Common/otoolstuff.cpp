@@ -49,7 +49,7 @@ void _moduleLibraryFixer(const std::string & moduleLibraryPath, bool engineCall,
 	std::string jaspModuleName;
 	if (modLibpath.string().find("/Modules/module_libs/jasp") != std::string::npos) 
 	{
-		auto modulePlace = modLibpath.string().find("/Modules/") + 9;
+		auto modulePlace = modLibpath.string().find("/Modules/module_libs/") + 21;
 		auto moduleNameLength = modLibpath.string().find('/', modulePlace);
 
 		jaspModuleName = modLibpath.string().substr(modulePlace, moduleNameLength - modulePlace);
@@ -58,7 +58,7 @@ void _moduleLibraryFixer(const std::string & moduleLibraryPath, bool engineCall,
 
 #ifdef __APPLE__
 	std::cout << "This is a mac so we will fix the otool mess of folder '" << modLibpath << "'...\n";
-
+	std::cout << "!!!" << jaspModuleName << std::endl;
 	typedef std::filesystem::recursive_directory_iterator	recIt;
 	
 	std::filesystem::path path;
@@ -133,9 +133,9 @@ void _moduleLibraryFixer(const std::string & moduleLibraryPath, bool engineCall,
 				}
 				else {
 					ids_to_be_replaced = {
-						{"libtbbmalloc.dylib",					"@executable_path/../Modules/" + jaspModuleName + "/RcppParallel/lib/libtbbmalloc.dylib"},
-						{"libtbbmalloc_proxy.dylib",			"@executable_path/../Modules/" + jaspModuleName + "/RcppParallel/lib/libtbbmalloc_proxy.dylib"},
-						{"libtbb.dylib",						"@executable_path/../Modules/" + jaspModuleName + "/RcppParallel/lib/libtbb.dylib"}
+						{"libtbbmalloc.dylib",					"@executable_path/../Modules/module_libs/" + jaspModuleName + "/RcppParallel/lib/libtbbmalloc.dylib"},
+						{"libtbbmalloc_proxy.dylib",			"@executable_path/../Modules/module_libs/" + jaspModuleName + "/RcppParallel/lib/libtbbmalloc_proxy.dylib"},
+						{"libtbb.dylib",						"@executable_path/../Modules/module_libs/" + jaspModuleName + "/RcppParallel/lib/libtbb.dylib"}
 					};
 				}
 

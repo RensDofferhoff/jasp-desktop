@@ -130,10 +130,15 @@ if(length(localBundles) > 0) {
 
 #fix otool stuff and sign
 if(length(toInstallRemote) > 0 || length(toInstallLocal) > 0) {
-    if (Sys.info()[['sysname']] == 'Darwin') {  
-        print("Patching and Signing all Module binaries")
-        jaspEngineLocation <- file.path("@CMAKE_BINARY_DIR@", "Desktop" , "JASPEngine")
-        jaspEngineCall     <- paste0(jaspEngineLocation, ' "', "@MODULES_BINARY_PATH@/binary_pkgs" ,'"')
-        system(jaspEngineCall)
+    moduleLib <- file.path("@MODULES_BINARY_PATH@", "module_libs")
+    modules <- list.dirs(moduleLib, recursive = FALSE)
+    patch <- function(mod) {
+        if (Sys.info()[['sysname']] == 'Darwin') {  
+            print("Patching and Signing all Module binaries")
+            jaspEngineLocation <- file.path("@CMAKE_BINARY_DIR@", "Desktop" , "JASPEngine")
+            jaspEngineCall     <- paste0(jaspEngineLocation, ' "', mod ,'"')
+            system(jaspEngineCall)
+        }
     }
+    sapply(modules, patch)
 }
