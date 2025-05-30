@@ -46,7 +46,6 @@ private:
 	static void readManifest(const std::string &path);
 	static Compatibility isCompatible();
 
-	
 	static const Version maxSupportedJaspArchiveVersion;
 };
 

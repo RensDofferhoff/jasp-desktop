@@ -21,9 +21,10 @@
 
 #include <QObject>
 #include <QMetaType>
-
-#include "exporters/exporter.h"
+#include "json/json.h"
 #include "utilenums.h"
+
+class Exporter;
 
 ///
 /// This class is used to handle the communication to and from the asynchronous loading/synching/saving file processes.
@@ -83,7 +84,7 @@ private:
 						_last_error		= "Unknown error",
 						_message;
 	bool				_completed		= false,
-						_success		= false;
+                    _success		= false;
 	FileEvent		*	_chainedTo		= nullptr;
 	Exporter		*	_exporter		= nullptr;
 	Json::Value			_database		= Json::nullValue;

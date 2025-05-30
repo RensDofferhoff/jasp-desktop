@@ -17,6 +17,7 @@
 //
 
 #include "fileevent.h"
+#include "exporters/exporter.h"
 #include "exporters/dataexporter.h"
 #include "exporters/resultexporter.h"
 #include "exporters/jaspexporter.h"

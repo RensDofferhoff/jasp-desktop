@@ -20,6 +20,7 @@
 #include <QDir>
 #include "utilities/messageforwarder.h"
 #include "log.h"
+#include "data/jaspencryptiondata.h"
 
 Computer::Computer(FileMenu *parent): FileMenuObject(parent)
 {
@@ -102,7 +103,7 @@ FileEvent *Computer::browseSave(const QString &path, FileEvent::FileMode mode)
 
 	case FileEvent::FileSave:
 		caption = tr("Save");
-		filter  = tr("JASP Files") + " (*.jasp)";
+        filter  = tr("JASP Files") + " (*.jasp);;" + tr("Encrypted JASP Files") + " (*.jasp)";
 		browsePath += ".jasp";
 		break;
 
@@ -111,8 +112,8 @@ FileEvent *Computer::browseSave(const QString &path, FileEvent::FileMode mode)
 	}
 
 
-	QString extension,
-			finalPath = MessageForwarder::browseSaveFile(caption, browsePath, filter, &extension);
+    QString extension, selectedFilter,
+            finalPath = MessageForwarder::browseSaveFile(caption, browsePath, filter, selectedFilter, extension);
 
 	FileEvent *event = new FileEvent(this, mode);
 
@@ -124,8 +125,17 @@ FileEvent *Computer::browseSave(const QString &path, FileEvent::FileMode mode)
 															 !finalPath.endsWith(".pdf",  Qt::CaseInsensitive))	)	finalPath.append(QString(".html"));
 		else if	(mode == FileEvent::FileExportData		&&	(!finalPath.endsWith(".csv",  Qt::CaseInsensitive) &&
 															 !finalPath.endsWith(".txt",  Qt::CaseInsensitive) &&
-															 !finalPath.endsWith(".tsv",  Qt::CaseInsensitive))	)	finalPath.append(QString(".csv"));
-		event->setPath(finalPath);
+                                                             !finalPath.endsWith(".tsv",  Qt::CaseInsensitive))	)	finalPath.append(QString(".csv"));
+
+        if(selectedFilter.contains("encrypt", Qt::CaseInsensitive)) {
+            JaspEncryptionData::getInstance()->reset(); //seems like sensible behaviour
+            if(!JaspEncryptionData::getInstance()->queryUserForPassword()) {
+                event->setComplete(true);
+                return event;
+            }
+        }
+
+        event->setPath(finalPath);
 		emit dataSetIORequest(event);
 	}
 	else

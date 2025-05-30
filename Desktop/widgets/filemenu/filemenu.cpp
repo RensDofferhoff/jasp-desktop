@@ -25,6 +25,7 @@
 #include "data/datasetpackage.h"
 #include "mainwindow.h"
 #include "utilities/appdirs.h"
+#include "data/jaspencryptiondata.h"
 
 FileMenu::FileMenu(QObject *parent) : QObject(parent)
 {	
@@ -114,7 +115,8 @@ FileEvent *FileMenu::open(const Json::Value & dbJson)
 
 FileEvent *FileMenu::saveAs()
 {
-	return _computer->browseSave();
+    FileEvent* event = _computer->browseSave();
+    return event;
 }
 
 FileEvent *FileMenu::newData()
@@ -254,6 +256,7 @@ void FileMenu::enableButtonsForOpenedWorkspace(bool enableSaveButton)
 {
 	_actionButtons->setEnabled(ActionButtons::Save,				enableSaveButton);
 	_actionButtons->setEnabled(ActionButtons::SaveAs,			true);
+    _actionButtons->setEnabled(ActionButtons::SaveAsEncrypt,		true);
 	_actionButtons->setEnabled(ActionButtons::ExportResults,	true);
 	_actionButtons->setEnabled(ActionButtons::ExportData,		true);
 	_actionButtons->setEnabled(ActionButtons::SyncData,			true);
@@ -310,6 +313,7 @@ void FileMenu::dataSetIOCompleted(FileEvent *event)
 		_computer->clearFileName();
 		_currentFilePath		= "";
 		_currentFileType		= Utils::FileType::unknown;
+        JaspEncryptionData::getInstance()->reset();
 		clearSyncData();
 	}
 
@@ -375,6 +379,7 @@ void FileMenu::analysisAdded(Analysis *analysis)
 {
 	_actionButtons->setEnabled(ActionButtons::Close,			true);
 	_actionButtons->setEnabled(ActionButtons::SaveAs,			true);
+    _actionButtons->setEnabled(ActionButtons::SaveAsEncrypt,		true);
 	_actionButtons->setEnabled(ActionButtons::ExportResults,	true);
 }
 
