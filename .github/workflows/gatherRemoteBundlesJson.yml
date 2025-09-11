@@ -34,7 +34,7 @@ jobs:
           pip install argparse
 
       - name: Run script
-        run: python Tools/gatherModuleJson.py 
+        run: python3 jasp-desktop/Tools/gatherModuleJson.py modules-registry/core-modules/ ${{ secrets.GITHUB_TOKEN }} > jasp-desktop/Modules/remote-bundles.json
 
       - name: Configure Git
         run: |
@@ -43,7 +43,7 @@ jobs:
 
       - name: Commit changes
         run: |
-          git add Modules/remote-bundles.json
+          git add jasp-desktop/Modules/remote-bundles.json
           git commit -m "Update Bundles"
 
       - name: Push changes
