@@ -19,9 +19,6 @@ jobs:
           repository: jasp-stats-modules/modules-registry
           path:  'module-registry'
 
-      - name: eione
-        run: tree
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -38,6 +35,7 @@ jobs:
 
       - name: Configure Git
         run: |
+          cd jasp-desktop
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
