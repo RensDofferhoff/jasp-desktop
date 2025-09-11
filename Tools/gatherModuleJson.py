@@ -19,9 +19,10 @@ def gatherMod(repo_list, token, include_prerelease=True):
     mac_intel = []
     mac_arm = []
 
+    print(repo_list)
+
     for repo_str in repo_list:
         try:
-            print(repo_str)
             repo = g.get_repo(repo_str)
             if include_prerelease:
                 release = repo.get_latest_release()
