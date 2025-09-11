@@ -23,8 +23,7 @@ jobs:
       - name: tree
         run: |
           ls -l
-          tree
-          cd .. 
+          cd module-registry
           tree
         
 
