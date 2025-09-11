@@ -47,5 +47,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Modules/remote-bundles.json
-          git commit -m "Update Bundles"
+          git commit -m "Update Bundles" || echo "nothing to commit!"
           git push
