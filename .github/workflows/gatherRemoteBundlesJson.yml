@@ -8,8 +8,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout jasp-desktop
         uses: actions/checkout@v3
+
+      - name: Checkout secondary repo
+        uses: actions/checkout@v3
+        with:
+          repository: jasp-stats-modules/modules-registry
+
+      - name: Run script
+        run: ls -l
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,3 +32,16 @@ jobs:
 
       - name: Run script
         run: python Tools/gatherModuleJson.py 
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit changes
+        run: |
+          git add Modules/remote-bundles.json
+          git commit -m "Update Bundles"
+
+      - name: Push changes
+        run: git push
