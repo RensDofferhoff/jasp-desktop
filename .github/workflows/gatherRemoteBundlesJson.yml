@@ -19,8 +19,8 @@ jobs:
           repository: jasp-stats-modules/modules-registry
           path:  'module-registry'
 
-      - name: Run script
-        run: ls -l
+      - name: eione
+        run: tree
 
       - name: Set up Python
         uses: actions/setup-python@v5
