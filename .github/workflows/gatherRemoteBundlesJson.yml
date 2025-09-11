@@ -41,7 +41,8 @@ jobs:
 
       - name: Commit changes
         run: |
-          git add jasp-desktop/Modules/remote-bundles.json
+          cd jasp-desktop
+          git add Modules/remote-bundles.json
           git commit -m "Update Bundles"
 
       - name: Push changes
