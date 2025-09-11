@@ -19,6 +19,13 @@ jobs:
           repository: jasp-stats-modules/modules-registry
           path:  'module-registry'
 
+      - name: tree
+        run: |
+          tree
+          cd .. 
+          tree
+        
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
