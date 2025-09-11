@@ -33,17 +33,11 @@ jobs:
       - name: Run script
         run: python3 jasp-desktop/Tools/gatherModuleJson.py modules-registry/core-modules/ ${{ secrets.GITHUB_TOKEN }} > jasp-desktop/Modules/remote-bundles.json
 
-      - name: Configure Git
+      - name: commit and push
         run: |
           cd jasp-desktop
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Commit changes
-        run: |
-          cd jasp-desktop
           git add Modules/remote-bundles.json
           git commit -m "Update Bundles"
-
-      - name: Push changes
-        run: git push
+          git push
