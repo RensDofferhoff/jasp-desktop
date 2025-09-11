@@ -9,13 +9,15 @@ jobs:
 
     steps:
       - name: Checkout jasp-desktop
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
+        with:
+          path:  'jasp-desktop'
 
       - name: Checkout secondary repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
         with:
           repository: jasp-stats-modules/modules-registry
-          path:  './'
+          path:  'module-registry'
 
       - name: Run script
         run: ls -l
