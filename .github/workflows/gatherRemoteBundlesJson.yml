@@ -1,4 +1,4 @@
-name: Gather Bundle JSON for all core modules we ship along
+name: Gather JSON core Bundles
 
 on:
   workflow_dispatch:
