@@ -1,0 +1,26 @@
+name: Gather Bundle JSON for all core modules we ship along
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyGithub
+          pip intall argparse
+
+      - name: Run script
+        run: python Tools/gatherModuleJson.py 
