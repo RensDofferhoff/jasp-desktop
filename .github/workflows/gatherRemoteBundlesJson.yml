@@ -17,15 +17,8 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: jasp-stats-modules/modules-registry
-          path:  'module-registry'
+          path:  'modules-registry'
           submodules: 'true'
-
-      - name: tree
-        run: |
-          ls -l
-          cd module-registry
-          tree
-        
 
       - name: Set up Python
         uses: actions/setup-python@v5
