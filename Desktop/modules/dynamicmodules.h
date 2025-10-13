@@ -178,6 +178,8 @@ private:
 														*	_devModHelpWatcher			= nullptr;
 	Modules::DynamicModule								*	_devModule					= nullptr;
 	QString													_moduleStoreUrl				= "";
+
+	const QString											_storeBaseUrl				= "https://module-library.jasp-stats.org";
 };
 
 }

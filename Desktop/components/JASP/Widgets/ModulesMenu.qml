@@ -388,9 +388,9 @@ FocusScope
             WebEngineView
             {
 				id:						moduleStore
-                visible:                !ribbonModel.dataMode
+				visible:                pageLoaded && !ribbonModel.dataMode
                 clip:                   true
-                width:                  visible ? 500 * preferencesModel.uiScale : 0
+				width:                  visible ? 500 * preferencesModel.uiScale : 0
                 anchors.right:          modules.left
                 height:                 modulesFlick.height - jaspTheme.contentMargin
 				url:					   (downloadInProgress || installInProgress)? 'https://static.jasp-stats.org/downloadProgressTest.html?' + 't=' + downloadTotal + '&p=' +  downloadProgress + '&i=' + installInProgress : dynamicModules.moduleStoreUrl
@@ -400,6 +400,15 @@ FocusScope
 				property bool	installInProgress: false;
 				property int		downloadProgress;
 				property int		downloadTotal;
+				property bool		pageLoaded: false;
+
+				onLoadingChanged: (loadRequest) => {
+					if (!loadRequest.active && loadRequest.status === WebEngineView.LoadSucceededStatus) {
+						pageLoaded = true  // Show after load
+					} else if (loadRequest.status === WebEngineView.LoadFailedStatus) {
+						console.log("Page failed to load")
+					}
+				}
 
             }
         }

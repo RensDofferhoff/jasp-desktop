@@ -931,18 +931,18 @@ const QString DynamicModules::moduleStoreUrl() const
 	auto arch = DynamicRuntimeInfo::getMicroArch();
 	std::string platformString;
 
-	// if(platform == RuntimeEnvironment::MAC)
-	// 	platformString = arch == MicroArch::AARCH64 ? "MacOS_arm64" : "MacOS_x86_64";
-	// else if(platform == RuntimeEnvironment::FLATPAK)
-	// 	platformString = arch == MicroArch::AARCH64 ? "MacOS_aarch64" : "MacOS_arm64";
-	// else if(platform == RuntimeEnvironment::LINUX_LOCAL)
-	// 	platformString = arch == MicroArch::AARCH64 ? "Linux_aarch64" : "Linux_x86_64";
-	// else
+	if(platform == RuntimeEnvironment::MAC)
+		platformString = arch == MicroArch::AARCH64 ? "MacOS_arm64" : "MacOS_x86_64";
+	else if(platform == RuntimeEnvironment::FLATPAK)
+		platformString = arch == MicroArch::AARCH64 ? "MacOS_aarch64" : "MacOS_arm64";
+	else if(platform == RuntimeEnvironment::LINUX_LOCAL)
+		platformString = arch == MicroArch::AARCH64 ? "Linux_aarch64" : "Linux_x86_64";
+	else
 		platformString = "Windows_x86-64";
 
 	QUrlQuery query({{"a", QString(platformString.c_str())}, {"v", QString(AppInfo::version.asString(3).c_str())} , {"i", installList}});
-	QString tmp = "https://jasp-stats-modules.github.io/modules-app/?" + query.toString(QUrl::FullyEncoded);
-	return "https://jasp-stats-modules.github.io/modules-app/?" + query.toString(QUrl::FullyEncoded);
+	QString tmp = _storeBaseUrl + "?" + query.toString(QUrl::FullyEncoded);
+	return _storeBaseUrl + "?" + query.toString(QUrl::FullyEncoded);
 }
 
 
