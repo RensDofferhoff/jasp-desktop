@@ -608,6 +608,10 @@ msgid "Change the CRAN repository: "
 msgstr ""
 
 msgctxt "PrefsAdvanced|"
+msgid "Module library URL: "
+msgstr "Moodulite teegi URL: "
+
+msgctxt "PrefsAdvanced|"
 msgid "Generate markdown files for help"
 msgstr ""
 
@@ -1188,6 +1192,18 @@ msgstr ""
 msgctxt "ModulesMenu|"
 msgid "Uninstall module "
 msgstr ""
+
+msgctxt "ModulesMenu|"
+msgid "Not allowed to show the module library to install modules"
+msgstr "Moodulite installimiseks ei ole lubatud kuvada mooduliteeki"
+
+msgctxt "ModulesMenu|"
+msgid ""
+"In \"Preferences\" > \"Interface\" the \"Check for updates\" option is "
+"turned off. Please turn it on to see the module library."
+msgstr ""
+"Menüüs \"Eelistused\" > \"Liides\" on \"Kontrolli uuendusi\" valik välja lülitatud. "
+"Palun lülitage see sisse, et näha mooduliteeki."
 
 msgctxt "RCommanderWindow|"
 msgid "R in JASP"

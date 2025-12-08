@@ -617,6 +617,10 @@ msgid "Change the CRAN repository: "
 msgstr "Trocar o repositorio CRAN: "
 
 msgctxt "PrefsAdvanced|"
+msgid "Module library URL: "
+msgstr "URL da biblioteca de módulos: "
+
+msgctxt "PrefsAdvanced|"
 msgid "Max logfiles to keep: "
 msgstr "Máx. ficheiros inicio a manter: "
 
@@ -1853,6 +1857,18 @@ msgstr "Instalando agora o módulo de desenvolvemento"
 msgctxt "ModulesMenu|"
 msgid "Uninstall module "
 msgstr "Desinstalar o módulo "
+
+msgctxt "ModulesMenu|"
+msgid "Not allowed to show the module library to install modules"
+msgstr "Non está permitido mostrar a biblioteca de módulos para instalar módulos"
+
+msgctxt "ModulesMenu|"
+msgid ""
+"In \"Preferences\" > \"Interface\" the \"Check for updates\" option is "
+"turned off. Please turn it on to see the module library."
+msgstr ""
+"En \"Preferencias\" > \"Interface\", a opción \"Comprobar actualizacións\" está "
+"desactivada. Por favor, actívea para ver a biblioteca de módulos."
 
 msgctxt "ModulesMenu|"
 msgid "Install Developer Module"
