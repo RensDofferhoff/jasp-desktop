@@ -23,14 +23,14 @@ QStringList getModulesFromDir(const std::string& path)
 std::vector<std::string> InstalledModules::getModules(bool extra) {
 	//get the module orders and groupings form the modules settings file
 	//This will probably be replaced with org specific settings from toml file in future
-	std::string		settings = AppDirs::bundledModulesDir().toStdString() + settingsPath;
-	std::ifstream	in(settings);
-	Json::Value		root;
-	Json::Reader().	parse(in, root);
-	Json::Value		commonNames = root.get("common", Json::arrayValue),
-					extraNames = root.get("extra", Json::arrayValue);
-	if(!commonNames.isArray())	commonNames = Json::arrayValue;
-	if(!extraNames.isArray())	extraNames	= Json::arrayValue;
+	std::string settings = AppDirs::bundledModulesDir().toStdString() + settingsPath;
+	std::ifstream in(settings);
+	Json::Value root;
+	Json::Reader().parse(in, root);
+	Json::Value commonNames = root.get("common", Json::arrayValue);
+	Json::Value extraNames = root.get("extra", Json::arrayValue);
+	if(!commonNames.isArray()) commonNames = Json::arrayValue;
+	if(!extraNames.isArray()) extraNames = Json::arrayValue;
 
 
 	//collect all available modules
@@ -50,7 +50,7 @@ std::vector<std::string> InstalledModules::getModules(bool extra) {
 			extraModules.push_back(name.asCString());
 			availableModules.removeAll(name.asCString());
 		}
-
+	if(extra) return extraModules;
 
 	std::vector<std::string> commonModules;
 	for(auto& name: commonNames)
@@ -58,11 +58,8 @@ std::vector<std::string> InstalledModules::getModules(bool extra) {
 			commonModules.push_back(name.asCString());
 			availableModules.removeAll(name.asCString());
 		}
-	
-	for(auto& module : availableModules)
-		(installedModules.contains(module) ? commonModules : extraModules).push_back(module.toStdString());
-	
-	return extra ? extraModules : commonModules;
+	for(auto& module : availableModules) commonModules.push_back(module.toStdString());
+	return commonModules;
 }
 
 std::vector<std::string> InstalledModules::getActiveCommonModules()

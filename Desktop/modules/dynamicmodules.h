@@ -46,6 +46,7 @@ class DynamicModules : public QObject
 	Q_PROPERTY(QString		moduleStoreUrl							READ moduleStoreUrl																			NOTIFY moduleStoreUrlChanged						)
 
 
+
 public:
 	explicit				DynamicModules(QObject *parent) ;
 							~DynamicModules() override;

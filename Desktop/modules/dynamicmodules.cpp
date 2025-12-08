@@ -454,7 +454,6 @@ void DynamicModules::installationPackagesSucceeded(const QString & moduleNames)
 #endif
 	}
 	_moduleBundlesNeedingInstall.clear();
-    emit moduleStoreUrlChanged();
     // MessageForwarder::showWarning(tr("Install complete"), tr("Completed installation of Bundles: ") + listStr);
 }
 
@@ -463,7 +462,6 @@ void DynamicModules::unInstallationPackagesSucceeded(const QString &moduleNames)
 {
 	Log::log() << "Modules succesfully uninstalled" << std::endl;
 	_modulesNeedingRemoval.clear();
-    emit moduleStoreUrlChanged();
 }
 
 void DynamicModules::unInstallationPackagesFailed(const QString &moduleName, const QString &errorMessage)

@@ -3,6 +3,7 @@ import QtQuick.Controls as QTC
 import QtQuick.Layouts
 import JASP.Controls
 import QtWebEngine
+import QtWebChannel
 import "./FileMenu"
 
 FocusScope
@@ -72,7 +73,7 @@ FocusScope
 	{
 		id:				slidePart
 		x:				modulesMenu.opened ? 0 : width
-        width:			modules.width + vertScroller.width + moduleStore.width + jaspTheme.contentMargin
+        width:			modulesFlick.width + vertScroller.width + moduleStoreContainer.width + 2 * jaspTheme.contentMargin
 		height:			modulesMenu.height
 		color:			jaspTheme.fileMenuColorBackground
 		border.width:	1
@@ -118,6 +119,127 @@ FocusScope
 			extraSpace: modulesFlick.contentY
 		}
 		
+		WebEngineProfile {
+			id: moduleStoreProfile
+			downloadPath: jaspTmpDir
+
+			onDownloadRequested: function(request) {
+				console.log("Download requested:", request.url)
+				let name = request.downloadFileName
+				let index = name.lastIndexOf('.');
+				let extension = index !== -1 ? name.substring(index + 1) : '';
+				if(extension === 'JASPModule') {
+					moduleStore.downloadInProgress = true
+					moduleStore.downloadTotal = request.totalBytes
+					moduleStore.downloadProgress = Qt.binding(function() { return request.receivedBytes; })
+					moduleStore.currentDownloadRequest = request
+					request.accept()
+				}
+				else
+					request.cancel()
+			}
+
+			onDownloadFinished: function(request) {
+				moduleStore.downloadInProgress = false
+				moduleStore.currentDownloadRequest = null
+				if (request.state !== WebEngineDownloadRequest.DownloadCompleted) {
+					console.log("Download interrupted:", request.interruptReasonString)
+					return
+				}
+				console.log("Download finished:", request.downloadFileName)
+				let path = request.downloadDirectory + '/' + request.downloadFileName
+				moduleLibrary.startInstalling()
+				dynamicModules.installJASPModule(path)
+			}
+		}
+
+		Item
+		{
+			id:						moduleStoreContainer
+			visible:                !ribbonModel.dataMode
+			clip:                   true
+			width:                  visible ? 500 * preferencesModel.uiScale : 0
+			anchors
+			{
+				top:				modulesFlick.top
+				right:				modulesFlick.left
+				bottom:				modulesFlick.bottom
+				margins:			jaspTheme.contentMargin
+			}
+
+			WebEngineView
+			{
+				id:						moduleStore
+				visible:                preferencesModel.checkUpdates
+				anchors.fill:			parent
+				url:                    preferencesModel.checkUpdates ? preferencesModel.moduleLibraryURL : "about:blank"
+				profile:                moduleStoreProfile
+
+				property bool	downloadInProgress: false;
+				property bool	installInProgress: false;
+				property int		downloadProgress;
+				property int		downloadTotal;
+				property var		currentDownloadRequest: null;
+
+				webChannel.registeredObjects:	[ moduleStoreWebChannel ]
+
+				QtObject {
+					id: moduleStoreWebChannel
+					WebChannel.id: "moduleStore"
+
+					function info() {
+						return moduleLibrary.getEnvironmentInfo();
+					}
+
+					signal environmentInfoChanged(var environmentInfo)
+
+					Component.onCompleted: moduleLibrary.environmentInfoChanged.connect(moduleStoreWebChannel.environmentInfoChanged)
+					Component.onDestruction: moduleLibrary.environmentInfoChanged.disconnect(moduleStoreWebChannel.environmentInfoChanged)
+
+					function uninstall(moduleName) {
+						moduleLibrary.uninstallJASPModule(moduleName)
+					}
+				}
+			}
+
+			Rectangle
+			{
+				id:					checkUpdatesDisabledMessage
+				visible:			!preferencesModel.checkUpdates
+				anchors.fill:		parent
+				color:				jaspTheme.uiBackground
+				border.width:		1
+				border.color:		jaspTheme.uiBorder
+
+				Column
+				{
+					anchors.centerIn:	parent
+					anchors.margins:	20 * preferencesModel.uiScale
+					width:				parent.width - 40 * preferencesModel.uiScale
+					spacing:			10 * preferencesModel.uiScale
+
+					Text
+					{
+						text:					qsTr("Not allowed to show the module library to install modules")
+						width:					parent.width
+						wrapMode:				Text.WordWrap
+						horizontalAlignment:	Text.AlignHCenter
+						font:					jaspTheme.fontGroupTitle
+						color:					jaspTheme.textEnabled
+					}
+
+					Text
+					{
+						width:					parent.width
+						wrapMode:				Text.WordWrap
+						horizontalAlignment: 	Text.AlignHCenter
+						text:					qsTr("In \"Preferences\" > \"Interface\" the \"Check for updates\" option is turned off. Please turn it on to see the module library.")
+						font:					jaspTheme.font
+						color:					jaspTheme.textEnabled
+					}
+				}
+			}
+		}
 		
 
 		Flickable
@@ -126,12 +248,12 @@ FocusScope
 			flickableDirection:		Flickable.VerticalFlick
 			contentHeight:			workspaceSpecs.visible ? workspaceSpecs.height : modules.height
 			contentWidth:			width
+			width:                  visible ? 340 * preferencesModel.uiScale : 0
 
 			anchors
 			{
 				top:				parent.top
-				topMargin:			5 * preferencesModel.uiScale
-				left:				parent.left
+				margins:			jaspTheme.contentMargin
 				right:				vertScroller.left
 				bottom:				parent.bottom
 			}
@@ -140,7 +262,7 @@ FocusScope
 			{
 				id:			workspaceSpecs
 				spacing:	jaspTheme.rowSpacing
-				width:		slidePart.width - vertScroller.width
+				width:		modulesFlick.width
 				visible:	ribbonModel.dataMode
 
 				MenuHeader
@@ -204,7 +326,7 @@ FocusScope
 			{
 				id:			modules
 				spacing:	4  * preferencesModel.uiScale
-                width:		(340 * preferencesModel.uiScale) - vertScroller.width
+                width:		modulesFlick
 				visible:	!ribbonModel.dataMode
                 anchors.right: vertScroller.visible ? vertScroller.left : parent.right
 
@@ -354,63 +476,11 @@ FocusScope
 							}
 						}
 					}
-				}
+				}				
 			}
 
 
-            WebEngineProfile {
-                id: moduleStoreProfile
-				downloadPath: jaspTmpDir
-
-                onDownloadRequested: function(request) {
-                    console.log("Download requested:", request.url)
-                    let name = request.downloadFileName
-                    let index = name.lastIndexOf('.');
-                    let extension = index !== -1 ? name.substring(index + 1) : '';
-                    if(extension === 'JASPModule') {
-						moduleStore.downloadInProgress = true
-						moduleStore.downloadTotal = request.totalBytes
-						moduleStore.downloadProgress = Qt.binding(function() { return request.receivedBytes; })
-						request.accept()
-                    }
-                    else
-                        request.cancel()
-                }
-
-                onDownloadFinished: function(request) {
-                    console.log("Download finished:", request.downloadFileName)
-                    let path = request.downloadDirectory + '/' + request.downloadFileName
-                    dynamicModules.installJASPModule(path)
-					moduleStore.downloadInProgress = false
-                }
-            }
-
-            WebEngineView
-            {
-				id:						moduleStore
-				visible:                pageLoaded && !ribbonModel.dataMode
-                clip:                   true
-				width:                  visible ? 500 * preferencesModel.uiScale : 0
-                anchors.right:          modules.left
-                height:                 modulesFlick.height - jaspTheme.contentMargin
-				url:					   (downloadInProgress || installInProgress)? 'https://static.jasp-stats.org/downloadProgressTest.html?' + 't=' + downloadTotal + '&p=' +  downloadProgress + '&i=' + installInProgress : dynamicModules.moduleStoreUrl
-                profile:                moduleStoreProfile
-
-				property bool	downloadInProgress: false;
-				property bool	installInProgress: false;
-				property int		downloadProgress;
-				property int		downloadTotal;
-				property bool		pageLoaded: false;
-
-				onLoadingChanged: (loadRequest) => {
-					if (!loadRequest.active && loadRequest.status === WebEngineView.LoadSucceededStatus) {
-						pageLoaded = true  // Show after load
-					} else if (loadRequest.status === WebEngineView.LoadFailedStatus) {
-						console.log("Page failed to load")
-					}
-				}
-
-            }
+            
         }
 
 		JASPScrollBar
@@ -428,6 +498,89 @@ FocusScope
 		}
 
 		focus: true
+
+		// Progress bar overlay for download and installation
+		Rectangle
+		{
+			id:				progressOverlay
+			anchors.fill:	parent
+			color:			jaspTheme.grayDarker
+			visible:		moduleStore.downloadInProgress || moduleLibrary.isInstalling
+			z:				10
+
+			Column
+			{
+				anchors.centerIn:	parent
+				spacing:			10 * preferencesModel.uiScale
+				width:				300 * preferencesModel.uiScale
+
+				Text
+				{
+					id:					progressText
+					text:				moduleStore.downloadInProgress ? qsTr("Downloading module...") : qsTr("Installing module...")
+					color:				"white"
+					font.pixelSize:		16 * preferencesModel.uiScale
+					anchors.horizontalCenter: parent.horizontalCenter
+				}
+
+				// TODO show progress of installation
+				Rectangle
+				{
+					id:				progressBarBackground
+					width:			parent.width
+					height:			30 * preferencesModel.uiScale
+					color:			jaspTheme.grayDarker
+					border.color:	jaspTheme.uiBorder
+					border.width:	1
+					radius:			3
+					visible:		moduleStore.downloadInProgress
+
+					Rectangle
+					{
+						id:		progressBarFill
+						width:	moduleStore.downloadTotal > 0 ? (parent.width * moduleStore.downloadProgress / moduleStore.downloadTotal) : 0
+						height:	parent.height
+						color:	jaspTheme.blue
+						radius:	parent.radius
+
+						Behavior on width
+						{
+							enabled: preferencesModel.animationsOn
+							PropertyAnimation { duration: 100 }
+						}
+					}
+
+					Text
+					{
+						anchors.centerIn:	parent
+						text:				moduleStore.downloadTotal > 0 ? Math.round((moduleStore.downloadProgress / moduleStore.downloadTotal) * 100) + "%" : "0%"
+						color:				"white"
+						font.pixelSize:		12 * preferencesModel.uiScale
+					}
+				}
+
+				RoundedButton
+				{
+					id:					cancelButton
+					text:				qsTr("Cancel")
+					width:				120 * preferencesModel.uiScale
+					height:				30 * preferencesModel.uiScale
+					anchors.horizontalCenter: parent.horizontalCenter
+					// TODO also allow to cancel installation
+					visible:			moduleStore.downloadInProgress
+
+					onClicked:
+					{
+						if (moduleStore.currentDownloadRequest !== null) {
+							moduleStore.currentDownloadRequest.cancel()
+						}
+						moduleStore.downloadInProgress = false
+						moduleStore.currentDownloadRequest = null
+					}
+					toolTip:			qsTr("Cancel download")
+				}
+			}
+		}
 
 		Item
 		{
