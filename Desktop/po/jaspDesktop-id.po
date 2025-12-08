@@ -645,10 +645,6 @@ msgid "Change the CRAN repository: "
 msgstr "Ubah repositori CRAN: "
 
 msgctxt "PrefsAdvanced|"
-msgid "Module library URL: "
-msgstr "URL pustaka modul: "
-
-msgctxt "PrefsAdvanced|"
 msgid "Generate markdown files for help"
 msgstr "Buat berkas markdown untuk bantuan"
 
@@ -1262,18 +1258,6 @@ msgstr ""
 msgctxt "ModulesMenu|"
 msgid "Uninstall module "
 msgstr ""
-
-msgctxt "ModulesMenu|"
-msgid "Not allowed to show the module library to install modules"
-msgstr "Tidak diizinkan untuk menampilkan perpustakaan modul untuk memasang modul"
-
-msgctxt "ModulesMenu|"
-msgid ""
-"In \"Preferences\" > \"Interface\" the \"Check for updates\" option is "
-"turned off. Please turn it on to see the module library."
-msgstr ""
-"Di \"Preferensi\" > \"Antarmuka\", opsi \"Periksa pembaruan\" dimatikan. "
-"Silakan aktifkan untuk melihat perpustakaan modul."
 
 msgctxt "RCommanderWindow|"
 msgid "R in JASP"

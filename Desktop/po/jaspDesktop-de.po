@@ -647,10 +647,6 @@ msgid "Change the CRAN repository: "
 msgstr "CRAN-Archiv wechseln: "
 
 msgctxt "PrefsAdvanced|"
-msgid "Module library URL: "
-msgstr "URL der Modulbibliothek: "
-
-msgctxt "PrefsAdvanced|"
 msgid "Generate markdown files for help"
 msgstr "Markdown-Dateien für Hilfe anlegen"
 
@@ -1262,18 +1258,6 @@ msgstr "Nicht einsatzbereit?"
 msgctxt "ModulesMenu|"
 msgid "Uninstall module "
 msgstr "Modul deinstallieren "
-
-msgctxt "ModulesMenu|"
-msgid "Not allowed to show the module library to install modules"
-msgstr "Es ist nicht erlaubt, die Modulbibliothek zum Installieren von Modulen anzuzeigen"
-
-msgctxt "ModulesMenu|"
-msgid ""
-"In \"Preferences\" > \"Interface\" the \"Check for updates\" option is "
-"turned off. Please turn it on to see the module library."
-msgstr ""
-"In \"Einstellungen\" > \"Benutzeroberfläche\" ist die Option \"Nach Updates suchen\" "
-"deaktiviert. Bitte aktivieren Sie diese, um die Modulbibliothek zu sehen."
 
 msgctxt "RCommanderWindow|"
 msgid "R in JASP"

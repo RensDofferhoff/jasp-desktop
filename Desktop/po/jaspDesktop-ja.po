@@ -624,10 +624,6 @@ msgid "Change the CRAN repository: "
 msgstr "CRANリポジトリの変更 "
 
 msgctxt "PrefsAdvanced|"
-msgid "Module library URL: "
-msgstr "モジュールライブラリのURL: "
-
-msgctxt "PrefsAdvanced|"
 msgid "Generate markdown files for help"
 msgstr "ヘルプ用マークダウンファイルの生成"
 
@@ -1235,18 +1231,6 @@ msgstr "使用する準備ができていませんか？"
 msgctxt "ModulesMenu|"
 msgid "Uninstall module "
 msgstr "モジュールのアンインストール "
-
-msgctxt "ModulesMenu|"
-msgid "Not allowed to show the module library to install modules"
-msgstr "モジュールをインストールするためのモジュールライブラリを表示することは許可されていません"
-
-msgctxt "ModulesMenu|"
-msgid ""
-"In \"Preferences\" > \"Interface\" the \"Check for updates\" option is "
-"turned off. Please turn it on to see the module library."
-msgstr ""
-"「設定」>「インターフェース」で「更新の確認」オプションがオフになっています。"
-"モジュールライブラリを表示するには、これをオンにしてください。"
 
 msgctxt "RCommanderWindow|"
 msgid "R in JASP"
