@@ -35,7 +35,7 @@ jobs:
           pip install argparse
 
       - name: Run script
-        run: python3 jasp-desktop/Tools/gatherBundles.py --prerelease  --core --json ../../Modules/modules-settings.json modules-registry/ ${{ secrets.GITHUB_TOKEN }} > jasp-desktop/Modules/remote-bundles.json
+        run: python3 jasp-desktop/Tools/gatherBundles.py --prerelease  --core --json jasp-desktop/Modules/modules-settings.json modules-registry/ ${{ secrets.GITHUB_TOKEN }} > jasp-desktop/Modules/remote-bundles.json
 
       - name: commit and push
         run: |
