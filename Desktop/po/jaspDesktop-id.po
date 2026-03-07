@@ -5740,3 +5740,54 @@ msgstr ""
 msgctxt "ModulesMenu|"
 msgid " (%1/%2)"
 msgstr ""
+
+msgctxt "PrefsResults|"
+msgid "Show interactive plots by default, where possible."
+msgstr ""
+
+msgctxt "PrefsResults|"
+msgid ""
+"When enabled shows the interactive plots by default, you can always switch "
+"them in the plots own dropdown too."
+msgstr ""
+
+msgctxt "PlotEditingReferenceLines|"
+msgid "Point"
+msgstr ""
+
+msgctxt "PlotEditingReferenceLines|"
+msgid "Horizontal Line"
+msgstr ""
+
+msgctxt "PlotEditingReferenceLines|"
+msgid "Vertical Line"
+msgstr ""
+
+msgctxt "PlotEditor|"
+msgid "References"
+msgstr ""
+
+msgctxt "PlotEditor::References|"
+msgid "Type"
+msgstr ""
+
+#, fuzzy
+msgctxt "PlotEditor::References|"
+msgid "Text"
+msgstr "Teks"
+
+msgctxt "PlotEditor::References|"
+msgid "Horizontal"
+msgstr ""
+
+msgctxt "PlotEditor::References|"
+msgid "Vertical"
+msgstr ""
+
+msgctxt "PlotEditor::References|"
+msgid "Remove"
+msgstr ""
+
+msgctxt "ResultMenuModel|"
+msgid "Switch Static/Interactive Image"
+msgstr ""

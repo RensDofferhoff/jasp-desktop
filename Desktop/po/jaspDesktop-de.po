@@ -1,15 +1,9 @@
 msgid ""
 msgstr ""
-"PO-Revision-Date: 2026-03-02 13:09+0000\n"
-"Last-Translator: Johannes Keyser <joke@fsfe.org>\n"
-"Language-Team: German <https://hosted.weblate.org/projects/jasp/jaspdesktop/"
-"de/>\n"
-"Language: de\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 5.16.1-dev\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "X-Language: de_DE\n"
 "X-Source-Language: American English\n"
 "X-Qt-Contexts: true\n"
@@ -6212,3 +6206,54 @@ msgstr "Installieren"
 msgctxt "ModulesMenu|"
 msgid " (%1/%2)"
 msgstr " (%1/%2)"
+
+msgctxt "PrefsResults|"
+msgid "Show interactive plots by default, where possible."
+msgstr ""
+
+msgctxt "PrefsResults|"
+msgid ""
+"When enabled shows the interactive plots by default, you can always switch "
+"them in the plots own dropdown too."
+msgstr ""
+
+msgctxt "PlotEditingReferenceLines|"
+msgid "Point"
+msgstr ""
+
+msgctxt "PlotEditingReferenceLines|"
+msgid "Horizontal Line"
+msgstr ""
+
+msgctxt "PlotEditingReferenceLines|"
+msgid "Vertical Line"
+msgstr ""
+
+msgctxt "PlotEditor|"
+msgid "References"
+msgstr ""
+
+msgctxt "PlotEditor::References|"
+msgid "Type"
+msgstr ""
+
+#, fuzzy
+msgctxt "PlotEditor::References|"
+msgid "Text"
+msgstr "Text"
+
+msgctxt "PlotEditor::References|"
+msgid "Horizontal"
+msgstr ""
+
+msgctxt "PlotEditor::References|"
+msgid "Vertical"
+msgstr ""
+
+msgctxt "PlotEditor::References|"
+msgid "Remove"
+msgstr ""
+
+msgctxt "ResultMenuModel|"
+msgid "Switch Static/Interactive Image"
+msgstr ""
