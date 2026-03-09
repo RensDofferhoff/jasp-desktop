@@ -62,14 +62,9 @@ if(WIN32)
     collect-junctions
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     BYPRODUCTS "${CMAKE_BINARY_DIR}/junctions.rds"
-    COMMAND cmd.exe /C CollectJunctions.cmd
+    COMMAND cmd.exe /C JunctionTool.exe -s Modules
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_BINARY_DIR}/junctions.rds" "${JASP_INSTALL_PREFIX}/")
-
-  add_custom_target(
-    recreate-junctions
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-    COMMAND cmd.exe /C RecreateJunctions.cmd)
 
   add_custom_target(
     zip
@@ -77,7 +72,7 @@ if(WIN32)
     BYPRODUCTS "${CMAKE_SOURCE_DIR}/JASP/JASP.zip"
     COMMAND ${CMAKE_COMMAND} -E make_directory JASP
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_BINARY_DIR}/junctions.rds" "${JASP_INSTALL_PREFIX}/"
+            "${CMAKE_BINARY_DIR}/junctions_map.txt" "${JASP_INSTALL_PREFIX}/"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_SOURCE_DIR}/Tools/windows/zip/staticRuntimeInfo.json" "${JASP_INSTALL_PREFIX}/"
     COMMAND cmd.exe /C ZIP.cmd)
@@ -87,7 +82,7 @@ if(WIN32)
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     COMMAND ${CMAKE_COMMAND} -E make_directory JASP
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_BINARY_DIR}/junctions.rds" "${JASP_INSTALL_PREFIX}/"
+            "${CMAKE_BINARY_DIR}/junctions_map.txt" "${JASP_INSTALL_PREFIX}/"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/Tools/windows/msix/staticRuntimeInfo.json" "${JASP_INSTALL_PREFIX}/"
     COMMAND cmd.exe /C msix.cmd)
