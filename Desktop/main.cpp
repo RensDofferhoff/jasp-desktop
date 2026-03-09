@@ -48,17 +48,18 @@ const std::string	jaspExtension		= ".jasp",
 bool createJunctions(const QString& toolPath, const QString& mapFilePath, const QString& baseDirPath)
 {
     QProcess junctionTool;
+    QString modulesPath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("Modules");
     
     junctionTool.setProcessChannelMode(QProcess::ForwardedChannels);
     
     junctionTool.setProgram(toolPath);
-    junctionTool.setArguments({"-c", QDir::toNativeSeparators(mapFilePath), QDir::toNativeSeparators(baseDirPath)});
+    junctionTool.setArguments({"-c", QDir::toNativeSeparators(mapFilePath), QDir::toNativeSeparators(baseDirPath), QDir::toNativeSeparators(modulesPath)});
 
-    std::cout << "Starting junction tool..." << std::endl;
+    Log::log() << "Starting junction tool..." << std::endl;
     junctionTool.start();
 
     if (!junctionTool.waitForStarted()) {
-        std::cerr << "Failed to start junction_tool.exe!" << std::endl;
+        Log::log() << "Failed to start junction_tool.exe!" << std::endl;
         return false;
     }
 
@@ -533,7 +534,7 @@ int main(int argc, char *argv[])
 				QMessageBox *msgBox = MessageForwarder::getInfoBox("Creating junctions, one moment please", "Creating junctions, one moment please");
 				msgBox->show();
 
-				if(!createJunctions("junctionTool", "junctions_map.txt", "Modules"))
+                if(!createJunctions("junctionTool", "junctions_map.txt", AppDirs::bundledModulesDir()))
 				{
 					std::cerr << "Modules folder missing and couldn't be created!\nContact the JASP team for support." << std::endl;
 					exit(254);

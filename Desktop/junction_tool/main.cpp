@@ -81,20 +81,31 @@ bool CreateTrueJunction(const fs::path& junctionLink, const fs::path& targetDir)
     if (!hFile.IsValid()) return false;
 
     // Build the Reparse Data
-    std::wstring ntTarget = L"\\??\\" + fs::absolute(targetDir).wstring();
-    size_t targetLenBytes = ntTarget.length() * sizeof(WCHAR);
+    fs::path absoluteTarget = fs::absolute(targetDir);
+    absoluteTarget.make_preferred(); 
+
+    std::wstring ntTarget = L"\\??\\" + absoluteTarget.wstring();
+    size_t ntTargetBytes = ntTarget.length() * sizeof(WCHAR);
+
+    std::wstring printName = absoluteTarget.wstring();
+    size_t printNameBytes = printName.length() * sizeof(WCHAR);
 
     BYTE buffer[MAXIMUM_REPARSE_DATA_BUFFER_SIZE] = {0};
     auto* reparseData = reinterpret_cast<PREPARSE_DATA_BUFFER>(buffer);
 
     reparseData->ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
     reparseData->MountPointReparseBuffer.SubstituteNameOffset = 0;
-    reparseData->MountPointReparseBuffer.SubstituteNameLength = static_cast<USHORT>(targetLenBytes);
-    reparseData->MountPointReparseBuffer.PrintNameOffset = static_cast<USHORT>(targetLenBytes + sizeof(WCHAR));
-    reparseData->MountPointReparseBuffer.PrintNameLength = 0;
+    reparseData->MountPointReparseBuffer.SubstituteNameLength = static_cast<USHORT>(ntTargetBytes);
+    reparseData->MountPointReparseBuffer.PrintNameOffset = static_cast<USHORT>(ntTargetBytes + sizeof(WCHAR));
+    reparseData->MountPointReparseBuffer.PrintNameLength = static_cast<USHORT>(printNameBytes);
     
-    memcpy(reparseData->MountPointReparseBuffer.PathBuffer, ntTarget.c_str(), targetLenBytes);
-    reparseData->ReparseDataLength = static_cast<USHORT>(sizeof(reparseData->MountPointReparseBuffer) + targetLenBytes);
+    memcpy(reinterpret_cast<BYTE*>(reparseData->MountPointReparseBuffer.PathBuffer) + reparseData->MountPointReparseBuffer.SubstituteNameOffset, 
+           ntTarget.c_str(), ntTargetBytes + sizeof(WCHAR));
+           
+    memcpy(reinterpret_cast<BYTE*>(reparseData->MountPointReparseBuffer.PathBuffer) + reparseData->MountPointReparseBuffer.PrintNameOffset, 
+           printName.c_str(), printNameBytes + sizeof(WCHAR));
+
+    reparseData->ReparseDataLength = static_cast<USHORT>(8 + ntTargetBytes + sizeof(WCHAR) + printNameBytes + sizeof(WCHAR));
 
     // Apply the reparse point (Transforms the folder into a Junction)
     DWORD bytesReturned;
@@ -156,7 +167,7 @@ void RunScan(const fs::path& baseDir, bool deleteAfterScan) {
     }
 }
 
-void RunCreate(const std::string& filename, const fs::path& baseDir) {
+void RunCreate(const std::string& filename, const fs::path& baseDirJunction, const fs::path& baseDirTarget) {
     std::ifstream inFile(filename);
     if (!inFile) { 
         std::cerr << "[ERROR] Could not open " << filename << "\n"; 
@@ -173,14 +184,46 @@ void RunCreate(const std::string& filename, const fs::path& baseDir) {
         fs::path relFrom = line.substr(0, sep);
         fs::path relTo   = line.substr(sep + 3);
 
-        fs::path absFrom = baseDir / relFrom;
-        fs::path absTo   = baseDir / relTo;
+        // Calculate independent absolute paths for junction location and target location
+        fs::path absFrom = baseDirJunction / relFrom;
+        fs::path absTo   = baseDirTarget / relTo;
 
         if (CreateTrueJunction(absFrom, absTo)) {
             std::cout << "[CREATE] " << absFrom.string() << "\n";
             successCount++;
         } else {
             std::cerr << "[ERROR] Failed on: " << absFrom.string() << " (Win32 Code: " << GetLastError() << ")\n";
+            failCount++;
+        }
+    }
+
+    //Handle special dirs 'manifests' and 'Tools'
+    std::cout << "\nProcessing special folders and files...\n";
+    std::vector<std::string> specialDirs = {"manifests", "Tools"};
+    for (const auto& dirName : specialDirs) {
+        fs::path targetDir = baseDirTarget / dirName;
+        fs::path junctionLink = baseDirJunction / dirName;
+
+        if (fs::exists(targetDir) && fs::is_directory(targetDir)) {
+            if (CreateTrueJunction(junctionLink, targetDir)) {
+                std::cout << "[CREATE SPECIAL] " << junctionLink.string() << "\n";
+                successCount++;
+            } else {
+                std::cerr << "[ERROR] Failed on special dir: " << junctionLink.string() << " (Win32 Code: " << GetLastError() << ")\n";
+                failCount++;
+            }
+        }
+    }
+
+    // Check for 'modules-settings.json'
+    fs::path settingsFileTarget = baseDirTarget / "modules-settings.json";
+    fs::path settingsFileDest = baseDirJunction / "modules-settings.json";
+    if (fs::exists(settingsFileTarget) && fs::is_regular_file(settingsFileTarget)) {
+        try {
+            fs::copy_file(settingsFileTarget, settingsFileDest, fs::copy_options::overwrite_existing);
+            std::cout << "[COPIED SPECIAL] " << settingsFileDest.string() << "\n";
+        } catch (const fs::filesystem_error& e) {
+            std::cerr << "[ERROR] Failed to copy modules-settings.json: " << e.what() << "\n";
             failCount++;
         }
     }
@@ -201,10 +244,10 @@ int main(int argc, char* argv[]) {
         std::cout << "--- NTFS Junction Tool ---\n"
                   << "Scan Mode:          " << argv[0] << " -s  <search_and_base_dir>\n"
                   << "Scan & Delete Mode: " << argv[0] << " -sd <search_and_base_dir>\n"
-                  << "Create Mode:        " << argv[0] << " -c  <map_file> <new_base_dir>\n"
+                  << "Create Mode:        " << argv[0] << " -c  <map_file> <base_dir_junction> <base_dir_target>\n"
                   << "\nExample:\n"
                   << "  " << argv[0] << " -sd \"C:\\JASP\\Modules\"\n"
-                  << "  " << argv[0] << " -c  \"junctions_map.txt\" \"Modules\"\n";
+                  << "  " << argv[0] << " -c  \"junctions_map.txt\" \"C:\\Dest\\Modules\" \"C:\\JASP\\Modules\"\n";
         return 1;
     }
 
@@ -216,11 +259,12 @@ int main(int argc, char* argv[]) {
         } else if (mode == "-sd") {
             RunScan(fs::absolute(argv[2]).lexically_normal(), true);
         } else if (mode == "-c") {
-            if (argc < 4) {
-                std::cerr << "[ERROR] Create Mode requires both a map file and a base directory.\n";
+            // Require 5 arguments (exe, -c, file, baseDirJunction, baseDirTarget)
+            if (argc < 5) {
+                std::cerr << "[ERROR] Create Mode requires a map file, a base junction directory, and a base target directory.\n";
                 return 1;
             }
-            RunCreate(argv[2], fs::absolute(argv[3]).lexically_normal());
+            RunCreate(argv[2], fs::absolute(argv[3]).lexically_normal(), fs::absolute(argv[4]).lexically_normal());
         } else {
             std::cerr << "[ERROR] Unknown mode. Use -s, -sd, or -c.\n";
             return 1;
