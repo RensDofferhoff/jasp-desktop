@@ -25,8 +25,8 @@
             "checksum": "32b9938b5547bbc72739ebc0fa6e7007da4b1539615e96729a30428e90555f92"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.95.5-beta.10_R-4-5-2_Beta/jaspTTests_0.95.5-beta.10_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "99e8d02b86079c554d9e50dc6b5e6d146e42a2c92ee7fc6f9c1ec35726d654d7"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.0-beta.0_R-4-5-2_Beta/jaspTTests_0.96.0-beta.0_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "71797d9d9ed8e7163d56277e50f6be21414cdd835bd93d65fda7b83917c10d2f"
         }
     ],
     "MacOS-arm64": [
@@ -55,8 +55,8 @@
             "checksum": "ed998f3c58056c73a32d63d7f0afd0171b0a7836d527f14d81342a4e7e129d23"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.95.5-beta.9_R-4-5-2_Beta/jaspTTests_0.95.5-beta.9_MacOS_arm64_R-4-5-2.JASPModule",
-            "checksum": "50bd6748beb6da5f21dea12e8ff34d39c0b0a938c747d0fb6eae2e500aec3e85"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.0-beta.0_R-4-5-2_Beta/jaspTTests_0.96.0-beta.0_MacOS_arm64_R-4-5-2.JASPModule",
+            "checksum": "c1c8074b215a1094eeeeb3d5b3187804b9355bc512dfc5ad38f1e2fed90405b0"
         }
     ],
     "MacOS-x86_64": [
@@ -85,8 +85,8 @@
             "checksum": "c95bd7ad4310a12522532e273054032ba932faef804668f6908293b1147c4898"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.95.5-beta.8_R-4-5-2_Beta/jaspTTests_0.95.5-beta.8_MacOS_x86_64_R-4-5-2.JASPModule",
-            "checksum": "2f55bc2ec5ca075acf87b1a42a4233c4b383ae48cea90365483bb6b454fd906f"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.0-beta.0_R-4-5-2_Beta/jaspTTests_0.96.0-beta.0_MacOS_x86_64_R-4-5-2.JASPModule",
+            "checksum": "3dc3edbdef93827c6987b3486b127450cba6a11ba93a9dbee707f007a139161f"
         }
     ]
 }
