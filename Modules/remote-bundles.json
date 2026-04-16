@@ -25,8 +25,8 @@
             "checksum": "a98518d50134e25a9f6cdd80c5f5063fdb5db6fe7c612c22dcb4a15886c45a40"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.2-beta.2_R-4-5-2_Beta/jaspTTests_0.96.2-beta.2_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "aa183f388d947469f7bae7e01298ca656873993da779b43c5fb4e10c99a4e7e8"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.2-beta.3_R-4-5-2_Beta/jaspTTests_0.96.2-beta.3_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "ff7b4e0c0a9196499e863aad02ba0fd11a979bc3d327db15332e392802948bf6"
         }
     ],
     "MacOS-arm64": [
@@ -55,8 +55,8 @@
             "checksum": "3d5da6aa1199be740e6506614656d57211c1b46f19f16328bacbc09f10bb518e"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.2-beta.2_R-4-5-2_Beta/jaspTTests_0.96.2-beta.2_MacOS_arm64_R-4-5-2.JASPModule",
-            "checksum": "87727ecfe6b7c6669f56bf276a3786a7d4022d8cb560d2a161ce856d6f5e027a"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.2-beta.3_R-4-5-2_Beta/jaspTTests_0.96.2-beta.3_MacOS_arm64_R-4-5-2.JASPModule",
+            "checksum": "8ce1512049ebcf630f558261809449ca7c17f12a037175736debeef576daeab2"
         }
     ],
     "MacOS-x86_64": [
@@ -85,8 +85,8 @@
             "checksum": "06f3c681115e5fe8fc92cc39caf3d98ab4f608e4ef8620a2fb65651b365038e1"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.2-beta.2_R-4-5-2_Beta/jaspTTests_0.96.2-beta.2_MacOS_x86_64_R-4-5-2.JASPModule",
-            "checksum": "c48d46e8af23b2123d7ddadecab5f16aab7e1b979191d03a0845499b18bf15b6"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.2-beta.3_R-4-5-2_Beta/jaspTTests_0.96.2-beta.3_MacOS_x86_64_R-4-5-2.JASPModule",
+            "checksum": "edb5f5ffbb87325be6153924d786dc93a7d8c4bdc636480cd75b3562285fc92e"
         }
     ]
 }
