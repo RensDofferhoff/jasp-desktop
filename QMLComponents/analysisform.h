@@ -58,6 +58,7 @@ class AnalysisForm : public QQuickItem
 	Q_PROPERTY(QVariant		analysis				READ analysis												NOTIFY analysisChanged				)
 	Q_PROPERTY(QVariantList	optionNameConversion	READ optionNameConversion	WRITE setOptionNameConversion	NOTIFY optionNameConversionChanged	)
 	Q_PROPERTY(bool			showRButton				READ showRButton											NOTIFY showRButtonChanged			)
+	Q_PROPERTY(bool			showRoboReportButton	READ showRoboReportButton									NOTIFY showRoboReportButtonChanged	)
 	Q_PROPERTY(bool			developerMode			READ developerMode											NOTIFY developerModeChanged			)
 	Q_PROPERTY(QString		rSyntaxText				READ rSyntaxText											NOTIFY rSyntaxTextChanged			)
 	Q_PROPERTY(bool			showAllROptions			READ showAllROptions		WRITE setShowAllROptions		NOTIFY showAllROptionsChanged		)
@@ -90,6 +91,7 @@ public:
 	bool					wasUpgraded()					const	{ return _analysis ? _analysis->wasUpgraded() : false;						}
 	bool					formCompleted()					const	{ return _formCompleted;	}
 	bool					showRButton()					const	{ return _showRButton;		}
+	bool					showRoboReportButton()			const	{ return _showRoboReportButton;		}
 	bool					developerMode()					const	{ return _developerMode;	}
 	QString					rSyntaxText()					const;
 	bool					showAllROptions()				const;
@@ -101,10 +103,13 @@ public slots:
 	void					setOptionNameConversion(	const QVariantList	&	conv);
 	void					setTitle(					QString					title);
 	void					setShowRButton(				bool					showRButton);
+	void					setShowRoboReportButton(	bool					showRoboReportButton);
 	void					setDeveloperMode(			bool					developerMode);
 	void					setShowAllROptions(			bool					showAllROptions);
 	void					sendRSyntax(				QString					text);
 	void					toggleRSyntax();
+	void					runRoboReport();
+
 
 signals:
 	void					formChanged(				AnalysisBase	*	analysis);
@@ -125,6 +130,7 @@ signals:
 	void					optionNameConversionChanged();
 	void					titleChanged();
 	void					showRButtonChanged();
+	void					showRoboReportButtonChanged();
 	void					developerModeChanged();
 	void					rSyntaxTextChanged();
 	void					showAllROptionsChanged();
@@ -246,7 +252,8 @@ private:
 	qstringset										_waitingFilters;
 	RSyntax										*	_rSyntax						= nullptr;
 	bool											_showRButton					= false,
-													_developerMode					= false;
+													_developerMode					= false,
+													_showRoboReportButton			= true;
 	JASPControl*									_activeJASPControl				= nullptr;
 };
 

@@ -393,7 +393,7 @@ DropArea
 				{
 					id:					rSyntaxButton
 					width:				height
-					iconSource:			enabled ? jaspTheme.iconPath + "/R-roundbutton.svg" :  jaspTheme.iconPath + "/R-roundbutton-disabled.svg"
+                    iconSource:			enabled ? jaspTheme.iconPath + "/R-roundbutton.svg" :  jaspTheme.iconPath + "/R-roundbutton-disabled.svg"
 					enabled:			expanderButton.expanded
 					onClicked:			if (formParent.myForm) formParent.myForm.toggleRSyntax();
 					toolTip:			preferencesModel.showRSyntax ? qsTr("Hide R Syntax") : qsTr("Show R syntax")
@@ -403,12 +403,33 @@ DropArea
 					anchors
 					{
 						top:			parent.top
-						right:			editButton.left
+                        right:			roboReportButton.left
 						bottom:			parent.bottom
 						topMargin:		editButton.anchors.topMargin
 						bottomMargin:	editButton.anchors.bottomMargin
 					}
 				}
+
+                MenuButton
+                {
+                    id:					roboReportButton
+                    width:				height
+                    iconSource:			enabled ? jaspTheme.iconPath + "/roboreport.png" :  jaspTheme.iconPath + "/R-roundbutton-disabled.svg"
+                    enabled:			expanderButton.expanded
+                    onClicked:			if (formParent.myForm) formParent.myForm.runRoboReport();
+                    toolTip:			qsTr("Run RoboReport")
+                    radius:				height
+                    opacity:			editButton.opacity
+                    visible:            formParent.myForm && formParent.myForm.showRoboReportButton
+                    anchors
+                    {
+                        top:			parent.top
+                        right:			editButton.left
+                        bottom:			parent.bottom
+                        topMargin:		editButton.anchors.topMargin
+                        bottomMargin:	editButton.anchors.bottomMargin
+                    }
+                }
 
 				MenuButton
 				{

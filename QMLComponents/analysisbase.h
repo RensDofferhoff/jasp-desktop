@@ -101,6 +101,8 @@ private:
 protected:
 	static const std::string	emptyString; ///< Otherwise we return references to a temporary object (std::string(""))
 	static const stringvec		emptyStringVec;
+
+	//bool underRoboReportControl
 };
 
 #endif // ANALYSISBASE_H

@@ -1054,6 +1054,17 @@ void AnalysisForm::setShowRButton(bool showRButton)
 	emit showRButtonChanged();
 }
 
+void AnalysisForm::setShowRoboReportButton(bool showRoboReportButton)
+{
+	if (_showRoboReportButton == showRoboReportButton)
+		return;
+
+	_showRoboReportButton = showRoboReportButton;
+
+	emit showRoboReportButtonChanged();
+}
+
+
 void AnalysisForm::setDeveloperMode(bool developerMode)
 {
 	if (_developerMode == developerMode)
@@ -1084,6 +1095,11 @@ void AnalysisForm::toggleRSyntax()
 {
 	PreferencesModelBase* pref = PreferencesModelBase::preferences();
 	pref->setShowRSyntax(!pref->showRSyntax());
+}
+
+void AnalysisForm::runRoboReport()
+{
+	//return _analysis->;
 }
 
 void AnalysisForm::setActiveJASPControl(JASPControl* control, bool hasActiveFocus)
