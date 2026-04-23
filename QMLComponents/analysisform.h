@@ -59,6 +59,7 @@ class AnalysisForm : public QQuickItem
 	Q_PROPERTY(QVariantList	optionNameConversion	READ optionNameConversion	WRITE setOptionNameConversion	NOTIFY optionNameConversionChanged	)
 	Q_PROPERTY(bool			showRButton				READ showRButton											NOTIFY showRButtonChanged			)
 	Q_PROPERTY(bool			showRoboReportButton	READ showRoboReportButton									NOTIFY showRoboReportButtonChanged	)
+	Q_PROPERTY(bool			roboReportSectionVisible READ roboReportSectionVisible								NOTIFY roboReportSectionVisibleChanged)
 	Q_PROPERTY(bool			developerMode			READ developerMode											NOTIFY developerModeChanged			)
 	Q_PROPERTY(QString		rSyntaxText				READ rSyntaxText											NOTIFY rSyntaxTextChanged			)
 	Q_PROPERTY(bool			showAllROptions			READ showAllROptions		WRITE setShowAllROptions		NOTIFY showAllROptionsChanged		)
@@ -92,6 +93,7 @@ public:
 	bool					formCompleted()					const	{ return _formCompleted;	}
 	bool					showRButton()					const	{ return _showRButton;		}
 	bool					showRoboReportButton()			const	{ return _showRoboReportButton;		}
+	bool					roboReportSectionVisible()		const	{ return _roboReportSectionVisible;	}
 	bool					developerMode()					const	{ return _developerMode;	}
 	QString					rSyntaxText()					const;
 	bool					showAllROptions()				const;
@@ -108,7 +110,8 @@ public slots:
 	void					setShowAllROptions(			bool					showAllROptions);
 	void					sendRSyntax(				QString					text);
 	void					toggleRSyntax();
-	void					runRoboReport();
+	void					toggleRoboReport();
+	void					runRoboReport(				QString					text);
 
 
 signals:
@@ -131,6 +134,7 @@ signals:
 	void					titleChanged();
 	void					showRButtonChanged();
 	void					showRoboReportButtonChanged();
+	void					roboReportSectionVisibleChanged();
 	void					developerModeChanged();
 	void					rSyntaxTextChanged();
 	void					showAllROptionsChanged();
@@ -253,7 +257,8 @@ private:
 	RSyntax										*	_rSyntax						= nullptr;
 	bool											_showRButton					= false,
 													_developerMode					= false,
-													_showRoboReportButton			= true;
+													_showRoboReportButton			= true,
+													_roboReportSectionVisible		= false;
 	JASPControl*									_activeJASPControl				= nullptr;
 };
 

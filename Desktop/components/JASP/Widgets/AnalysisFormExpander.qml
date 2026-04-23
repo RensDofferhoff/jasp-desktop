@@ -416,8 +416,8 @@ DropArea
                     width:				height
                     iconSource:			enabled ? jaspTheme.iconPath + "/roboreport.png" :  jaspTheme.iconPath + "/R-roundbutton-disabled.svg"
                     enabled:			expanderButton.expanded
-                    onClicked:			if (formParent.myForm) formParent.myForm.runRoboReport();
-                    toolTip:			qsTr("Run RoboReport")
+                    onClicked:			if (formParent.myForm) formParent.myForm.toggleRoboReport();
+                    toolTip:			qsTr("RoboReport")
                     radius:				height
                     opacity:			editButton.opacity
                     visible:            formParent.myForm && formParent.myForm.showRoboReportButton

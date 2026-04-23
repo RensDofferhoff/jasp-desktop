@@ -67,6 +67,7 @@ public:
 						void				setQmlError(const QString &newQmlError);
 						void				sendRScript(const QString & script, const QString & controlName, bool whiteListedVersion)		{ emit sendRScriptSignal(script, controlName, whiteListedVersion, tq(module())); }
 						void				sendFilter(	const QString & name)																{ emit sendFilterSignal(name, tq(module())); }
+						void				runRoboReport(QString text);
 
 
 public slots:

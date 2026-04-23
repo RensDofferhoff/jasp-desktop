@@ -273,3 +273,8 @@ const Json::Value &AnalysisBase::boundValue(const std::string &name, const QVect
 	if (found && !parentBoundValue.isNull() && parentBoundValue.isObject())	return parentBoundValue[name];
 	else																	return Json::Value::null;
 }
+
+void AnalysisBase::runRoboReport(QString text)
+{
+	// To be implemented: Add the logic to forward the roboreport syntax to the engine
+}

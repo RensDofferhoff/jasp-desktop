@@ -110,7 +110,7 @@ AnalysisForm
 	{
 		id:				formContent
 		width:			parent.width
-		height:			oldFileMessagesBox.height + errorMessagesBox.height + warningMessagesBox.height + rSyntaxElement.height + contentArea.implicitHeight
+		height:			oldFileMessagesBox.height + errorMessagesBox.height + warningMessagesBox.height + rSyntaxElement.height + roboReportElement.height + contentArea.implicitHeight
 		anchors
 		{
 			top:		form.top
@@ -291,11 +291,38 @@ AnalysisForm
 			}
 		}
 
+	Item
+	{
+		id:					roboReportElement
+		anchors.top:		rSyntaxElement.bottom
+		width:				parent.width
+		height:				visible ? roboReportArea.y + roboReportArea.height : 0
+		visible:			form.roboReportSectionVisible
+
+		Button
+		{
+			id:					runRoboReportButton
+			label:				qsTr("Run Roboreport")
+			onClicked:			form.runRoboReport(roboReportArea.text)
+		}
+
+		TextArea
+		{
+			id:					roboReportArea
+			anchors.top:		runRoboReportButton.bottom
+			anchors.topMargin:	jaspTheme.generalAnchorMargin
+			width:				parent.width
+			height:				visible ? 100 * preferencesModel.uiScale : 0
+			text:				""
+			isBound:			false
+		}
+	}
+
 		GridLayout
 		{
 			id:					contentArea
-			anchors.top:		rSyntaxElement.bottom
-			anchors.margins:	warningMessagesBox.visible || errorMessagesBox.visible || rSyntaxElement.visible ? jaspTheme.generalAnchorMargin : 0
+		anchors.top:		roboReportElement.bottom
+		anchors.margins:	warningMessagesBox.visible || errorMessagesBox.visible || rSyntaxElement.visible || roboReportElement.visible ? jaspTheme.generalAnchorMargin : 0
 			width:				form.implicitWidth
 		}
 	}

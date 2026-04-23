@@ -1097,9 +1097,16 @@ void AnalysisForm::toggleRSyntax()
 	pref->setShowRSyntax(!pref->showRSyntax());
 }
 
-void AnalysisForm::runRoboReport()
+void AnalysisForm::toggleRoboReport()
 {
-	//return _analysis->;
+	_roboReportSectionVisible = !_roboReportSectionVisible;
+	emit roboReportSectionVisibleChanged();
+}
+
+void AnalysisForm::runRoboReport(QString text)
+{
+	if (_analysis && !_removed)
+		_analysis->runRoboReport(text);
 }
 
 void AnalysisForm::setActiveJASPControl(JASPControl* control, bool hasActiveFocus)
