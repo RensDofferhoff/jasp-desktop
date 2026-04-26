@@ -1273,3 +1273,19 @@ bool Analysis::isColumnFreeOrMine(const QString & columnName) const
 
 	return col->analysisId() == id();
 }
+
+
+bool Analysis::roboReportActive() const
+{
+	return _roboReportActive;
+}
+
+void Analysis::setRoboReportActive(bool value)
+{
+	if (_roboReportActive == value)
+	{
+		return;
+	}
+
+	_roboReportActive = value;
+}

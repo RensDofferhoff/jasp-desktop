@@ -73,6 +73,8 @@ public:
 	void				setResults(			const Json::Value & results, analysisResultStatus	status, const Json::Value & progress = Json::nullValue) { setResults(results, analysisResultsStatusToAnalysisStatus(status), progress); }
 	void				setResults(			const Json::Value & results, Status					status, const Json::Value & progress = Json::nullValue);
 	void				imageSaved(			const Json::Value & results);
+	bool				roboReportActive()	const override;
+	void				setRoboReportActive(bool value) override;
 	void				saveImage(			const Json::Value & options);
 	void				editImage(			const Json::Value & options);
 	void				imageEdited(		const Json::Value & results);
@@ -249,6 +251,7 @@ private:
 								_optionsFromDifferentVersion	= false,
 								_storedWithoutState				= false,
 								_tryToFixNotes					= false,
+								_roboReportActive				= false,
 								_hasReport						= false,
 								_beingTranslated				= false;
 	int							_revision						= 0;
