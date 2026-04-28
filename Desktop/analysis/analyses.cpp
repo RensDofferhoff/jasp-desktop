@@ -866,14 +866,9 @@ void Analyses::registerRpcHandlers()
 	if (!disp)
 		return;
 
-	// Fire-and-forget: create and start an analysis by module + name
-	// Uses the param-spec overload: required params are validated
-	// automatically, and the handler receives a guaranteed-complete
-	// params object.
-	disp->registerMethod(
-		"analysis.create",
-		{{"module", true}, {"analysis", true}},
-		[](const Json::Value& params) -> Json::Value
+	// Looked up by name from the RPCSpec.json registry.
+	// Spec defines params & result schema — validated automatically.
+	disp->registerMethodByName("analysis.create", [](const Json::Value& params) -> Json::Value
 		{
 			QString module   = QString::fromStdString(params["module"].asString());
 			QString analysis = QString::fromStdString(params["analysis"].asString());

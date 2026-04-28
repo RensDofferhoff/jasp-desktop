@@ -105,10 +105,10 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 	_package				= new DataSetPackage(this);
 	_dynamicModules			= new DynamicModules(this);
 	_upgrader				= new Upgrader(this);
-	_analyses				= new Analyses();
-	_engineSync				= new EngineSync(this);
 	_rpcDispatcher = new JaspRpcDispatcher();
 	_rpcServer = new JaspRpcServer(*_rpcDispatcher, "127.0.0.1", 5555, "/rpc", this);
+	_analyses				= new Analyses();
+	_engineSync				= new EngineSync(this);
 	_datasetTableModel		= new DataSetTableModel();
 	_dataSetModelVarInfo	= new DataSetTableModel(false);
 	_columnModel			= new ColumnModel(_datasetTableModel);

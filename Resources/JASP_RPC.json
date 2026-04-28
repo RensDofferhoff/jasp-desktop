@@ -1,0 +1,90 @@
+{
+  "openrpc": "1.2.6",
+  "info": {
+    "title": "JASP RPC API",
+    "version": "1.0.0"
+  },
+  "methods": [
+    {
+      "name": "analysis.create",
+      "summary": "Create and start an analysis by module name and analysis name.",
+      "params": [
+        {
+          "name": "module",
+          "required": true,
+          "description": "JASP module name, e.g. 'jaspTTests'.",
+          "schema": { "type": "string" }
+        },
+        {
+          "name": "analysis",
+          "required": true,
+          "description": "Analysis name within the module, e.g. 'TTestIndependent'.",
+          "schema": { "type": "string" }
+        }
+      ],
+      "result": {
+        "name": "analysis.create.result",
+        "description": "Metadata about the created analysis.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "description": "Always 'success' when the analysis was created."
+            },
+            "analysisId": {
+              "type": "integer",
+              "description": "Unique integer identifier for the new analysis."
+            },
+            "module": {
+              "type": "string",
+              "description": "The module name, echoed back."
+            },
+            "analysis": {
+              "type": "string",
+              "description": "The analysis name, echoed back."
+            }
+          },
+          "required": ["status", "analysisId", "module", "analysis"]
+        }
+      }
+    },
+    {
+      "name": "ping",
+      "summary": "Simple connectivity check. Always returns pong.",
+      "params": [],
+      "result": {
+        "name": "ping.result",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string",
+              "description": "Always 'pong'."
+            }
+          },
+          "required": ["message"]
+        }
+      }
+    },
+    {
+      "name": "rpc.discover",
+      "summary": "Schema discovery. Returns the names of all registered RPC methods.",
+      "params": [],
+      "result": {
+        "name": "rpc.discover.result",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "methods": {
+              "type": "array",
+              "description": "List of registered method name strings.",
+              "items": { "type": "string" }
+            }
+          },
+          "required": ["methods"]
+        }
+      }
+    }
+  ]
+}
