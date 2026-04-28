@@ -885,4 +885,44 @@ void Analyses::registerRpcHandlers()
 			response["analysis"]   = analysis.toStdString();
 			return response;
 		});
+
+	disp->registerMethodByName("analysis.setOptions", [](const Json::Value& params) -> Json::Value
+		{
+			int analysisId = params["analysisId"].asInt();
+			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
+			if (!a)
+				return JaspRpcDispatcher::errorResult(
+					"Analysis not found: " + std::to_string(analysisId));
+
+			AnalysisForm* form = a->form();
+			if (!form)
+				return JaspRpcDispatcher::errorResult(
+					"Analysis form not available for analysis " + std::to_string(analysisId));
+
+			QVariantMap optionsMap = jsonToQVariant(params["options"]).toMap();
+			form->setOptions(optionsMap);
+			a->boundValueChangedHandler();
+
+			Json::Value response = JaspRpcDispatcher::successResult();
+			response["analysisId"] = analysisId;
+			response["module"]     = a->module();
+			response["analysis"]   = a->name();
+			return response;
+		});
+
+	disp->registerMethodByName("analysis.getOptions", [](const Json::Value& params) -> Json::Value
+		{
+			int analysisId = params["analysisId"].asInt();
+			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
+			if (!a)
+				return JaspRpcDispatcher::errorResult(
+					"Analysis not found: " + std::to_string(analysisId));
+
+			Json::Value response = JaspRpcDispatcher::successResult();
+			response["analysisId"] = analysisId;
+			response["module"]     = a->module();
+			response["analysis"]   = a->name();
+			response["options"]    = a->boundValues();
+			return response;
+		});
 }

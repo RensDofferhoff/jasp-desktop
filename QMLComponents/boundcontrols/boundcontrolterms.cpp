@@ -165,7 +165,30 @@ bool BoundControlTerms::isJsonValid(const Json::Value &optionValue) const
 
 Json::Value BoundControlTerms::_makeOption(const Terms& terms, const Terms::RelatedValuesPerTerm& controlValues) const
 {
-	return terms.getOptions(controlValues, _optionKeyValue(), _optionKeyLabel(), _listView->containsInteractions(), _listView->hasRowComponent(), _isSingleRow);
+	Json::Value result = terms.getOptions(controlValues, _optionKeyValue(), _optionKeyLabel(),
+										  _listView->containsInteractions(), _listView->hasRowComponent(), _isSingleRow);
+
+	// Add eligible variables (those still available in the source list)
+	ListModelTermsAvailable* availModel = _termsModel->availableModel();
+	if (availModel)
+	{
+		Json::Value eligible(Json::objectValue);
+		Json::Value variables(Json::arrayValue);
+		Json::Value types(Json::arrayValue);
+
+		const Terms& availableTerms = availModel->terms();
+		for (const Term& term : availableTerms)
+		{
+			variables.append(fq(term.value()));
+			types.append(columnTypeToString(term.type()));
+		}
+
+		eligible["variables"]	= variables;
+		eligible["types"]		= types;
+		result["eligible_variables"] = eligible;
+	}
+
+	return result;
 }
 
 std::string BoundControlTerms::_optionKeyValue() const
