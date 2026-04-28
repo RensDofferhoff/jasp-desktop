@@ -55,7 +55,7 @@ qt_add_executable(
 
 set(
     QML_IMPORT_PATH
-	"${PROJECT_SOURCE_DIR}/Desktop/components" 
+	"${PROJECT_SOURCE_DIR}/Desktop/components"
 	"${PROJECT_SOURCE_DIR}/QMLComponents/components"
     CACHE
     PATH
@@ -153,6 +153,7 @@ target_link_libraries(
     Qt::WebChannelQuick
     Qt::Svg
     Qt::Network
+    Qt6::HttpServer
 	#? Qt::PrintSupport
     Qt::Xml
     Qt::Sql

@@ -25,6 +25,7 @@
 #include <QTimer>
 #include <QFile>
 #include "log.h"
+#include "rpc/jasprpcdispatcher.h"
 
 using namespace std;
 using Modules::Upgrader;
@@ -36,6 +37,8 @@ Analyses::Analyses()
 {
 	if(_singleton) throw std::runtime_error("Can only instantiate single copy of Analyses!");
 	_singleton = this;
+
+	registerRpcHandlers();
 
 	new KnownIssues(this);
 }
@@ -855,4 +858,36 @@ void Analyses::allUserDataChanged(QString json)
 {
 	Json::Reader().parse(fq(json), _allUserData);
 	setAnalysesUserData(_allUserData);
+}
+
+void Analyses::registerRpcHandlers()
+{
+	auto* disp = JaspRpcDispatcher::singleton();
+	if (!disp)
+		return;
+
+	// Fire-and-forget: create and start an analysis by module + name
+	// Uses the param-spec overload: required params are validated
+	// automatically, and the handler receives a guaranteed-complete
+	// params object.
+	disp->registerMethod(
+		"analysis.create",
+		{{"module", true}, {"analysis", true}},
+		[](const Json::Value& params) -> Json::Value
+		{
+			QString module   = QString::fromStdString(params["module"].asString());
+			QString analysis = QString::fromStdString(params["analysis"].asString());
+
+			Analysis* a = Analyses::analyses()->createAnalysis(module, analysis);
+			if (!a)
+				return JaspRpcDispatcher::errorResult(
+					"Failed to create analysis: " + module.toStdString() +
+					"::" + analysis.toStdString());
+
+			Json::Value response = JaspRpcDispatcher::successResult();
+			response["analysisId"] = static_cast<int>(a->id());
+			response["module"]     = module.toStdString();
+			response["analysis"]   = analysis.toStdString();
+			return response;
+		});
 }

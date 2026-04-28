@@ -91,6 +91,7 @@ if(NOT FLATPAK_USED)
       QuickControls2Impl
       QmlWorkerScript
       QuickWidgets
+      HttpServer
   )
   if(NOT USE_QT_STATIC_LIBS)
     find_package(
@@ -130,7 +131,8 @@ else()
                QuickControls2
                QuickControls2Impl
                QmlWorkerScript
-               QuickWidgets)
+               QuickWidgets
+               HttpServer)
 
   find_package(
     Qt6WebEngineQuick
@@ -188,8 +190,8 @@ if(LINUX)
 
   # ---- libsodium ----
   message(CHECK_START "Looking for `libsodium`")
-    set(libsodium_INCLUDE_DIR /usr/include /app/lib64/)
-    set(LIBSODIUM_LIBRARY_DIRS /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /app/include/)
+  set(libsodium_INCLUDE_DIR /usr/include /app/lib64/)
+  set(LIBSODIUM_LIBRARY_DIRS /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /app/include/)
 
   message(CHECK_START "Looking for libsodium.so")
   find_library(libsodium_LIBRARIES libsodium.so
@@ -208,8 +210,8 @@ if(LINUX)
 
   # ---- FreeXL ----
   message(CHECK_START "Looking for `libfreexl`")
-    set(LIBFREEXL_INCLUDE_DIRS /usr/include /app/lib64/)
-    set(LIBFREEXL_LIBRARY_DIRS /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /app/include/)
+  set(LIBFREEXL_INCLUDE_DIRS /usr/include /app/lib64/)
+  set(LIBFREEXL_LIBRARY_DIRS /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /app/include/)
 
   message(CHECK_START "Looking for libfreexl.so")
   find_library(LIBFREEXL_LIBRARIES libfreexl.so
@@ -228,8 +230,8 @@ if(LINUX)
 
   # ---- librdata ----
   message(CHECK_START "Looking for `librdata`")
-    set(LIBRDATA_INCLUDE_DIRS /usr/include/ /usr/include/rdata /usr/local/include /usr/local/include/rdata /app/include)
-    set(LIBRDATA_LIBRARY_DIRS /usr/local/lib /usr/lib /app/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
+  set(LIBRDATA_INCLUDE_DIRS /usr/include/ /usr/include/rdata /usr/local/include /usr/local/include/rdata /app/include)
+  set(LIBRDATA_LIBRARY_DIRS /usr/local/lib /usr/lib /app/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
 
   message(CHECK_START "Looking for librdata.so")
   find_library(LIBRDATA_LIBRARIES librdata.so
@@ -266,7 +268,7 @@ endif()
 if(WIN32)
 
   include(FindRToolsDLLPath)
-  
+
   find_package(freexl 2.0.99 REQUIRED)
   find_package(libsodium 1.0.20 REQUIRED)
 

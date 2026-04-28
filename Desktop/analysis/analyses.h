@@ -61,6 +61,8 @@ public:
 						~Analyses()	{ _singleton = nullptr; }
 	static Analyses *	analyses()	{ return _singleton; }
 
+	static void			registerRpcHandlers();
+
 	Analysis	*	createFromJaspFileEntry(Json::Value analysisData, RibbonModel* ribbonModel);
 
 	Analysis	*	create(const Json::Value & analysisData, Modules::AnalysisEntry * analysisEntry, size_t id, Analysis::Status status = Analysis::Empty, bool notifyAll = true, const std::string & title = "", const Version & loadedVersion = "", const Json::Value & options = Json::nullValue);

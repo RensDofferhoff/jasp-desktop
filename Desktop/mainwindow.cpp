@@ -63,6 +63,9 @@
 #include "rsyntax/formulabase.h"
 #include "utilities/desktopcommunicator.h"
 
+#include "rpc/jasprpcdispatcher.h"
+#include "rpc/jasprpcserver.h"
+
 #include "boost/iostreams/stream.hpp"
 #include <boost/iostreams/device/null.hpp>
 
@@ -104,6 +107,8 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 	_upgrader				= new Upgrader(this);
 	_analyses				= new Analyses();
 	_engineSync				= new EngineSync(this);
+	_rpcDispatcher = new JaspRpcDispatcher();
+	_rpcServer = new JaspRpcServer(*_rpcDispatcher, "127.0.0.1", 5555, "/rpc", this);
 	_datasetTableModel		= new DataSetTableModel();
 	_dataSetModelVarInfo	= new DataSetTableModel(false);
 	_columnModel			= new ColumnModel(_datasetTableModel);
@@ -175,6 +180,28 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 
 	Log::log() << "JASP Desktop started and Engines initalized." << std::endl;
 	
+	
+	// Built-in ping/echo for connectivity verification
+	JaspRpcDispatcher::singleton()->registerMethod("ping", [](const Json::Value& params) {
+		Json::Value result;
+		result["message"] = "pong";
+		return result;
+	});
+
+	// Schema discovery: list all registered methods
+	JaspRpcDispatcher::singleton()->registerMethod("rpc.discover", [](const Json::Value&) {
+		auto* d = JaspRpcDispatcher::singleton();
+		Json::Value methods(Json::arrayValue);
+		for (const auto& name : d->registeredMethods())
+			methods.append(name);
+		Json::Value result;
+		result["methods"] = methods;
+		return result;
+	});
+	
+	if (!_rpcServer->start())
+		Log::log() << "JASP-RPC server failed to start." << std::endl;
+	
 
 	JASPTIMER_FINISH(MainWindowConstructor);
 }
@@ -214,6 +241,9 @@ MainWindow::~MainWindow()
 {
 	Log::log() << "MainWindow::~MainWindow()" << std::endl;
 	
+	delete _rpcServer;
+	delete _rpcDispatcher;
+
 	_engineSync->killProcessTimer();
 
 	try

@@ -26,14 +26,14 @@
 #include "log.h"
 
 void Application::init(QString filePath, bool newData, bool unitTest, int timeOut, bool save, bool logToFile, const Json::Value & dbJson, QString reportingPath)
-{	
+{
 	std::cout << "Application init entered" << std::endl;
-	
+
 	if(logToFile)
 		Settings::setValue(Settings::LOG_TO_FILE, true);
 
 	Dirs::setReportingDir(fq(reportingPath));
-	
+
 	if(unitTest)
 		resultXmlCompare::compareResults::theOne()->enableTestMode(); //So languagemodel can be aware
 

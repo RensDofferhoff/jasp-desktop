@@ -57,6 +57,8 @@
 #include "data/workspacemodel.h"
 #include "utilities/languagemodel.h"
 #include "gui/jaspConfiguration/jaspconfiguration.h"
+#include "rpc/jasprpcdispatcher.h"
+#include "rpc/jasprpcserver.h"
 
 using namespace std;
 
@@ -373,6 +375,8 @@ private:
 									_hadFatalError			= false;
 	QFont							_defaultFont;
 	QTimer					*		_progressBarTimer		= nullptr;
+	JaspRpcDispatcher*  _rpcDispatcher  = nullptr;
+	JaspRpcServer*      _rpcServer      = nullptr;
 };
 
 #endif // MAINWIDGET_H
