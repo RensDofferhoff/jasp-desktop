@@ -202,6 +202,56 @@ RpcMethodSpec RpcMethodSpec::fromJsonString(const std::string& jsonStr)
 	return fromJson(root);
 }
 
+Json::Value RpcSchema::toJson() const
+{
+	Json::Value j;
+	if (!type.empty())        j["type"]        = type;
+	if (!description.empty()) j["description"] = description;
+	if (!required.empty())
+	{
+		Json::Value req(Json::arrayValue);
+		for (const auto& r : required) req.append(r);
+		j["required"] = req;
+	}
+	if (!properties.empty())
+	{
+		Json::Value props(Json::objectValue);
+		for (const auto& pr : properties)
+		{
+			Json::Value pj;
+			if (!pr.description.empty()) pj["description"] = pr.description;
+			if (pr.schema)               pj = pr.schema->toJson();
+			props[pr.name] = pj;
+		}
+		j["properties"] = props;
+	}
+	return j;
+}
+
+Json::Value RpcMethodSpec::toJson() const
+{
+	Json::Value m;
+	m["name"]    = name;
+	m["summary"] = summary;
+	Json::Value plist(Json::arrayValue);
+	for (const auto& p : params)
+	{
+		Json::Value pj;
+		pj["name"]        = p.name;
+		pj["required"]    = p.required;
+		pj["description"] = p.description;
+		if (!p.schema.type.empty()) pj["type"] = p.schema.type;
+		plist.append(pj);
+	}
+	m["params"] = plist;
+	Json::Value r;
+	r["name"]        = result.name;
+	r["description"] = result.description;
+	r["schema"]      = result.schema.toJson();
+	m["result"] = r;
+	return m;
+}
+
 // =========================================================================
 //  JaspRpcDispatcher — singleton
 // =========================================================================
@@ -493,6 +543,12 @@ std::vector<std::string> JaspRpcDispatcher::knownSpecNames() const
 	for (const auto& p : _specs)
 		names.push_back(p.first);
 	return names;
+}
+
+const RpcMethodSpec* JaspRpcDispatcher::getSpec(const std::string& method) const
+{
+	auto it = _specs.find(method);
+	return it != _specs.end() ? &it->second : nullptr;
 }
 
 bool JaspRpcDispatcher::registerMethod(const std::string& method,

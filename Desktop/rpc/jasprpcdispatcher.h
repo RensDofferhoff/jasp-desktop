@@ -74,6 +74,7 @@ struct RpcSchema
 	// ---- factories ----------------------------------------------------
 	static RpcSchema fromJson(const Json::Value& json);
 	static RpcSchema any();           // accepts everything
+	Json::Value toJson() const;
 };
 
 // =========================================================================
@@ -117,6 +118,8 @@ struct RpcMethodSpec
 
 	/// Convenience: parse from a raw JSON string.
 	static RpcMethodSpec fromJsonString(const std::string& jsonStr);
+
+	Json::Value toJson() const;
 };
 
 // =========================================================================
@@ -207,6 +210,9 @@ public:
 
 	void unregisterMethod(const std::string& method);
 	std::vector<std::string> registeredMethods() const;
+
+	/// Return the spec for a given method name, or nullptr if not found.
+	const RpcMethodSpec* getSpec(const std::string& method) const;
 
 	// ------------------------------------------------------------------
 	// Dispatch

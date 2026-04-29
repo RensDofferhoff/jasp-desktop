@@ -188,12 +188,17 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 		return result;
 	});
 
-	// Schema discovery: list all registered methods
+	// Schema discovery: list all registered methods with spec info when available
 	JaspRpcDispatcher::singleton()->registerMethod("rpc.discover", [](const Json::Value&) {
 		auto* d = JaspRpcDispatcher::singleton();
 		Json::Value methods(Json::arrayValue);
 		for (const auto& name : d->registeredMethods())
-			methods.append(name);
+		{
+			if (auto* spec = d->getSpec(name))
+				methods.append(spec->toJson());
+			else
+				methods.append(name);
+		}
 		Json::Value result;
 		result["methods"] = methods;
 		return result;
