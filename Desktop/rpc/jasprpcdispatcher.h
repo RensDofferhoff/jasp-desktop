@@ -13,114 +13,21 @@
 // any declared default values, and validates the handler's return value
 // before sending it to the client.
 //
+// Schema types (RpcSchema, RpcParamSpec, RpcResultSpec, RpcMethodSpec)
+// live in rpcschema.h — keeping the dispatcher header focused on
+// registration and dispatch logic.
+//
 
 #ifndef JASPRPCDISPATCHER_H
 #define JASPRPCDISPATCHER_H
 
 #include <functional>
-#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "json/json.h"
-
-// =========================================================================
-//  JSON-Schema leaf types (used inside RPC specs)
-// =========================================================================
-
-/// A JSON Schema fragment describing a single value (recursive for objects).
-struct RpcSchema
-{
-	std::string   type;          // "string","integer","number","boolean","object","array","null","any"
-	std::string   description;   // human-readable
-	Json::Value   defaultValue;  // Json::nullValue = no default
-
-	/// Only meaningful when type == "object".
-	std::vector<std::string> required;
-
-	/// One named property inside an object schema.
-	struct Property
-	{
-		Property() = default;
-		Property(Property&&) = default;
-		Property& operator=(Property&&) = default;
-
-		Property(const Property& o)
-			: name(o.name), description(o.description)
-			, required(o.required), defaultValue(o.defaultValue)
-			, schema(o.schema ? std::make_unique<RpcSchema>(*o.schema) : nullptr)
-		{}
-		Property& operator=(const Property& o)
-		{
-			if (this != &o)
-			{
-				name = o.name; description = o.description;
-				required = o.required; defaultValue = o.defaultValue;
-				schema = o.schema ? std::make_unique<RpcSchema>(*o.schema) : nullptr;
-			}
-			return *this;
-		}
-
-		std::string                 name;
-		std::string                 description;
-		bool                        required     = false;
-		Json::Value                 defaultValue;
-		std::unique_ptr<RpcSchema>  schema;  // nullptr = accept any
-	};
-
-	std::vector<Property> properties;
-
-	// ---- factories ----------------------------------------------------
-	static RpcSchema fromJson(const Json::Value& json);
-	static RpcSchema any();           // accepts everything
-	Json::Value toJson() const;
-};
-
-// =========================================================================
-//  Parameter / result descriptors
-// =========================================================================
-
-/// Describes one named parameter of an RPC method.
-struct RpcParamSpec
-{
-	std::string name;
-	std::string description;
-	bool        required = true;
-	RpcSchema   schema;          // RpcSchema::any() = no type check
-};
-
-/// Describes the return value of an RPC method.
-struct RpcResultSpec
-{
-	std::string name;
-	std::string description;
-	RpcSchema   schema;
-};
-
-// =========================================================================
-//  Full method specification (OpenRPC-inspired)
-// =========================================================================
-
-/// An OpenRPC-ish method descriptor.  Can be built directly in C++ or
-/// parsed from a JSON string / Json::Value.
-struct RpcMethodSpec
-{
-	std::string               name;
-	std::string               summary;
-	std::vector<RpcParamSpec> params;
-	RpcResultSpec             result;
-
-	// ---- factories ----------------------------------------------------
-	/// Parse a JSON object that follows the OpenRPC method-spec shape.
-	/// Throws std::runtime_error on malformed input.
-	static RpcMethodSpec fromJson(const Json::Value& json);
-
-	/// Convenience: parse from a raw JSON string.
-	static RpcMethodSpec fromJsonString(const std::string& jsonStr);
-
-	Json::Value toJson() const;
-};
+#include "rpcschema.h"
 
 // =========================================================================
 //  Handler type

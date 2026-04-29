@@ -1,16 +1,22 @@
 //
 // JaspRpcDispatcher implementation — see jasprpcdispatcher.h for API docs.
 //
+// Schema serialisation / deserialisation (RpcSchema, RpcMethodSpec, etc.)
+// lives in rpcschema.cpp.  This file keeps the dispatcher, its validation
+// helpers, and the wrapping logic that ties schemas to handler dispatch.
+//
 
 #include "jasprpcdispatcher.h"
+
 #include <cassert>
 #include <fstream>
-#include "log.h"
-#include "dirs.h"
 #include <sstream>
 
+#include "dirs.h"
+#include "log.h"
+
 // =========================================================================
-//  Internal helpers
+//  Internal helpers (not exposed)
 // =========================================================================
 
 namespace
@@ -50,25 +56,6 @@ bool typeMatches(Json::ValueType actual, const std::string& schemaType)
 	return true; // unknown type name → permissive
 }
 
-/// Recursively apply property defaults inside an object value.
-Json::Value applySchemaDefaults(const Json::Value& value,
-								const RpcSchema& schema)
-{
-	if (!value.isObject() || schema.properties.empty())
-		return value;
-
-	Json::Value out = value;
-	for (const auto& prop : schema.properties)
-	{
-		if (!out.isMember(prop.name) && !prop.defaultValue.isNull())
-			out[prop.name] = prop.defaultValue;
-
-		if (out.isMember(prop.name) && prop.schema)
-			out[prop.name] = applySchemaDefaults(out[prop.name], *prop.schema);
-	}
-	return out;
-}
-
 /// Returns a JSON error object with code -32602 and the given message.
 Json::Value invalidParamsError(const std::string& msg)
 {
@@ -79,178 +66,6 @@ Json::Value invalidParamsError(const std::string& msg)
 }
 
 } // anonymous namespace
-
-// =========================================================================
-//  RpcSchema
-// =========================================================================
-
-RpcSchema RpcSchema::fromJson(const Json::Value& json)
-{
-	RpcSchema s;
-	s.type         = json.get("type", "").asString();
-	s.description  = json.get("description", "").asString();
-	s.defaultValue = json.get("default", Json::nullValue);
-
-	// ---- required list (only meaningful for objects) ------------------
-	if (json.isMember("required") && json["required"].isArray())
-		for (const auto& r : json["required"])
-			s.required.push_back(r.asString());
-
-	// ---- properties ---------------------------------------------------
-	if (json.isMember("properties") && json["properties"].isObject())
-	{
-		const Json::Value& props = json["properties"];
-		for (const auto& name : props.getMemberNames())
-		{
-			Property prop;
-			prop.name         = name;
-			prop.description  = props[name].get("description", "").asString();
-			prop.defaultValue = props[name].get("default",     Json::nullValue);
-
-			// Per-property required flag: true if name appears in
-			// the parent's "required" array.
-			for (const auto& req : s.required)
-				if (req == name) { prop.required = true; break; }
-
-			// Recurse: the property value may itself be a schema object.
-			const Json::Value& propJson = props[name];
-			if (propJson.isMember("type") || propJson.isMember("properties") ||
-				propJson.isMember("required"))
-			{
-				prop.schema = std::make_unique<RpcSchema>(RpcSchema::fromJson(propJson));
-			}
-
-			s.properties.push_back(std::move(prop));
-		}
-	}
-
-	return s;
-}
-
-RpcSchema RpcSchema::any()
-{
-	RpcSchema s;
-	s.type = "any";
-	return s;
-}
-
-// =========================================================================
-//  RpcMethodSpec
-// =========================================================================
-
-RpcMethodSpec RpcMethodSpec::fromJson(const Json::Value& json)
-{
-	if (!json.isObject())
-		throw std::runtime_error("RpcMethodSpec must be a JSON object");
-
-	RpcMethodSpec spec;
-
-	// ---- name ---------------------------------------------------------
-	if (!json.isMember("name") || !json["name"].isString())
-		throw std::runtime_error("RpcMethodSpec: missing 'name' (string)");
-	spec.name = json["name"].asString();
-
-	// ---- summary ------------------------------------------------------
-	spec.summary = json.get("summary", "").asString();
-
-	// ---- params -------------------------------------------------------
-	if (!json.isMember("params") || !json["params"].isArray())
-		throw std::runtime_error("RpcMethodSpec '" + spec.name +
-								 "': missing 'params' (array)");
-
-	for (const auto& pJson : json["params"])
-	{
-		if (!pJson.isObject())
-			throw std::runtime_error("RpcMethodSpec '" + spec.name +
-									 "': each param must be an object");
-
-		RpcParamSpec p;
-		if (!pJson.isMember("name") || !pJson["name"].isString())
-			throw std::runtime_error("RpcMethodSpec '" + spec.name +
-									 "': param missing 'name'");
-		p.name        = pJson["name"].asString();
-		p.description = pJson.get("description", "").asString();
-		p.required    = pJson.get("required", true).asBool();
-
-		if (pJson.isMember("schema"))
-			p.schema = RpcSchema::fromJson(pJson["schema"]);
-		// else: RpcSchema default = any type accepted
-
-		spec.params.push_back(std::move(p));
-	}
-
-	// ---- result -------------------------------------------------------
-	if (json.isMember("result") && json["result"].isObject())
-	{
-		const Json::Value& rJson = json["result"];
-		spec.result.name        = rJson.get("name", "").asString();
-		spec.result.description = rJson.get("description", "").asString();
-		if (rJson.isMember("schema"))
-			spec.result.schema = RpcSchema::fromJson(rJson["schema"]);
-	}
-
-	return spec;
-}
-
-RpcMethodSpec RpcMethodSpec::fromJsonString(const std::string& jsonStr)
-{
-	Json::Value  root;
-	Json::Reader reader;
-	if (!reader.parse(jsonStr, root))
-		throw std::runtime_error(
-			"RpcMethodSpec parse error: " + reader.getFormattedErrorMessages());
-	return fromJson(root);
-}
-
-Json::Value RpcSchema::toJson() const
-{
-	Json::Value j;
-	if (!type.empty())        j["type"]        = type;
-	if (!description.empty()) j["description"] = description;
-	if (!required.empty())
-	{
-		Json::Value req(Json::arrayValue);
-		for (const auto& r : required) req.append(r);
-		j["required"] = req;
-	}
-	if (!properties.empty())
-	{
-		Json::Value props(Json::objectValue);
-		for (const auto& pr : properties)
-		{
-			Json::Value pj;
-			if (!pr.description.empty()) pj["description"] = pr.description;
-			if (pr.schema)               pj = pr.schema->toJson();
-			props[pr.name] = pj;
-		}
-		j["properties"] = props;
-	}
-	return j;
-}
-
-Json::Value RpcMethodSpec::toJson() const
-{
-	Json::Value m;
-	m["name"]    = name;
-	m["summary"] = summary;
-	Json::Value plist(Json::arrayValue);
-	for (const auto& p : params)
-	{
-		Json::Value pj;
-		pj["name"]        = p.name;
-		pj["required"]    = p.required;
-		pj["description"] = p.description;
-		if (!p.schema.type.empty()) pj["type"] = p.schema.type;
-		plist.append(pj);
-	}
-	m["params"] = plist;
-	Json::Value r;
-	r["name"]        = result.name;
-	r["description"] = result.description;
-	r["schema"]      = result.schema.toJson();
-	m["result"] = r;
-	return m;
-}
 
 // =========================================================================
 //  JaspRpcDispatcher — singleton
@@ -338,7 +153,6 @@ Json::Value JaspRpcDispatcher::validateParams(
 
 		if (params.isMember(p.name))
 		{
-			// Only validate against the schema if one is declared (type != "" or properties exist)
 			const RpcSchema& sch = p.schema;
 			if (!sch.type.empty() || !sch.properties.empty())
 			{
@@ -355,7 +169,6 @@ Json::Value JaspRpcDispatcher::validateParams(
 Json::Value JaspRpcDispatcher::validateResult(const Json::Value& result,
 											  const RpcResultSpec& spec)
 {
-	// Empty result spec → skip validation.
 	if (spec.schema.type.empty() && spec.schema.properties.empty())
 		return Json::nullValue;
 
@@ -406,7 +219,7 @@ Json::Value JaspRpcDispatcher::errorResult(const std::string& message)
 }
 
 // =========================================================================
-//  Registration
+//  Registration — bare (no validation)
 // =========================================================================
 
 bool JaspRpcDispatcher::registerMethod(const std::string& method,
@@ -416,9 +229,42 @@ bool JaspRpcDispatcher::registerMethod(const std::string& method,
 		return false;
 
 	_handlers[method] = std::move(handler);
-	Log::log() << "[JaspRpcDispatcher] Registered: " << method << std::endl;
 	return true;
 }
+
+// =========================================================================
+//  Registration — flat param spec
+// =========================================================================
+
+bool JaspRpcDispatcher::registerMethod(const std::string& method,
+									   std::vector<RpcParamSpec> paramSpec,
+									   RpcHandler handler)
+{
+	if (_handlers.find(method) != _handlers.end())
+		return false;
+
+	auto wrapped = [handler = std::move(handler),
+					spec = std::move(paramSpec)](const Json::Value& params) -> Json::Value
+	{
+		// 1. Validate
+		Json::Value err = validateParams(params, spec);
+		if (!err.isNull())
+			return err;
+
+		// 2. Apply defaults
+		Json::Value safeParams = applyDefaults(params, spec);
+
+		// 3. Call handler
+		return handler(safeParams);
+	};
+
+	_handlers[method] = std::move(wrapped);
+	return true;
+}
+
+// =========================================================================
+//  Registration — full OpenRPC method spec
+// =========================================================================
 
 bool JaspRpcDispatcher::registerMethod(const RpcMethodSpec& spec,
 									   RpcHandler handler)
@@ -426,21 +272,21 @@ bool JaspRpcDispatcher::registerMethod(const RpcMethodSpec& spec,
 	if (_handlers.find(spec.name) != _handlers.end())
 		return false;
 
-	// Wrap the handler: validate params → apply defaults → call → validate result.
-	auto wrapped = [spec, fn = std::move(handler)](const Json::Value& params) -> Json::Value
+	auto wrapped = [handler = std::move(handler),
+					spec](const Json::Value& params) -> Json::Value
 	{
-		// 1. Validate params
+		// 1. Validate incoming params against declared schemas
 		Json::Value err = validateParams(params, spec.params);
 		if (!err.isNull())
 			return err;
 
-		// 2. Apply defaults
+		// 2. Apply declared default values for missing optional params
 		Json::Value safeParams = applyDefaults(params, spec.params);
 
-		// 3. Call the handler
-		Json::Value result = fn(safeParams);
+		// 3. Call the handler with validated, defaulted params
+		Json::Value result = handler(safeParams);
 
-		// 4. Validate result (skip if result spec has no schema)
+		// 4. Validate the handler's return value against result.schema
 		err = validateResult(result, spec.result);
 		if (!err.isNull())
 			return err;
@@ -449,15 +295,14 @@ bool JaspRpcDispatcher::registerMethod(const RpcMethodSpec& spec,
 	};
 
 	_handlers[spec.name] = std::move(wrapped);
-	Log::log() << "[JaspRpcDispatcher] Registered (spec): " << spec.name << std::endl;
 	return true;
 }
 
 bool JaspRpcDispatcher::registerMethodFromSpec(const std::string& specJson,
 											   RpcHandler handler)
 {
-	return registerMethod(RpcMethodSpec::fromJsonString(specJson),
-						  std::move(handler));
+	RpcMethodSpec spec = RpcMethodSpec::fromJsonString(specJson);
+	return registerMethod(spec, std::move(handler));
 }
 
 bool JaspRpcDispatcher::registerMethodByName(const std::string& methodName,
@@ -465,11 +310,7 @@ bool JaspRpcDispatcher::registerMethodByName(const std::string& methodName,
 {
 	auto it = _specs.find(methodName);
 	if (it == _specs.end())
-	{
-		Log::log() << "[JaspRpcDispatcher] registerMethodByName: unknown method '"
-				  << methodName << "'" << std::endl;
 		return false;
-	}
 
 	return registerMethod(it->second, std::move(handler));
 }
@@ -484,38 +325,36 @@ int JaspRpcDispatcher::loadSpecFromString(const std::string& openRpcJson)
 	Json::Reader reader;
 	if (!reader.parse(openRpcJson, root))
 	{
-		Log::log() << "[JaspRpcDispatcher] loadSpecFromString: parse error: "
+		Log::log() << "[JaspRpcDispatcher] Failed to parse spec JSON: "
 				  << reader.getFormattedErrorMessages() << std::endl;
 		return -1;
 	}
 
-	if (!root.isObject() || !root.isMember("methods") || !root["methods"].isArray())
+	// OpenRPC 1.x: top-level "methods" array.
+	if (!root.isMember("methods") || !root["methods"].isArray())
 	{
-		Log::log() << "[JaspRpcDispatcher] loadSpecFromString: missing 'methods' array"
+		Log::log() << "[JaspRpcDispatcher] Spec JSON missing 'methods' array"
 				  << std::endl;
-		return -1;
+		return 0;
 	}
 
 	int loaded = 0;
-	for (const auto& methodJson : root["methods"])
+	for (const auto& mJson : root["methods"])
 	{
+		if (!mJson.isObject())
+			continue;
+
 		try
 		{
-			RpcMethodSpec spec = RpcMethodSpec::fromJson(methodJson);
-			if (spec.name.empty())
-			{
-				Log::log() << "[JaspRpcDispatcher] loadSpecFromString: skipping method "
-							 "with empty name" << std::endl;
-				continue;
-			}
-			Log::log() << "[JaspRpcDispatcher] Spec loaded: " << spec.name << std::endl;
-			_specs[spec.name] = std::move(spec);
+			RpcMethodSpec spec = RpcMethodSpec::fromJson(mJson);
+			std::string name = spec.name;
+			_specs[name] = std::move(spec);
 			++loaded;
 		}
 		catch (const std::exception& e)
 		{
-			Log::log() << "[JaspRpcDispatcher] loadSpecFromString: skipping malformed "
-						 "method: " << e.what() << std::endl;
+			Log::log() << "[JaspRpcDispatcher] Skipping malformed method spec: "
+					  << e.what() << std::endl;
 		}
 	}
 
@@ -526,13 +365,12 @@ int JaspRpcDispatcher::loadSpecFile(const std::string& path)
 {
 	std::ifstream file(path);
 	if (!file.is_open())
-	{
-		// Not an error — the file may simply not exist yet.
 		return -1;
-	}
 
-	std::string content((std::istreambuf_iterator<char>(file)),
-						 std::istreambuf_iterator<char>());
+	std::string content(
+		(std::istreambuf_iterator<char>(file)),
+		std::istreambuf_iterator<char>());
+
 	return loadSpecFromString(content);
 }
 
@@ -540,79 +378,68 @@ std::vector<std::string> JaspRpcDispatcher::knownSpecNames() const
 {
 	std::vector<std::string> names;
 	names.reserve(_specs.size());
-	for (const auto& p : _specs)
-		names.push_back(p.first);
+	for (const auto& pair : _specs)
+		names.push_back(pair.first);
 	return names;
 }
 
 const RpcMethodSpec* JaspRpcDispatcher::getSpec(const std::string& method) const
 {
 	auto it = _specs.find(method);
-	return it != _specs.end() ? &it->second : nullptr;
+	return (it != _specs.end()) ? &it->second : nullptr;
 }
 
-bool JaspRpcDispatcher::registerMethod(const std::string& method,
-									   std::vector<RpcParamSpec> paramSpec,
-									   RpcHandler handler)
-{
-	// Backward-compatible overload: wrap with flat required-param check
-	// and fill null defaults for missing optional params.
-	return registerMethod(method, [spec = std::move(paramSpec),
-								   fn = std::move(handler)](const Json::Value& params) -> Json::Value
-	{
-		Json::Value err = validateParams(params, spec);
-		if (!err.isNull())
-			return err;
-
-		Json::Value safeParams(Json::objectValue);
-		for (const auto& p : spec)
-		{
-			if (params.isMember(p.name))
-				safeParams[p.name] = params[p.name];
-			else
-				safeParams[p.name] = Json::Value(Json::nullValue);
-		}
-		return fn(safeParams);
-	});
-}
+// =========================================================================
+//  Unregistration / introspection
+// =========================================================================
 
 void JaspRpcDispatcher::unregisterMethod(const std::string& method)
 {
 	_handlers.erase(method);
-	Log::log() << "[JaspRpcDispatcher] Unregistered: " << method << std::endl;
 }
 
 std::vector<std::string> JaspRpcDispatcher::registeredMethods() const
 {
 	std::vector<std::string> names;
 	names.reserve(_handlers.size());
-	for (const auto& p : _handlers)
-		names.push_back(p.first);
+	for (const auto& pair : _handlers)
+		names.push_back(pair.first);
 	return names;
 }
 
 // =========================================================================
-//  JSON-RPC 2.0 protocol helpers (private)
+//  JSON-RPC 2.0 protocol helpers
 // =========================================================================
 
-Json::Value JaspRpcDispatcher::makeError(int code, const std::string& message,
+Json::Value JaspRpcDispatcher::makeError(int code,
+										 const std::string& message,
 										 const Json::Value& id)
 {
 	Json::Value err;
 	err["jsonrpc"] = "2.0";
+	err["id"]      = id;
 	err["error"]["code"]    = code;
 	err["error"]["message"] = message;
-	err["id"] = id;
 	return err;
 }
 
 Json::Value JaspRpcDispatcher::makeResponse(const Json::Value& result,
-											 const Json::Value& id)
+											const Json::Value& id)
 {
 	Json::Value resp;
 	resp["jsonrpc"] = "2.0";
-	resp["result"]  = result;
 	resp["id"]      = id;
+
+	if (result.isMember("code") && result.isMember("message"))
+	{
+		// Looks like an error object from a handler — forward as error.
+		resp["error"] = result;
+	}
+	else
+	{
+		resp["result"] = result;
+	}
+
 	return resp;
 }
 
@@ -622,37 +449,36 @@ Json::Value JaspRpcDispatcher::makeResponse(const Json::Value& result,
 
 Json::Value JaspRpcDispatcher::dispatch(const Json::Value& request)
 {
-	if (!request.isObject())
-		return makeError(-32600, "Invalid Request: not an object", Json::nullValue);
-
-	if (request.get("jsonrpc", "") != "2.0")
-		return makeError(-32600, "Invalid Request: jsonrpc != '2.0'",
-						 request.get("id", Json::nullValue));
-
 	Json::Value id = request.get("id", Json::nullValue);
 
+	// JSON-RPC 2.0: "method" is required.
 	if (!request.isMember("method") || !request["method"].isString())
-		return makeError(-32600, "Invalid Request: missing method", id);
+		return makeError(-32600, "Invalid Request: missing 'method'", id);
 
 	std::string method = request["method"].asString();
 	auto it = _handlers.find(method);
-
 	if (it == _handlers.end())
-		return makeError(-32601, "Method not found: " + method, id);
+		return makeError(-32601, "Method not found: '" + method + "'", id);
 
-	Json::Value params = request.get("params", Json::Value(Json::objectValue));
+	Json::Value params = request.get("params", Json::objectValue);
 
 	try
 	{
-		return makeResponse(it->second(params), id);
+		Json::Value result = it->second(params);
+
+		// If the handler returned an error, wrap it properly.
+		if (result.isObject() && result.isMember("code") &&
+			result.isMember("message"))
+		{
+			return makeError(result["code"].asInt(),
+							 result["message"].asString(), id);
+		}
+
+		return makeResponse(result, id);
 	}
 	catch (const std::exception& e)
 	{
-		return makeError(-32000, std::string("Handler error: ") + e.what(), id);
-	}
-	catch (...)
-	{
-		return makeError(-32000, "Unknown handler error", id);
+		return makeError(-32603, std::string("Internal error: ") + e.what(), id);
 	}
 }
 
@@ -660,13 +486,18 @@ std::string JaspRpcDispatcher::dispatch(const std::string& requestJson)
 {
 	Json::Value  req;
 	Json::Reader reader;
-
 	if (!reader.parse(requestJson, req))
-		return Json::writeString(
-			Json::StreamWriterBuilder(),
-			makeError(-32700,
-					  "Parse error: " + reader.getFormattedErrorMessages(),
-					  Json::nullValue));
+	{
+		// Build a parse-error response manually.
+		Json::Value err;
+		err["jsonrpc"] = "2.0";
+		err["id"]      = Json::nullValue;
+		err["error"]["code"]    = -32700;
+		err["error"]["message"] = "Parse error";
+		Json::StreamWriterBuilder builder;
+		builder["indentation"] = "";
+		return Json::writeString(builder, err);
+	}
 
 	Json::Value resp = dispatch(req);
 
