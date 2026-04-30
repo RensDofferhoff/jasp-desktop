@@ -904,17 +904,13 @@ void Analyses::registerRpcHandlers()
 				return JaspRpcDispatcher::errorResult(
 					"Analysis form not available for analysis " + std::to_string(analysisId));
 
-			QVariantMap optionsMap = jsonToQVariant(params["options"]).toMap();
-			form->clearAllErrors();
-			QCoreApplication::processEvents();
-			form->setOptions(optionsMap);
-			QCoreApplication::processEvents();
-			a->boundValueChangedHandler();
+			Json::Value parsedOptions;
+			std::string errorMsg;
+			std::string rawOptions = Json::writeString(Json::StreamWriterBuilder(), params["options"]);
 
-
-			if (form->hasError())
+			if (!form->parseOptions(rawOptions, parsedOptions, errorMsg))
 				return JaspRpcDispatcher::errorResult(
-					"Validation errors on analysis options: " + fq(form->getError(true)));
+					"Validation errors on analysis options: " + errorMsg);
 
 			Json::Value response = JaspRpcDispatcher::successResult();
 			response["analysisId"] = analysisId;
