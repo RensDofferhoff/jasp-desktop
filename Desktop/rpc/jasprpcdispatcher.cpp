@@ -290,9 +290,13 @@ bool JaspRpcDispatcher::registerMethod(const RpcMethodSpec& spec,
 		Json::Value result = handler(safeParams);
 
 		// 4. Validate the handler's return value against result.schema
-		err = validateResult(result, spec.result);
-		if (!err.isNull())
-			return err;
+		//    Skip validation for error responses so the real error is not swallowed.
+		if (!(result.isMember("status") && result["status"] == "error"))
+		{
+			err = validateResult(result, spec.result);
+			if (!err.isNull())
+				return err;
+		}
 
 		return result;
 	};

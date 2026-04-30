@@ -242,7 +242,14 @@
 								"required": ["name", "type"]
 							}
 						}
-					}
+					},
+					"required": [
+						"status",
+						"path",
+						"rowCount",
+						"columnCount",
+						"columns"
+					]
 				}
 			}
 		},

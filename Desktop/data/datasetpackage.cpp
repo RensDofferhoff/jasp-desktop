@@ -119,6 +119,8 @@ void DataSetPackage::registerRpcHandlers()
 		pkg->setCurrentFile(QString::fromStdString(path));
 		pkg->setId(path);
 
+		emit pkg->newDataLoaded();
+
 		Json::Value response = JaspRpcDispatcher::successResult();
 		response["path"]        = path;
 		response["rowCount"]    = static_cast<int>(pkg->dataRowCount());
