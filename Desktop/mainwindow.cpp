@@ -180,30 +180,6 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 
 	Log::log() << "JASP Desktop started and Engines initalized." << std::endl;
 	
-	
-	// Built-in ping/echo for connectivity verification
-	JaspRpcDispatcher::singleton()->registerMethod("ping", [](const Json::Value& params) {
-		Json::Value result;
-		result["message"] = "pong";
-		return result;
-	});
-
-	// Schema discovery: list all registered methods with spec info when available
-	JaspRpcDispatcher::singleton()->registerMethod("rpc.discover", [](const Json::Value&) {
-		auto* d = JaspRpcDispatcher::singleton();
-		Json::Value methods(Json::arrayValue);
-		for (const auto& name : d->registeredMethods())
-		{
-			if (auto* spec = d->getSpec(name))
-				methods.append(spec->toJson());
-			else
-				methods.append(name);
-		}
-		Json::Value result;
-		result["methods"] = methods;
-		return result;
-	});
-	
 	if (!_rpcServer->start())
 		Log::log() << "JASP-RPC server failed to start." << std::endl;
 	

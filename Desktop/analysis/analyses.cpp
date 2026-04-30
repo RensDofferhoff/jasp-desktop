@@ -925,4 +925,38 @@ void Analyses::registerRpcHandlers()
 			response["options"]    = a->boundValues();
 			return response;
 		});
+
+	disp->registerMethodByName("modules.list", [](const Json::Value&) -> Json::Value
+	{
+		auto* dm = DynamicModules::dynMods();
+		Json::Value modules(Json::arrayValue);
+
+		for (const auto& modName : dm->moduleNames())
+		{
+			if (auto* mod = dm->dynamicModule(modName))
+			{
+				Json::Value m;
+				m["name"]  = modName;
+				m["title"] = mod->title();
+
+				Json::Value analyses(Json::arrayValue);
+				for (const auto* entry : mod->menu())
+				{
+					if (!entry->isAnalysis() || entry->isSeparator())
+						continue;
+
+					Json::Value a;
+					a["name"]  = entry->function();
+					a["title"] = entry->title();
+					analyses.append(a);
+				}
+				m["analyses"] = analyses;
+				modules.append(m);
+			}
+		}
+
+		Json::Value result;
+		result["modules"] = modules;
+		return result;
+	});
 }

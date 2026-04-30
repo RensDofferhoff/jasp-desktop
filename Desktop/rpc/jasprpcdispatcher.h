@@ -158,6 +158,10 @@ public:
 									 const std::vector<RpcParamSpec>& spec);
 
 private:
+	/// Register built-in methods (ping, rpc.discover) that don't belong to
+	/// any particular subsystem but are part of the JSON-RPC 2.0 core.
+	void registerBuiltins();
+
 	static Json::Value makeError(int code, const std::string& message,
 								 const Json::Value& id);
 	static Json::Value makeResponse(const Json::Value& result,

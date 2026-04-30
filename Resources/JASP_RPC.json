@@ -142,6 +142,56 @@
 			}
 		},
 		{
+			"name": "modules.list",
+			"summary": "List all loaded modules and their available analyses.",
+			"params": [],
+			"result": {
+				"name": "modules.list.result",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"modules": {
+							"type": "array",
+							"description": "All currently loaded modules.",
+							"items": {
+								"type": "object",
+								"properties": {
+									"name": {
+										"type": "string",
+										"description": "Module name, e.g. 'jaspTTests'."
+									},
+									"title": {
+										"type": "string",
+										"description": "Human-readable module title, e.g. 'T-Tests'."
+									},
+									"analyses": {
+										"type": "array",
+										"description": "Available analyses in this module.",
+										"items": {
+											"type": "object",
+											"properties": {
+												"name": {
+													"type": "string",
+													"description": "Analysis function name, e.g. 'TTestIndependentSamples'."
+												},
+												"title": {
+													"type": "string",
+													"description": "Human-readable analysis title, e.g. 'Independent Samples T-Test'."
+												}
+											},
+											"required": ["name", "title"]
+										}
+									}
+								},
+								"required": ["name", "title", "analyses"]
+							}
+						}
+					},
+					"required": ["modules"]
+				}
+			}
+		},
+		{
 			"name": "ping",
 			"summary": "Simple connectivity check. Always returns pong.",
 			"params": [],

@@ -88,6 +88,9 @@ JaspRpcDispatcher::JaspRpcDispatcher()
 		Log::log() << "[" << specPath << "] found but no methods loaded"
 				  << std::endl;
 	// n < 0 → file not found / parse error; silently OK.
+
+	// Register built-in methods (ping, rpc.discover, etc.)
+	registerBuiltins();
 }
 
 JaspRpcDispatcher::~JaspRpcDispatcher()
@@ -405,6 +408,37 @@ std::vector<std::string> JaspRpcDispatcher::registeredMethods() const
 	for (const auto& pair : _handlers)
 		names.push_back(pair.first);
 	return names;
+}
+
+// =========================================================================
+//  Built-in methods
+// =========================================================================
+
+void JaspRpcDispatcher::registerBuiltins()
+{
+	// ping — connectivity / liveness check
+	registerMethod("ping", [](const Json::Value& params) -> Json::Value
+	{
+		Json::Value result;
+		result["message"] = "pong";
+		return result;
+	});
+
+	// rpc.discover — schema introspection
+	registerMethod("rpc.discover", [this](const Json::Value&) -> Json::Value
+	{
+		Json::Value methods(Json::arrayValue);
+		for (const auto& name : registeredMethods())
+		{
+			if (auto* spec = getSpec(name))
+				methods.append(spec->toJson());
+			else
+				methods.append(name);
+		}
+		Json::Value result;
+		result["methods"] = methods;
+		return result;
+	});
 }
 
 // =========================================================================
