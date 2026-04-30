@@ -908,7 +908,17 @@ void Analyses::registerRpcHandlers()
 			std::string errorMsg;
 			std::string rawOptions = Json::writeString(Json::StreamWriterBuilder(), params["options"]);
 
-			if (!form->parseOptions(rawOptions, parsedOptions, errorMsg))
+			form->parseOptions(rawOptions, parsedOptions, errorMsg);
+
+			// Gather form-level errors (e.g. circular dependencies) in addition to control errors
+			QString formErrors = form->errors();
+			if (!formErrors.isEmpty())
+			{
+				if (!errorMsg.empty()) errorMsg += ", ";
+				errorMsg += fq(formErrors);
+			}
+
+			if (!errorMsg.empty())
 				return JaspRpcDispatcher::errorResult(
 					"Validation errors on analysis options: " + errorMsg);
 
