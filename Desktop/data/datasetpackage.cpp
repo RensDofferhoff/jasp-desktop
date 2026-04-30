@@ -140,6 +140,39 @@ void DataSetPackage::registerRpcHandlers()
 
 		return response;
 	});
+
+	// --- data.info ---
+	disp->registerMethodByName("data.info", [](const Json::Value&) -> Json::Value
+	{
+		DataSetPackage* pkg = DataSetPackage::pkg();
+
+		Json::Value response = JaspRpcDispatcher::successResult();
+
+		if (!pkg->hasDataSet())
+		{
+			response["loaded"] = false;
+			return response;
+		}
+
+		response["loaded"]      = true;
+		response["path"]        = pkg->currentFile().toStdString();
+		response["rowCount"]    = static_cast<int>(pkg->dataRowCount());
+
+		auto colTypes = pkg->getColumnTypesMap();
+		response["columnCount"] = static_cast<int>(colTypes.size());
+
+		Json::Value columns(Json::arrayValue);
+		for (const auto& [name, type] : colTypes)
+		{
+			Json::Value col;
+			col["name"] = name;
+			col["type"] = columnTypeToString(type);
+			columns.append(col);
+		}
+		response["columns"] = columns;
+
+		return response;
+	});
 }
 
 Filter * DataSetPackage::filter()

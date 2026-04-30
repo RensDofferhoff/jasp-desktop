@@ -235,6 +235,7 @@ private:
 	void connectFileEventCompleted(FileEvent * event);
 	void refreshPlotsHandler(bool askUserForRefresh = true);
 	void checkEmptyWorkspace();
+	void registerRpcAsyncHandlers();
 
 signals:
 	void saveJaspFile();
@@ -377,6 +378,15 @@ private:
 	QTimer					*		_progressBarTimer		= nullptr;
 	JaspRpcDispatcher*  _rpcDispatcher  = nullptr;
 	JaspRpcServer*      _rpcServer      = nullptr;
+
+	// RPC async data-load job tracking
+	struct RpcLoadJob
+	{
+		std::string	status;	// "running", "complete", "error"
+		std::string	error;
+	};
+	std::unordered_map<int, RpcLoadJob>	_rpcJobs;
+	int									_nextRpcJobId = 1;
 };
 
 #endif // MAINWIDGET_H

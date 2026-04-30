@@ -68,13 +68,17 @@
 			],
 			"result": {
 				"name": "analysis.setOptions.result",
-				"description": "Confirmation that the options were applied.",
+				"description": "Confirmation that the options were applied, or an error if any options failed validation.",
 				"schema": {
 					"type": "object",
 					"properties": {
 						"status": {
 							"type": "string",
-							"description": "Always 'success' when the options were set."
+							"description": "'success' when the options were applied, or 'error' if one or more options failed validation."
+						},
+						"message": {
+							"type": "string",
+							"description": "When status is 'error', a description of the validation failures, with control names and reasons."
 						},
 						"analysisId": {
 							"type": "integer",
@@ -137,6 +141,151 @@
 						"module",
 						"analysis",
 						"options"
+					]
+				}
+			}
+		},
+		{
+			"name": "analysis.results",
+			"summary": "Retrieve the current results of an analysis by ID.",
+			"params": [
+				{
+					"name": "analysisId",
+					"required": true,
+					"description": "The integer identifier of the analysis to query.",
+					"schema": { "type": "integer" }
+				}
+			],
+			"result": {
+				"name": "analysis.results.result",
+				"description": "The current results of the analysis.",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"status": {
+							"type": "string",
+							"description": "'success' or 'error'."
+						},
+						"analysisId": {
+							"type": "integer",
+							"description": "The analysis identifier."
+						},
+						"module": {
+							"type": "string",
+							"description": "The module name."
+						},
+						"analysis": {
+							"type": "string",
+							"description": "The analysis name."
+						},
+						"results": {
+							"type": "object",
+							"description": "The full results JSON of the analysis, or null if not yet available."
+						}
+					},
+					"required": ["status", "analysisId", "module", "analysis"]
+				}
+			}
+		},
+		{
+			"name": "analysis.status",
+			"summary": "Query the run status of an analysis by ID.",
+			"params": [
+				{
+					"name": "analysisId",
+					"required": true,
+					"description": "The integer identifier of the analysis to query.",
+					"schema": { "type": "integer" }
+				}
+			],
+			"result": {
+				"name": "analysis.status.result",
+				"description": "The current run status of the analysis.",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"status": {
+							"type": "string",
+							"description": "'success' or 'error'."
+						},
+						"analysisId": {
+							"type": "integer",
+							"description": "The analysis identifier."
+						},
+						"module": {
+							"type": "string",
+							"description": "The module name."
+						},
+						"analysis": {
+							"type": "string",
+							"description": "The analysis name."
+						},
+						"analysisStatus": {
+							"type": "string",
+							"description": "The analysis run status, e.g. 'running', 'complete', 'fatalError'. Note: 'empty' is reported as 'running'."
+						}
+					},
+					"required": [
+						"status",
+						"analysisId",
+						"module",
+						"analysis",
+						"analysisStatus"
+					]
+				}
+			}
+		},
+		{
+			"name": "analysis.context",
+			"summary": "Retrieve context for an analysis: QML form file(s), help text, or other analysis metadata. Intended for AI clients that need to understand what options are available and how to set them.",
+			"params": [
+				{
+					"name": "module",
+					"required": true,
+					"description": "JASP module name, e.g. 'jaspTTests'.",
+					"schema": { "type": "string" }
+				},
+				{
+					"name": "analysis",
+					"required": true,
+					"description": "Analysis name within the module, e.g. 'TTestIndependentSamples'.",
+					"schema": { "type": "string" }
+				}
+			],
+			"result": {
+				"name": "analysis.context.result",
+				"description": "The QML source of the analysis form and any locally imported QML files. Each entry in 'files' maps a relative path to its QML source text.",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"status": {
+							"type": "string",
+							"description": "'success' or 'error'."
+						},
+						"module": {
+							"type": "string",
+							"description": "The module name."
+						},
+						"analysis": {
+							"type": "string",
+							"description": "The analysis name."
+						},
+						"files": {
+							"type": "object",
+							"description": "Map of relative file path to QML source text. Always contains the main form file; may include locally imported QML files.",
+							"additionalProperties": { "type": "string" }
+						},
+						"help": {
+							"type": "string",
+							"description": "The analysis help text in Markdown format, or empty string if no help file exists for this analysis."
+						}
+					},
+					"required": [
+						"status",
+						"module",
+						"analysis",
+						"files",
+						"help"
 					]
 				}
 			}
@@ -250,6 +399,117 @@
 						"columnCount",
 						"columns"
 					]
+				}
+			}
+		},
+		{
+			"name": "data.load.async",
+			"summary": "Start loading a data file asynchronously. Returns a jobId immediately.",
+			"params": [
+				{
+					"name": "path",
+					"required": true,
+					"description": "Absolute path to the data file (CSV, SPSS, JASP, Excel, etc.).",
+					"schema": { "type": "string" }
+				}
+			],
+			"result": {
+				"name": "data.load.async.result",
+				"description": "The accepted async job.",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"status": {
+							"type": "string",
+							"description": "'accepted' when the job was queued."
+						},
+						"jobId": {
+							"type": "integer",
+							"description": "Unique job identifier for polling with data.load.status."
+						}
+					},
+					"required": ["status", "jobId"]
+				}
+			}
+		},
+		{
+			"name": "data.load.status",
+			"summary": "Poll the status of an async data load job.",
+			"params": [
+				{
+					"name": "jobId",
+					"required": true,
+					"description": "The job identifier returned by data.load.async.",
+					"schema": { "type": "integer" }
+				}
+			],
+			"result": {
+				"name": "data.load.status.result",
+				"description": "Current status of the async load job.",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"jobId": {
+							"type": "integer",
+							"description": "The job identifier."
+						},
+						"status": {
+							"type": "string",
+							"description": "'running', 'complete', or 'error'."
+						},
+						"message": {
+							"type": "string",
+							"description": "Error message, present when status is 'error'. Use data.info to retrieve dataset metadata when status is 'complete'."
+						}
+					},
+					"required": ["jobId", "status"]
+				}
+			}
+		},
+		{
+			"name": "data.info",
+			"summary": "Retrieve metadata about the currently loaded dataset.",
+			"params": [],
+			"result": {
+				"name": "data.info.result",
+				"description": "Metadata about the loaded dataset, or loaded=false if none.",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"status": {
+							"type": "string",
+							"description": "Always 'success'."
+						},
+						"loaded": {
+							"type": "boolean",
+							"description": "Whether a dataset is currently loaded."
+						},
+						"path": {
+							"type": "string",
+							"description": "Path to the currently loaded file."
+						},
+						"rowCount": {
+							"type": "integer",
+							"description": "Number of data rows."
+						},
+						"columnCount": {
+							"type": "integer",
+							"description": "Number of columns."
+						},
+						"columns": {
+							"type": "array",
+							"description": "Column metadata.",
+							"items": {
+								"type": "object",
+								"properties": {
+									"name": { "type": "string" },
+									"type": { "type": "string" }
+								},
+								"required": ["name", "type"]
+							}
+						}
+					},
+					"required": ["status", "loaded"]
 				}
 			}
 		},

@@ -180,6 +180,8 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 
 	Log::log() << "JASP Desktop started and Engines initalized." << std::endl;
 	
+	registerRpcAsyncHandlers();
+
 	if (!_rpcServer->start())
 		Log::log() << "JASP-RPC server failed to start." << std::endl;
 	
@@ -1220,6 +1222,86 @@ void MainWindow::analysisEditImageHandler(int id, QString options)
 void MainWindow::connectFileEventCompleted(FileEvent * event)
 {
 	connect(event, &FileEvent::completed, this, &MainWindow::dataSetIOCompleted, Qt::QueuedConnection);
+}
+
+void MainWindow::registerRpcAsyncHandlers()
+{
+	auto* disp = JaspRpcDispatcher::singleton();
+	if (!disp)
+		return;
+
+	// --- data.load.async ---
+	disp->registerMethodByName("data.load.async", [this](const Json::Value& params) -> Json::Value
+	{
+		// Reject if a load is already in progress
+		for (const auto& [id, job] : _rpcJobs)
+			if (job.status == "running")
+				return JaspRpcDispatcher::errorResult(
+					"A data load is already in progress (job " + std::to_string(id) + ").");
+
+		std::string path = params["path"].asString();
+
+		int jobId = _nextRpcJobId++;
+		_rpcJobs[jobId] = {"running", ""};
+
+		auto* event = new FileEvent(this, FileEvent::FileOpen);
+		event->setSilent(true);
+		event->setPath(QString::fromStdString(path));
+
+		connect(event, &FileEvent::completed, this,
+			[this, jobId](FileEvent* e)
+			{
+				auto& job = _rpcJobs[jobId];
+
+				if (e->isSuccessful())
+				{
+					DataSetPackage* pkg = DataSetPackage::pkg();
+					pkg->setCurrentFile(e->path());
+					emit pkg->newDataLoaded();
+
+					job.status = "complete";
+				}
+				else
+				{
+					job.status = "error";
+					job.error  = e->message().toStdString();
+				}
+
+				e->deleteLater();
+			},
+			Qt::QueuedConnection);
+
+		_loader->io(event);
+
+		Json::Value response = JaspRpcDispatcher::successResult();
+		response["status"] = "accepted";
+		response["jobId"]  = jobId;
+		return response;
+	});
+
+	// --- data.load.status ---
+	disp->registerMethodByName("data.load.status", [this](const Json::Value& params) -> Json::Value
+	{
+		int jobId = params["jobId"].asInt();
+
+		auto it = _rpcJobs.find(jobId);
+		if (it == _rpcJobs.end())
+			return JaspRpcDispatcher::errorResult(
+				"Unknown jobId: " + std::to_string(jobId));
+
+		const auto& job = it->second;
+
+		Json::Value response = JaspRpcDispatcher::successResult();
+		response["jobId"]  = jobId;
+		response["status"] = job.status;
+
+		if (job.status == "error")
+			response["message"] = job.error;
+
+		return response;
+	});
+
+	Log::log() << "[RPC] Registered data.load.async and data.load.status handlers." << std::endl;
 }
 
 bool MainWindow::startDetached(const QString & applicationPath, const QStringList & args) const

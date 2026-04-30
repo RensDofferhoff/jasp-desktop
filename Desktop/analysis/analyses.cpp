@@ -24,6 +24,11 @@
 #include "knownissues.h"
 #include <QTimer>
 #include <QFile>
+#include <QDir>
+#include <QFileInfo>
+#include <QSet>
+#include <QCoreApplication>
+#include <QRegularExpression>
 #include "log.h"
 #include "rpc/jasprpcdispatcher.h"
 
@@ -43,10 +48,10 @@ Analyses::Analyses()
 	new KnownIssues(this);
 }
 
-void Analyses::destroyAllForms() 
-{ 
+void Analyses::destroyAllForms()
+{
 	Log::log() << "Analyses::destroyAllForms()" << std::endl;
-	
+
 	//Destroy all existing forms *before* destroying the rest of QML, to avoid a massive slew of errors
 	applyToAll([](Analysis * a){ if(a->form()) a->destroyForm(); });
 }
@@ -55,7 +60,7 @@ void Analyses::destroyAllForms()
 Analysis* Analyses::createFromJaspFileEntry(Json::Value analysisData, RibbonModel* ribbonModel)
 {
 	Log::log() << "Analyses::createFromJaspFileEntry" << std::endl;
-	
+
 	Analysis::Status status		= Analysis::parseStatus(analysisData["status"].asString());
 	size_t id					= analysisData["id"].asUInt();
 
@@ -65,33 +70,33 @@ Analysis* Analyses::createFromJaspFileEntry(Json::Value analysisData, RibbonMode
 
 	if(_nextId <= id) _nextId = id + 1;
 
-	
+
 	Modules::UpgradeMsgs		msgs;
 	bool						wasUpgraded		= Upgrader::upgrader()->upgradeAnalysisData(DynamicModules::dynMods()->modules(), analysisData, msgs);
 	Json::Value				&	optionsJson		= analysisData["options"];
 	std::string					title			= analysisData.get("title", "").asString();
 	Modules::AnalysisEntry	*	analysisEntry	= DynamicModules::dynMods()->retrieveCorrespondingAnalysisEntry(analysisData["dynamicModule"]);
 	Analysis				*	analysis		= create(analysisData, analysisEntry, id, status, false, title, analysisData["dynamicModule"]["moduleVersion"].asString(), optionsJson);
-	
+
 	if(msgs.count(Modules::analysisLog))
 	{
 		QStringList msgAna = tq(msgs[Modules::analysisLog]);
 		analysis->setErrorInResults(fq(msgAna.join("\n")));
-	}	
+	}
 
 	if(wasUpgraded)
 		analysis->setUpgradeMsgs(msgs);
-	
+
 	if(!TempFiles::stateFileExists(id))
 		analysis->_storedWithoutState = true; //This will trigger the "you need a refresh" on resize
-	
+
 	for(const Json::Value & columnName : analysisData.get("columns", Json::arrayValue))
 	{
 		Column * col = DataSetPackage::pkg()->dataSet()->column(columnName.asString());
-		
-		if(		col 
-			&&	
-			(	col->codeType() == computedColumnType::analysisNotComputed 
+
+		if(		col
+			&&
+			(	col->codeType() == computedColumnType::analysisNotComputed
 			||	col->codeType() == computedColumnType::notComputed			)
 			&&	col->analysisId() == -1)
 			col->setAnalysisId(analysis->id());
@@ -110,13 +115,13 @@ Analysis* Analyses::create(const Json::Value & analysisData, Modules::AnalysisEn
 	Analysis *analysis = new Analysis(id, analysisEntry, title, optionsVersion, options);
 
 	analysis->checkDefaultTitleFromJASPFile(analysisData);
-	
+
 	storeAnalysis(analysis, id, notifyAll);
 	bindAnalysisHandler(analysis);
-	
+
 	if(!analysisData.isNull())	analysis->loadResultsUserdataAndRSourcesFromJASPFile(analysisData, status);
 	else						analysis->setResults(analysisEntry->getDefaultResults(), status);
-	
+
 
 
 	return analysis;
@@ -250,17 +255,17 @@ Json::Value Analyses::asJson() const
 void Analyses::saveAnalysesJsonForReload()
 {
 	beginResetModel();
-	
+
 	_tempSave = asJson();
-	
+
 	destroyAllForms();
-	
+
 	for(auto & idAnalysis : _analysisMap)
 		delete idAnalysis.second;
-	
+
 	_analysisMap.clear();
 	_orderedIds.clear();
-	
+
 	endResetModel();
 }
 
@@ -268,17 +273,17 @@ void Analyses::reloadSavedAnalysesJson()
 {
 	if(!_tempSave.isObject() || !_tempSave.isMember("analyses") || !_tempSave.isMember("meta"))
 		return;
-	
+
 	beginResetModel();
-	
+
 	bool errorFound;
 	std::stringstream errors;
 	loadAnalysesFromJaspFileJson(_tempSave["analyses"], _tempSave["meta"], errorFound, errors, RibbonModel::singleton());
-	
+
 	//applyToAll([](Analysis * a){ a->setBeingTranslated(true); });
 	endResetModel();
-	
-	_tempSave = Json::nullValue; 
+
+	_tempSave = Json::nullValue;
 }
 
 
@@ -426,14 +431,14 @@ void Analyses::loadAnalysesFromDatasetPackage(bool & errorFound, stringstream & 
 	if (DataSetPackage::pkg()->hasAnalyses())
 	{
 		Json::Value analysesData = DataSetPackage::pkg()->analysesData();
-		
+
 		if (analysesData.isNull())
 		{
 			errorFound = true;
 			errorMsg << "An error has been detected and analyses could not be loaded.";
 			return;
 		}
-		
+
 		Json::Value meta, analysesDataList;
 		if (!analysesData.isArray())
 		{
@@ -447,7 +452,7 @@ void Analyses::loadAnalysesFromDatasetPackage(bool & errorFound, stringstream & 
 				emit setResultsMeta(results);
 			}
 		}
-		
+
 		loadAnalysesFromJaspFileJson(analysesDataList, meta, errorFound, errorMsg, ribbonModel);
 	}
 }
@@ -458,7 +463,7 @@ void Analyses::loadAnalysesFromJaspFileJson(const Json::Value & analysesDataList
 	stringstream	corruptionStrings;
 
 	Log::log() << "Loading analyses from jasp-file, entering loop." << std::endl;
-	
+
 	//There is no point trying to show progress here because qml is not updated while this function runs...
 	for (const Json::Value & analysisData : analysesDataList)
 	{
@@ -471,21 +476,21 @@ void Analyses::loadAnalysesFromJaspFileJson(const Json::Value & analysesDataList
 			//Maybe show a nicer messagebox?
 			errorFound = true;
 			corruptionStrings << "\n" << (++corruptAnalyses) << ": " << modProb.what();
-			
+
 			Log::log() << "Caught module exception: " << modProb.what() << std::endl;
 		}
 		catch (runtime_error & e)
 		{
 			errorFound = true;
 			corruptionStrings << "\n" << (++corruptAnalyses) << ": " << e.what();
-			
+
 			Log::log() << "Caught runtime_error exception: " << e.what() << std::endl;
 		}
 		catch (exception & e)
 		{
 			errorFound = true;
 			corruptionStrings << "\n" << (++corruptAnalyses) << ": " << e.what();
-			
+
 			Log::log() << "Caught exception: " << e.what() << std::endl;
 		}
 	}
@@ -779,10 +784,10 @@ void Analyses::analysisTitleChangedInResults(int id, QString title)
 
 void Analyses::setChangedAnalysisTitle()
 {
-    Analysis * analysis = dynamic_cast<Analysis*>(QObject::sender());
+	Analysis * analysis = dynamic_cast<Analysis*>(QObject::sender());
 
-    if (analysis != nullptr)
-        emit analysisTitleChanged(analysis);
+	if (analysis != nullptr)
+		emit analysisTitleChanged(analysis);
 }
 
 void Analyses::duplicateAnalysis(size_t id)
@@ -818,10 +823,10 @@ void Analyses::analysisTitleChangedHandler(string moduleName, string oldTitle, s
 void Analyses::prepareForLanguageChange()
 {
 	applyToAll([&](Analysis * a)
-	{ 
+	{
 		a->setBeingTranslated(true);
-		a->setRefreshBlocked(true); 
-		
+		a->setRefreshBlocked(true);
+
 		if(!a->isFinished())
 			a->abort();
 	});
@@ -841,7 +846,7 @@ void Analyses::languageChangedHandler()
 
 void Analyses::dataModeChanged(bool dataMode)
 {
-	applyToAll([&](Analysis * a) 
+	applyToAll([&](Analysis * a)
 	{
 		if(dataMode && !a->isFinished())
 			a->refresh();
@@ -900,8 +905,16 @@ void Analyses::registerRpcHandlers()
 					"Analysis form not available for analysis " + std::to_string(analysisId));
 
 			QVariantMap optionsMap = jsonToQVariant(params["options"]).toMap();
+			form->clearAllErrors();
+			QCoreApplication::processEvents();
 			form->setOptions(optionsMap);
+			QCoreApplication::processEvents();
 			a->boundValueChangedHandler();
+
+
+			if (form->hasError())
+				return JaspRpcDispatcher::errorResult(
+					"Validation errors on analysis options: " + fq(form->getError(true)));
 
 			Json::Value response = JaspRpcDispatcher::successResult();
 			response["analysisId"] = analysisId;
@@ -923,6 +936,131 @@ void Analyses::registerRpcHandlers()
 			response["module"]     = a->module();
 			response["analysis"]   = a->name();
 			response["options"]    = a->boundValues();
+			return response;
+		});
+
+	disp->registerMethodByName("analysis.results", [](const Json::Value& params) -> Json::Value
+		{
+			int analysisId = params["analysisId"].asInt();
+			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
+			if (!a)
+				return JaspRpcDispatcher::errorResult(
+					"Analysis not found: " + std::to_string(analysisId));
+
+			Json::Value response = JaspRpcDispatcher::successResult();
+			response["analysisId"] = analysisId;
+			response["module"]     = a->module();
+			response["analysis"]   = a->name();
+
+			const Json::Value& results = a->results();
+			response["results"] = results.isNull() ? Json::Value(Json::nullValue) : results;
+
+			return response;
+		});
+
+	disp->registerMethodByName("analysis.status", [](const Json::Value& params) -> Json::Value
+		{
+			int analysisId = params["analysisId"].asInt();
+			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
+			if (!a)
+				return JaspRpcDispatcher::errorResult(
+					"Analysis not found: " + std::to_string(analysisId));
+
+			Json::Value response = JaspRpcDispatcher::successResult();
+			response["analysisId"]     = analysisId;
+			response["module"]         = a->module();
+			response["analysis"]       = a->name();
+			std::string analysisStatus = Analysis::statusToString(a->status());
+			if (analysisStatus == "empty")
+				analysisStatus = "running";
+			response["analysisStatus"] = analysisStatus;
+
+			return response;
+		});
+
+	disp->registerMethodByName("analysis.context", [](const Json::Value& params) -> Json::Value
+		{
+			QString module   = QString::fromStdString(params["module"].asString());
+			QString analysis = QString::fromStdString(params["analysis"].asString());
+
+			auto* dm = DynamicModules::dynMods();
+			if (!dm)
+				return JaspRpcDispatcher::errorResult("DynamicModules not available");
+
+			auto* mod = dm->dynamicModule(fq(module));
+			if (!mod)
+				return JaspRpcDispatcher::errorResult("Module not found: " + fq(module));
+
+			Modules::AnalysisEntry* entry = nullptr;
+			for (auto* e : mod->menu())
+				if (e->isAnalysis() && e->function() == fq(analysis))
+				{
+					entry = e;
+					break;
+				}
+
+			if (!entry)
+				return JaspRpcDispatcher::errorResult("Analysis not found: " + fq(module) + "::" + fq(analysis));
+
+			std::string mainQmlPath = entry->qmlFilePath();
+			QFileInfo mainInfo(tq(mainQmlPath));
+			if (!mainInfo.exists())
+				return JaspRpcDispatcher::errorResult("QML file not found: " + mainQmlPath);
+
+			// Read main QML file
+			QFile mainFile(mainInfo.absoluteFilePath());
+			if (!mainFile.open(QIODevice::ReadOnly | QIODevice::Text))
+				return JaspRpcDispatcher::errorResult("Cannot read QML file: " + mainQmlPath);
+
+			QString mainQml = QString::fromUtf8(mainFile.readAll());
+			mainFile.close();
+
+			Json::Value files(Json::objectValue);
+			std::string mainRelPath = fq(mainInfo.fileName());
+			files[mainRelPath] = fq(mainQml);
+
+			// Scan for local relative imports (e.g. import "./common" as Common)
+			// and collect all .qml files from those directories
+			QSet<QString> collectedDirs;
+			QRegularExpression importRe(QStringLiteral("import\\s+\"(\\./[^\"]+)\"\\s+as\\s+\\w+"));
+			QRegularExpressionMatchIterator it = importRe.globalMatch(mainQml);
+			while (it.hasNext())
+			{
+				QRegularExpressionMatch m = it.next();
+				QString relDir = m.captured(1);
+				QDir dir(mainInfo.absoluteDir());
+				if (dir.exists(relDir) && !collectedDirs.contains(relDir))
+				{
+					collectedDirs.insert(relDir);
+					QDir importDir(dir.absoluteFilePath(relDir));
+					for (const auto& qf : importDir.entryList({"*.qml"}, QDir::Files))
+					{
+						QFile qmlFile(importDir.absoluteFilePath(qf));
+						if (qmlFile.open(QIODevice::ReadOnly | QIODevice::Text))
+						{
+							std::string relPath = fq(relDir + "/" + qf);
+							files[relPath] = fq(QString::fromUtf8(qmlFile.readAll()));
+							qmlFile.close();
+						}
+					}
+				}
+			}
+
+			// Read help file if available (<moduleInstFolder>/help/<functionName>.md)
+			Json::Value help("");
+			QString helpPath = mod->helpFolderPath() + QString::fromStdString(fq(analysis)) + ".md";
+			QFile helpFile(helpPath);
+			if (helpFile.open(QIODevice::ReadOnly | QIODevice::Text))
+			{
+				help = QString::fromUtf8(helpFile.readAll()).toStdString();
+				helpFile.close();
+			}
+
+			Json::Value response = JaspRpcDispatcher::successResult();
+			response["module"]   = module.toStdString();
+			response["analysis"] = analysis.toStdString();
+			response["files"]    = files;
+			response["help"]     = help;
 			return response;
 		});
 
