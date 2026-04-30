@@ -356,10 +356,12 @@ public slots:
 				void				handleAutoSave();
 				void				resetFilterCounters();
 				void				prepareForLanguageChange();
-				void				languageChangeDone();
-				void				handleAutoSavePrefChange();
-				
-private:
+					void				languageChangeDone();
+					void				handleAutoSavePrefChange();
+
+					void				registerRpcHandlers();
+
+	private:
 				bool				isThisTheSameThreadAsEngineSync();
 				bool				setLabelAllowFilter(	const QModelIndex & index, bool newAllowValue);
 				bool				setLabelDescription(	const QModelIndex & index, const QString & newDescription);

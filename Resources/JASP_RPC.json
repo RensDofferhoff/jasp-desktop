@@ -192,6 +192,61 @@
 			}
 		},
 		{
+			"name": "data.load",
+			"summary": "Load a data file into the workspace.",
+			"params": [
+				{
+					"name": "path",
+					"required": true,
+					"description": "Absolute path to the data file (CSV, SPSS, JASP, Excel, etc.).",
+					"schema": { "type": "string" }
+				}
+			],
+			"result": {
+				"name": "data.load.result",
+				"description": "Metadata about the loaded dataset.",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"status": {
+							"type": "string",
+							"description": "'success' or 'error'."
+						},
+						"path": {
+							"type": "string",
+							"description": "The path that was loaded."
+						},
+						"rowCount": {
+							"type": "integer",
+							"description": "Number of data rows."
+						},
+						"columnCount": {
+							"type": "integer",
+							"description": "Number of columns."
+						},
+						"columns": {
+							"type": "array",
+							"description": "Column metadata.",
+							"items": {
+								"type": "object",
+								"properties": {
+									"name": {
+										"type": "string",
+										"description": "Column name."
+									},
+									"type": {
+										"type": "string",
+										"description": "Column type: unknown, scale, ordinal, nominal, or nominalText."
+									}
+								},
+								"required": ["name", "type"]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
 			"name": "ping",
 			"summary": "Simple connectivity check. Always returns pong.",
 			"params": [],

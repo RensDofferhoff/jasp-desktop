@@ -98,6 +98,8 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 	std::cout << "Going to construct the necessary models for JASP to function." << std::endl;
 
 	//The order of these constructors is deliberate (up to some extent anyway). If you change the order you might find that stuff explodes randomly (although most likely during startup)
+	_rpcDispatcher 			= new JaspRpcDispatcher();
+	_rpcServer 				= new JaspRpcServer(*_rpcDispatcher, "127.0.0.1", 5555, "/rpc", this);
 	_qml					= new QQmlApplicationEngine(this);
 	_languageModel			= new LanguageModel(application, _qml, this);
 	_loader					= new AsyncLoader(nullptr);
@@ -105,8 +107,6 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 	_package				= new DataSetPackage(this);
 	_dynamicModules			= new DynamicModules(this);
 	_upgrader				= new Upgrader(this);
-	_rpcDispatcher = new JaspRpcDispatcher();
-	_rpcServer = new JaspRpcServer(*_rpcDispatcher, "127.0.0.1", 5555, "/rpc", this);
 	_analyses				= new Analyses();
 	_engineSync				= new EngineSync(this);
 	_datasetTableModel		= new DataSetTableModel();

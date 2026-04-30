@@ -34,6 +34,8 @@
 #include <ranges>
 #include "variableinfo.h"
 #include "fileevent.h"
+#include "datasetloader.h"
+#include "rpc/jasprpcdispatcher.h"
 
 //Im having problems getting the proxy models to play nicely with beginRemoveRows etc
 //So just reset the whole thing as that is what happens in datasetview
@@ -82,6 +84,8 @@ DataSetPackage::DataSetPackage(QObject * parent) : QAbstractItemModel(parent)
 	
 	_autoSaveTimer			.setSingleShot(false);
 	handleAutoSavePrefChange();
+
+	registerRpcHandlers();
 }
 
 DataSetPackage::~DataSetPackage() 
@@ -90,6 +94,50 @@ DataSetPackage::~DataSetPackage()
 	_delayedRefreshTimer.stop();
 	
 	_singleton = nullptr; 
+}
+
+void DataSetPackage::registerRpcHandlers()
+{
+	auto* disp = JaspRpcDispatcher::singleton();
+	if (!disp)
+		return;
+
+	disp->registerMethodByName("data.load", [](const Json::Value& params) -> Json::Value
+	{
+		std::string path = params["path"].asString();
+		std::string ext  = DataSetLoader::getExtension(path, "");
+		try
+		{
+			DataSetLoader::loadPackage(path, ext, [](int){});
+		}
+		catch (const std::exception& e)
+		{
+			return JaspRpcDispatcher::errorResult(e.what());
+		}
+
+		DataSetPackage* pkg = DataSetPackage::pkg();
+		pkg->setCurrentFile(QString::fromStdString(path));
+		pkg->setId(path);
+
+		Json::Value response = JaspRpcDispatcher::successResult();
+		response["path"]        = path;
+		response["rowCount"]    = static_cast<int>(pkg->dataRowCount());
+
+		auto colTypes = pkg->getColumnTypesMap();
+		response["columnCount"] = static_cast<int>(colTypes.size());
+
+		Json::Value columns(Json::arrayValue);
+		for (const auto& [name, type] : colTypes)
+		{
+			Json::Value col;
+			col["name"] = name;
+			col["type"] = columnTypeToString(type);
+			columns.append(col);
+		}
+		response["columns"] = columns;
+
+		return response;
+	});
 }
 
 Filter * DataSetPackage::filter()
