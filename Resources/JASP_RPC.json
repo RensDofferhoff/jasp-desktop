@@ -13,18 +13,22 @@
 					"name": "module",
 					"required": true,
 					"description": "JASP module name, e.g. 'jaspTTests'.",
-					"schema": { "type": "string" }
+					"schema": {
+						"type": "string"
+					}
 				},
 				{
 					"name": "analysis",
 					"required": true,
 					"description": "Analysis name within the module, e.g. 'TTestIndependent'.",
-					"schema": { "type": "string" }
+					"schema": {
+						"type": "string"
+					}
 				}
 			],
 			"result": {
 				"name": "analysis.create.result",
-				"description": "Metadata about the created analysis.",
+				"description": "Metadata about the created analysis, including its default options.",
 				"schema": {
 					"type": "object",
 					"properties": {
@@ -43,9 +47,24 @@
 						"analysis": {
 							"type": "string",
 							"description": "The analysis name, echoed back."
+						},
+						"options": {
+							"type": "object",
+							"description": "The current default analysis options. This is the same schema used by analysis.setOptions and analysis.getOptions."
+						},
+						"optionMeta": {
+							"type": "object",
+							"description": "Metadata describing each option: its kind (checkbox/combo/variables/number/string), valid choices for combos, allowed column types for variable lists, whether a variable list accepts single or multiple variables, and a shape example showing valid input."
 						}
 					},
-					"required": ["status", "analysisId", "module", "analysis"]
+					"required": [
+						"status",
+						"analysisId",
+						"module",
+						"analysis",
+						"options",
+						"optionMeta"
+					]
 				}
 			}
 		},
@@ -57,13 +76,17 @@
 					"name": "analysisId",
 					"required": true,
 					"description": "The integer identifier of the analysis to modify.",
-					"schema": { "type": "integer" }
+					"schema": {
+						"type": "integer"
+					}
 				},
 				{
 					"name": "options",
 					"required": true,
 					"description": "An object of option name/value pairs to set on the analysis.",
-					"schema": { "type": "object" }
+					"schema": {
+						"type": "object"
+					}
 				}
 			],
 			"result": {
@@ -105,7 +128,9 @@
 					"name": "analysisId",
 					"required": true,
 					"description": "The integer identifier of the analysis to query.",
-					"schema": { "type": "integer" }
+					"schema": {
+						"type": "integer"
+					}
 				}
 			],
 			"result": {
@@ -133,6 +158,10 @@
 						"options": {
 							"type": "object",
 							"description": "The current analysis options."
+						},
+						"optionMeta": {
+							"type": "object",
+							"description": "Metadata describing each option: its kind, valid choices, column types, etc."
 						}
 					},
 					"required": [
@@ -140,7 +169,8 @@
 						"analysisId",
 						"module",
 						"analysis",
-						"options"
+						"options",
+						"optionMeta"
 					]
 				}
 			}
@@ -153,7 +183,9 @@
 					"name": "analysisId",
 					"required": true,
 					"description": "The integer identifier of the analysis to query.",
-					"schema": { "type": "integer" }
+					"schema": {
+						"type": "integer"
+					}
 				}
 			],
 			"result": {
@@ -195,7 +227,9 @@
 					"name": "analysisId",
 					"required": true,
 					"description": "The integer identifier of the analysis to query.",
-					"schema": { "type": "integer" }
+					"schema": {
+						"type": "integer"
+					}
 				}
 			],
 			"result": {
@@ -243,13 +277,17 @@
 					"name": "module",
 					"required": true,
 					"description": "JASP module name, e.g. 'jaspTTests'.",
-					"schema": { "type": "string" }
+					"schema": {
+						"type": "string"
+					}
 				},
 				{
 					"name": "analysis",
 					"required": true,
 					"description": "Analysis name within the module, e.g. 'TTestIndependentSamples'.",
-					"schema": { "type": "string" }
+					"schema": {
+						"type": "string"
+					}
 				}
 			],
 			"result": {
@@ -273,7 +311,9 @@
 						"files": {
 							"type": "object",
 							"description": "Map of relative file path to QML source text. Always contains the main form file; may include locally imported QML files.",
-							"additionalProperties": { "type": "string" }
+							"additionalProperties": {
+								"type": "string"
+							}
 						},
 						"help": {
 							"type": "string",
@@ -348,7 +388,9 @@
 					"name": "path",
 					"required": true,
 					"description": "Absolute path to the data file (CSV, SPSS, JASP, Excel, etc.).",
-					"schema": { "type": "string" }
+					"schema": {
+						"type": "string"
+					}
 				}
 			],
 			"result": {
@@ -410,7 +452,9 @@
 					"name": "path",
 					"required": true,
 					"description": "Absolute path to the data file (CSV, SPSS, JASP, Excel, etc.).",
-					"schema": { "type": "string" }
+					"schema": {
+						"type": "string"
+					}
 				}
 			],
 			"result": {
@@ -440,7 +484,9 @@
 					"name": "jobId",
 					"required": true,
 					"description": "The job identifier returned by data.load.async.",
-					"schema": { "type": "integer" }
+					"schema": {
+						"type": "integer"
+					}
 				}
 			],
 			"result": {
@@ -502,8 +548,12 @@
 							"items": {
 								"type": "object",
 								"properties": {
-									"name": { "type": "string" },
-									"type": { "type": "string" }
+									"name": {
+										"type": "string"
+									},
+									"type": {
+										"type": "string"
+									}
 								},
 								"required": ["name", "type"]
 							}
@@ -543,7 +593,9 @@
 						"methods": {
 							"type": "array",
 							"description": "List of registered method name strings.",
-							"items": { "type": "string" }
+							"items": {
+								"type": "string"
+							}
 						}
 					},
 					"required": ["methods"]

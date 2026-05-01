@@ -22,9 +22,15 @@
 #include "utilities/qutils.h"
 #include "controls/jasplistcontrol.h"
 #include "controls/expanderbuttonbase.h"
+#include "controls/radiobuttonsgroupbase.h"
+#include "controls/radiobuttonbase.h"
+#include "controls/comboboxbase.h"
+#include "controls/textinputbase.h"
 #include "log.h"
 #include "controls/jaspcontrol.h"
 #include "rsyntax/rsyntax.h"
+#include "variableinfo.h"
+#include "dataset.h"
 
 #include <QQmlProperty>
 #include <QQmlContext>
@@ -298,6 +304,11 @@ void AnalysisForm::setHasVolatileNotes(bool hasVolatileNotes)
 
 void AnalysisForm::clearAllErrors()
 {
+	_formErrors.clear();
+	_formWarnings.clear();
+	emit errorsChanged();
+	emit warningsChanged();
+
 	for (QQuickItem* item : _controlErrorMessageCache)
 	{
 		JASPControl* control = item->property("control").value<JASPControl*>();
@@ -331,6 +342,156 @@ bool AnalysisForm::parseOptions(std::string rawOptions, Json::Value& parsedOptio
 	}
 
 	return true;
+}
+
+
+Json::Value AnalysisForm::optionMeta() const
+{
+	Json::Value meta(Json::objectValue);
+
+	for (JASPControl* ctrl : _dependsOrderedCtrls)
+	{
+		if (!ctrl->isBound() || !ctrl->boundControl())
+			continue;
+
+		Json::Value entry(Json::objectValue);
+		QString title = ctrl->humanFriendlyLabel();
+		if (!title.isEmpty())
+			entry["title"] = title.toStdString();
+		QString desc = ctrl->info();
+		if (!desc.isEmpty())
+			entry["description"] = desc.toStdString();
+
+		switch (ctrl->controlType())
+		{
+		case JASPControl::ControlType::CheckBox:
+		case JASPControl::ControlType::Switch:
+			entry["kind"] = "checkbox";
+			entry["instruction"] = "Set to true or false.";
+			entry["shape"] = ctrl->boundControl()->createJson();
+			break;
+
+		case JASPControl::ControlType::RadioButtonGroup:
+		{
+			entry["kind"] = "combo";
+			entry["instruction"] = "Set to one of the string values listed in choices.";
+			entry["shape"] = ctrl->boundControl()->createJson();
+			auto* group = qobject_cast<RadioButtonsGroupBase*>(ctrl);
+			if (group)
+			{
+				Json::Value choices(Json::arrayValue);
+				for (auto* button : group->buttons())
+				{
+					if (button->name().isEmpty()) continue;
+					Json::Value choice(Json::objectValue);
+					choice["value"] = button->name().toStdString();
+					if (!button->title().isEmpty())
+						choice["label"] = button->title().toStdString();
+					if (!button->info().isEmpty())
+						choice["info"] = button->info().toStdString();
+					choices.append(choice);
+				}
+				entry["choices"] = choices;
+			}
+			break;
+		}
+
+		case JASPControl::ControlType::ComboBox:
+		{
+			entry["kind"] = "combo";
+			entry["instruction"] = "Set to one of the string values listed in choices.";
+			entry["shape"] = ctrl->boundControl()->createJson();
+			auto* combo = qobject_cast<ComboBoxBase*>(ctrl);
+			if (combo && combo->model())
+			{
+				Json::Value choices(Json::arrayValue);
+				for (const Term& term : combo->model()->terms())
+				{
+					Json::Value choice(Json::objectValue);
+					choice["value"] = term.value().toStdString();
+					if (!term.label().isEmpty())
+						choice["label"] = term.label().toStdString();
+					choices.append(choice);
+				}
+				if (choices.size() > 0)
+					entry["choices"] = choices;
+			}
+			break;
+		}
+
+		case JASPControl::ControlType::VariablesListView:
+		{
+			entry["kind"] = "variables";
+			entry["instruction"] = "Set to an object with types and value. types must be an array of strings from allowedTypes (e.g. [\"scale\",\"scale\"]), not the variable\'s actual column type. value is a variable name, or an array of names if single is false. Pick variables from the variables map that plausibly match allowedTypes; the system will coerce them.";
+			entry["shape"] = ctrl->boundControl()->createJson();
+			auto* listCtrl = qobject_cast<JASPListControl*>(ctrl);
+			if (listCtrl)
+			{
+				Json::Value allowedTypes(Json::arrayValue);
+				for (const QString& col : listCtrl->allowedColumns())
+					allowedTypes.append(col.toStdString());
+				entry["allowedTypes"] = allowedTypes;
+				entry["single"] = listCtrl->maxRows() == 1;
+
+				DataSet* ds = VariableInfo::info()->dataSet();
+				if (ds)
+				{
+					Json::Value vars(Json::objectValue);
+					for (int i = 0; i < ds->columnCount(); i++)
+					{
+						Column* col = ds->column(size_t(i));
+						if (col)
+							vars[col->name()] = columnTypeToString(col->type());
+					}
+					entry["variables"] = vars;
+				}
+			}
+			break;
+		}
+
+		case JASPControl::ControlType::Slider:
+			entry["kind"] = "number";
+			entry["instruction"] = "Set to a number.";
+			entry["shape"] = ctrl->boundControl()->createJson();
+			break;
+
+		case JASPControl::ControlType::TextField:
+		{
+			entry["kind"] = "string";
+			entry["instruction"] = "Set to a string.";
+			entry["shape"] = ctrl->boundControl()->createJson();
+			auto* textInput = qobject_cast<TextInputBase*>(ctrl);
+			if (textInput)
+			{
+				switch (textInput->inputType())
+				{
+				case TextInputBase::IntegerInputType:
+				case TextInputBase::NumberInputType:
+				case TextInputBase::PercentIntputType:
+					entry["kind"] = "number";
+			entry["instruction"] = "Set to a number.";
+					break;
+				default:
+					break;
+				}
+			}
+			break;
+		}
+
+		case JASPControl::ControlType::TextArea:
+			entry["kind"] = "string";
+			entry["instruction"] = "Set to a string.";
+			entry["shape"] = ctrl->boundControl()->createJson();
+			break;
+
+		default:
+			continue; // Skip structural controls (Expander, GroupBox, etc.)
+		}
+
+		meta[ctrl->name().toStdString()] = entry;
+	}
+
+	return meta;
 }
 
 void AnalysisForm::_setUp()

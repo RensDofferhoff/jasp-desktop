@@ -29,6 +29,7 @@
 #include <QSet>
 #include <QCoreApplication>
 #include <QRegularExpression>
+#include <json/value.h>
 #include "log.h"
 #include "rpc/jasprpcdispatcher.h"
 
@@ -888,6 +889,8 @@ void Analyses::registerRpcHandlers()
 			response["analysisId"] = static_cast<int>(a->id());
 			response["module"]     = module.toStdString();
 			response["analysis"]   = analysis.toStdString();
+			response["options"]    = a->boundValues();
+			response["optionMeta"] = a->form() ? a->form()->optionMeta() : Json::Value(Json::objectValue);
 			return response;
 		});
 
@@ -922,6 +925,8 @@ void Analyses::registerRpcHandlers()
 				return JaspRpcDispatcher::errorResult(
 					"Validation errors on analysis options: " + errorMsg);
 
+			a->boundValueChangedHandler();
+
 			Json::Value response = JaspRpcDispatcher::successResult();
 			response["analysisId"] = analysisId;
 			response["module"]     = a->module();
@@ -942,6 +947,7 @@ void Analyses::registerRpcHandlers()
 			response["module"]     = a->module();
 			response["analysis"]   = a->name();
 			response["options"]    = a->boundValues();
+			response["optionMeta"] = a->form() ? a->form()->optionMeta() : Json::Value(Json::objectValue);
 			return response;
 		});
 

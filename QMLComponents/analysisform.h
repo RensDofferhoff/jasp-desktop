@@ -157,9 +157,10 @@ public:
 	Q_INVOKABLE bool		initialized()			const	{ return _initialized; }
 	Q_INVOKABLE QVariant	options()				const;
 	Q_INVOKABLE void		setOptions(const QVariantMap& options);
-	QString					generateWrapper(const QString& moduleName, const QString& analysisName, const QString& qmlFileName, const QString& analysisTitle, bool preloadData);
-	bool					parseOptions(std::string rawOptions, Json::Value& parsedOptions, std::string& errorMsg);
-	void					setAnalysis(AnalysisBase *	analysis);
+	QString				generateWrapper(const QString& moduleName, const QString& analysisName, const QString& qmlFileName, const QString& analysisTitle, bool preloadData);
+	bool				parseOptions(std::string rawOptions, Json::Value& parsedOptions, std::string& errorMsg);
+	Json::Value			optionMeta()					const;
+	void				setAnalysis(AnalysisBase *	analysis);
 	void					addControlError(JASPControl* control, QString message, bool temporary = false, bool warning = false, bool closeable = true);
 	void					clearControlError(JASPControl* control);
 	void					clearAllErrors();
