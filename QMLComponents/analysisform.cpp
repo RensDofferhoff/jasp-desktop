@@ -488,6 +488,10 @@ Json::Value AnalysisForm::optionMeta() const
 			continue; // Skip structural controls (Expander, GroupBox, etc.)
 		}
 
+		Json::Value defaultVal = ctrl->boundControl()->defaultBoundValue();
+		if (defaultVal != Json::nullValue)
+			entry["default"] = defaultVal;
+
 		meta[ctrl->name().toStdString()] = entry;
 	}
 
