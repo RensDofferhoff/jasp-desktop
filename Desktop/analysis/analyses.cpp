@@ -874,7 +874,7 @@ void Analyses::registerRpcHandlers()
 
 	// Looked up by name from the RPCSpec.json registry.
 	// Spec defines params & result schema — validated automatically.
-	disp->registerMethodByName("analysis.create", [](const Json::Value& params) -> Json::Value
+	disp->registerMethodByName("analysis_create", [](const Json::Value& params) -> Json::Value
 		{
 			QString module   = QString::fromStdString(params["module"].asString());
 			QString analysis = QString::fromStdString(params["analysis"].asString());
@@ -894,7 +894,7 @@ void Analyses::registerRpcHandlers()
 			return response;
 		});
 
-	disp->registerMethodByName("analysis.setOptions", [](const Json::Value& params) -> Json::Value
+	disp->registerMethodByName("analysis_setOptions", [](const Json::Value& params) -> Json::Value
 		{
 			int analysisId = params["analysisId"].asInt();
 			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
@@ -931,10 +931,12 @@ void Analyses::registerRpcHandlers()
 			response["analysisId"] = analysisId;
 			response["module"]     = a->module();
 			response["analysis"]   = a->name();
+			response["options"]    = a->boundValues();
+			response["optionMeta"] = a->form() ? a->form()->optionMeta() : Json::Value(Json::objectValue);
 			return response;
 		});
 
-	disp->registerMethodByName("analysis.getOptions", [](const Json::Value& params) -> Json::Value
+	disp->registerMethodByName("analysis_getOptions", [](const Json::Value& params) -> Json::Value
 		{
 			int analysisId = params["analysisId"].asInt();
 			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
@@ -951,7 +953,7 @@ void Analyses::registerRpcHandlers()
 			return response;
 		});
 
-	disp->registerMethodByName("analysis.results", [](const Json::Value& params) -> Json::Value
+	disp->registerMethodByName("analysis_results", [](const Json::Value& params) -> Json::Value
 		{
 			int analysisId = params["analysisId"].asInt();
 			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
@@ -970,7 +972,7 @@ void Analyses::registerRpcHandlers()
 			return response;
 		});
 
-	disp->registerMethodByName("analysis.status", [](const Json::Value& params) -> Json::Value
+	disp->registerMethodByName("analysis_status", [](const Json::Value& params) -> Json::Value
 		{
 			int analysisId = params["analysisId"].asInt();
 			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
@@ -990,7 +992,7 @@ void Analyses::registerRpcHandlers()
 			return response;
 		});
 
-	disp->registerMethodByName("analysis.context", [](const Json::Value& params) -> Json::Value
+	disp->registerMethodByName("analysis_context", [](const Json::Value& params) -> Json::Value
 		{
 			QString module   = QString::fromStdString(params["module"].asString());
 			QString analysis = QString::fromStdString(params["analysis"].asString());
@@ -1076,7 +1078,7 @@ void Analyses::registerRpcHandlers()
 			return response;
 		});
 
-	disp->registerMethodByName("modules.list", [](const Json::Value&) -> Json::Value
+	disp->registerMethodByName("modules_list", [](const Json::Value&) -> Json::Value
 	{
 		auto* dm = DynamicModules::dynMods();
 		Json::Value modules(Json::arrayValue);

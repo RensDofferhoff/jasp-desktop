@@ -99,7 +99,7 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 
 	//The order of these constructors is deliberate (up to some extent anyway). If you change the order you might find that stuff explodes randomly (although most likely during startup)
 	_rpcDispatcher 			= new JaspRpcDispatcher();
-	_rpcServer 				= new JaspRpcServer(*_rpcDispatcher, "127.0.0.1", 5555, "/rpc", this);
+    _rpcServer 				= new JaspRpcServer(*_rpcDispatcher, this);
 	_qml					= new QQmlApplicationEngine(this);
 	_languageModel			= new LanguageModel(application, _qml, this);
 	_loader					= new AsyncLoader(nullptr);
@@ -1230,8 +1230,8 @@ void MainWindow::registerRpcAsyncHandlers()
 	if (!disp)
 		return;
 
-	// --- data.load.async ---
-	disp->registerMethodByName("data.load.async", [this](const Json::Value& params) -> Json::Value
+	// --- data_load_async ---
+	disp->registerMethodByName("data_load_async", [this](const Json::Value& params) -> Json::Value
 	{
 		// Reject if a load is already in progress
 		for (const auto& [id, job] : _rpcJobs)
@@ -1279,8 +1279,8 @@ void MainWindow::registerRpcAsyncHandlers()
 		return response;
 	});
 
-	// --- data.load.status ---
-	disp->registerMethodByName("data.load.status", [this](const Json::Value& params) -> Json::Value
+	// --- data_load_status ---
+	disp->registerMethodByName("data_load_status", [this](const Json::Value& params) -> Json::Value
 	{
 		int jobId = params["jobId"].asInt();
 
@@ -1301,7 +1301,7 @@ void MainWindow::registerRpcAsyncHandlers()
 		return response;
 	});
 
-	Log::log() << "[RPC] Registered data.load.async and data.load.status handlers." << std::endl;
+	Log::log() << "[RPC] Registered data_load_async and data_load_status handlers." << std::endl;
 }
 
 bool MainWindow::startDetached(const QString & applicationPath, const QStringList & args) const

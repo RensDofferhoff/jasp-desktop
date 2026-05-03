@@ -25,10 +25,10 @@ public:
 	/// Construct a server.
 	/// The dispatcher must outlive the server.
 	explicit JaspRpcServer(JaspRpcDispatcher& dispatcher,
+                           QObject* parent = nullptr,
 	                       const QString& host = "127.0.0.1",
-	                       quint16 port = 5555,
-	                       const QString& endpointPath = "/rpc",
-	                       QObject* parent = nullptr);
+                           quint16 port = 48164,
+                           const QString& endpointPath = "/rpc");
 
 	~JaspRpcServer() override;
 

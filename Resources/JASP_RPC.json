@@ -6,7 +6,7 @@
 	},
 	"methods": [
 		{
-			"name": "analysis.create",
+			"name": "analysis_create",
 			"summary": "Create and start an analysis by module name and analysis name.",
 			"params": [
 				{
@@ -27,7 +27,7 @@
 				}
 			],
 			"result": {
-				"name": "analysis.create.result",
+				"name": "analysis_create_result",
 				"description": "Metadata about the created analysis, including its default options.",
 				"schema": {
 					"type": "object",
@@ -50,7 +50,7 @@
 						},
 						"options": {
 							"type": "object",
-							"description": "The current default analysis options. This is the same schema used by analysis.setOptions and analysis.getOptions."
+							"description": "The current default analysis options. This is the same schema used by analysis_setOptions and analysis_getOptions."
 						},
 						"optionMeta": {
 							"type": "object",
@@ -69,8 +69,8 @@
 			}
 		},
 		{
-			"name": "analysis.setOptions",
-			"summary": "Set analysis options for an existing analysis by ID.",
+			"name": "analysis_setOptions",
+			"summary": "Set analysis options for an existing analysis by ID. Returns the post-set options (including any new options or valid values that may have appeared).",
 			"params": [
 				{
 					"name": "analysisId",
@@ -90,8 +90,8 @@
 				}
 			],
 			"result": {
-				"name": "analysis.setOptions.result",
-				"description": "Confirmation that the options were applied, or an error if any options failed validation.",
+				"name": "analysis_setOptions_result",
+				"description": "The post-set options, including any new options or valid values that may have appeared after setting. Returns the options and optionMeta representing the current state of the analysis options after applying the requested changes.",
 				"schema": {
 					"type": "object",
 					"properties": {
@@ -114,14 +114,29 @@
 						"analysis": {
 							"type": "string",
 							"description": "The analysis name."
+						},
+						"options": {
+							"type": "object",
+							"description": "The current default analysis options. This is the same schema used by analysis_setOptions and analysis_getOptions."
+						},
+						"optionMeta": {
+							"type": "object",
+							"description": "Metadata describing each option: its kind (checkbox/combo/variables/number/string), valid choices for combos, allowed column types for variable lists, whether a variable list accepts single or multiple variables, and a shape example showing valid input."
 						}
 					},
-					"required": ["status", "analysisId", "module", "analysis"]
+					"required": [
+						"status",
+						"analysisId",
+						"module",
+						"analysis",
+						"options",
+						"optionMeta"
+					]
 				}
 			}
 		},
 		{
-			"name": "analysis.getOptions",
+			"name": "analysis_getOptions",
 			"summary": "Retrieve the current analysis options by analysis ID.",
 			"params": [
 				{
@@ -134,7 +149,7 @@
 				}
 			],
 			"result": {
-				"name": "analysis.getOptions.result",
+				"name": "analysis_getOptions_result",
 				"description": "The current options of the analysis.",
 				"schema": {
 					"type": "object",
@@ -176,7 +191,7 @@
 			}
 		},
 		{
-			"name": "analysis.results",
+			"name": "analysis_results",
 			"summary": "Retrieve the current results of an analysis by ID.",
 			"params": [
 				{
@@ -189,7 +204,7 @@
 				}
 			],
 			"result": {
-				"name": "analysis.results.result",
+				"name": "analysis_results_result",
 				"description": "The current results of the analysis.",
 				"schema": {
 					"type": "object",
@@ -220,7 +235,7 @@
 			}
 		},
 		{
-			"name": "analysis.status",
+			"name": "analysis_status",
 			"summary": "Query the run status of an analysis by ID.",
 			"params": [
 				{
@@ -233,7 +248,7 @@
 				}
 			],
 			"result": {
-				"name": "analysis.status.result",
+				"name": "analysis_status_result",
 				"description": "The current run status of the analysis.",
 				"schema": {
 					"type": "object",
@@ -270,7 +285,7 @@
 			}
 		},
 		{
-			"name": "analysis.context",
+			"name": "analysis_context",
 			"summary": "Retrieve context for an analysis: QML form file(s), help text, or other analysis metadata. Intended for AI clients that need to understand what options are available and how to set them.",
 			"params": [
 				{
@@ -291,7 +306,7 @@
 				}
 			],
 			"result": {
-				"name": "analysis.context.result",
+				"name": "analysis_context_result",
 				"description": "The QML source of the analysis form and any locally imported QML files. Each entry in 'files' maps a relative path to its QML source text.",
 				"schema": {
 					"type": "object",
@@ -331,11 +346,11 @@
 			}
 		},
 		{
-			"name": "modules.list",
+			"name": "modules_list",
 			"summary": "List all loaded modules and their available analyses.",
 			"params": [],
 			"result": {
-				"name": "modules.list.result",
+				"name": "modules_list_result",
 				"schema": {
 					"type": "object",
 					"properties": {
@@ -381,7 +396,7 @@
 			}
 		},
 		{
-			"name": "data.load",
+			"name": "data_load",
 			"summary": "Load a data file into the workspace.",
 			"params": [
 				{
@@ -394,7 +409,7 @@
 				}
 			],
 			"result": {
-				"name": "data.load.result",
+				"name": "data_load_result",
 				"description": "Metadata about the loaded dataset.",
 				"schema": {
 					"type": "object",
@@ -445,7 +460,7 @@
 			}
 		},
 		{
-			"name": "data.load.async",
+			"name": "data_load_async",
 			"summary": "Start loading a data file asynchronously. Returns a jobId immediately.",
 			"params": [
 				{
@@ -458,7 +473,7 @@
 				}
 			],
 			"result": {
-				"name": "data.load.async.result",
+				"name": "data_load_async_result",
 				"description": "The accepted async job.",
 				"schema": {
 					"type": "object",
@@ -469,7 +484,7 @@
 						},
 						"jobId": {
 							"type": "integer",
-							"description": "Unique job identifier for polling with data.load.status."
+							"description": "Unique job identifier for polling with data_load_status."
 						}
 					},
 					"required": ["status", "jobId"]
@@ -477,20 +492,20 @@
 			}
 		},
 		{
-			"name": "data.load.status",
+			"name": "data_load_status",
 			"summary": "Poll the status of an async data load job.",
 			"params": [
 				{
 					"name": "jobId",
 					"required": true,
-					"description": "The job identifier returned by data.load.async.",
+					"description": "The job identifier returned by data_load_async.",
 					"schema": {
 						"type": "integer"
 					}
 				}
 			],
 			"result": {
-				"name": "data.load.status.result",
+				"name": "data_load_status_result",
 				"description": "Current status of the async load job.",
 				"schema": {
 					"type": "object",
@@ -505,7 +520,7 @@
 						},
 						"message": {
 							"type": "string",
-							"description": "Error message, present when status is 'error'. Use data.info to retrieve dataset metadata when status is 'complete'."
+							"description": "Error message, present when status is 'error'. Use data_info to retrieve dataset metadata when status is 'complete'."
 						}
 					},
 					"required": ["jobId", "status"]
@@ -513,11 +528,11 @@
 			}
 		},
 		{
-			"name": "data.info",
+			"name": "data_info",
 			"summary": "Retrieve metadata about the currently loaded dataset.",
 			"params": [],
 			"result": {
-				"name": "data.info.result",
+				"name": "data_info_result",
 				"description": "Metadata about the loaded dataset, or loaded=false if none.",
 				"schema": {
 					"type": "object",
@@ -582,19 +597,21 @@
 			}
 		},
 		{
-			"name": "rpc.discover",
-			"summary": "Schema discovery. Returns the names of all registered RPC methods.",
+			"name": "rpc_discover",
+			"summary": "Schema discovery. Returns every registered method as an object. Methods with an OpenRPC spec include their full descriptor (summary, params, result); methods without a spec include at minimum their name.",
 			"params": [],
 			"result": {
-				"name": "rpc.discover.result",
+				"name": "rpc_discover_result",
 				"schema": {
 					"type": "object",
 					"properties": {
 						"methods": {
 							"type": "array",
-							"description": "List of registered method name strings.",
+							"description": "List of registered methods, each represented as a method object.",
 							"items": {
-								"type": "string"
+								"type": "object",
+								"description": "A method object. At minimum contains 'name'. Methods with an OpenRPC spec also include 'summary', 'params', and 'result'.",
+								"required": ["name"]
 							}
 						}
 					},

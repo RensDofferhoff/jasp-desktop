@@ -16,10 +16,10 @@
 #include "log.h"
 
 JaspRpcServer::JaspRpcServer(JaspRpcDispatcher& dispatcher,
+                              QObject* parent,
 							 const QString& host,
 							 quint16 port,
-							 const QString& endpointPath,
-							 QObject* parent)
+                              const QString& endpointPath)
 	: QObject(parent)
 	, _dispatcher(dispatcher)
 	, _host(host)

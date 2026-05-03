@@ -102,7 +102,7 @@ void DataSetPackage::registerRpcHandlers()
 	if (!disp)
 		return;
 
-	disp->registerMethodByName("data.load", [](const Json::Value& params) -> Json::Value
+	disp->registerMethodByName("data_load", [](const Json::Value& params) -> Json::Value
 	{
 		std::string path = params["path"].asString();
 		std::string ext  = DataSetLoader::getExtension(path, "");
@@ -141,8 +141,8 @@ void DataSetPackage::registerRpcHandlers()
 		return response;
 	});
 
-	// --- data.info ---
-	disp->registerMethodByName("data.info", [](const Json::Value&) -> Json::Value
+	// --- data_info ---
+	disp->registerMethodByName("data_info", [](const Json::Value&) -> Json::Value
 	{
 		DataSetPackage* pkg = DataSetPackage::pkg();
 

@@ -92,6 +92,7 @@ Json::Value RpcSchema::toJson() const
 	Json::Value j;
 	if (!type.empty())        j["type"]        = type;
 	if (!description.empty()) j["description"] = description;
+	if (!defaultValue.isNull()) j["default"]   = defaultValue;
 	if (!required.empty())
 	{
 		Json::Value req(Json::arrayValue);
@@ -104,8 +105,9 @@ Json::Value RpcSchema::toJson() const
 		for (const auto& pr : properties)
 		{
 			Json::Value pj;
-			if (!pr.description.empty()) pj["description"] = pr.description;
-			if (pr.schema)               pj = pr.schema->toJson();
+			if (!pr.description.empty())  pj["description"] = pr.description;
+			if (!pr.defaultValue.isNull()) pj["default"]     = pr.defaultValue;
+			if (pr.schema)                pj = pr.schema->toJson();
 			props[pr.name] = pj;
 		}
 		j["properties"] = props;
@@ -193,7 +195,7 @@ Json::Value RpcMethodSpec::toJson() const
 		pj["name"]        = p.name;
 		pj["required"]    = p.required;
 		pj["description"] = p.description;
-		if (!p.schema.type.empty()) pj["type"] = p.schema.type;
+		pj["schema"]      = p.schema.toJson();
 		plist.append(pj);
 	}
 	m["params"] = plist;

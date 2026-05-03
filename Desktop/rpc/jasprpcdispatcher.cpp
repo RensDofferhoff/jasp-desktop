@@ -89,7 +89,7 @@ JaspRpcDispatcher::JaspRpcDispatcher()
 				  << std::endl;
 	// n < 0 → file not found / parse error; silently OK.
 
-	// Register built-in methods (ping, rpc.discover, etc.)
+	// Register built-in methods (ping, rpc_discover, etc.)
 	registerBuiltins();
 }
 
@@ -428,8 +428,8 @@ void JaspRpcDispatcher::registerBuiltins()
 		return result;
 	});
 
-	// rpc.discover — schema introspection
-	registerMethod("rpc.discover", [this](const Json::Value&) -> Json::Value
+	// rpc_discover — schema introspection
+	registerMethod("rpc_discover", [this](const Json::Value&) -> Json::Value
 	{
 		Json::Value methods(Json::arrayValue);
 		for (const auto& name : registeredMethods())
@@ -437,7 +437,13 @@ void JaspRpcDispatcher::registerBuiltins()
 			if (auto* spec = getSpec(name))
 				methods.append(spec->toJson());
 			else
-				methods.append(name);
+			{
+				// Methods without a spec still get a minimal object so
+				// the response array is uniformly typed.
+				Json::Value obj;
+				obj["name"] = name;
+				methods.append(obj);
+			}
 		}
 		Json::Value result;
 		result["methods"] = methods;
