@@ -1,448 +1,490 @@
-
 .jasp-no-select {
-	-webkit-user-select: none;
+    -webkit-user-select: none;
 }
 
 body {
-        margin:           0 ;
-        cursor:           default;
-        font-size:        12px ;
+    margin: 0;
+    cursor: default;
+    font-size: 12px;
 }
 
 #results {
     display: inline-block;
 }
 
-h1, .h1-toolbar .jasp-menu {
-	font-size: 175% ;
+h1,
+.h1-toolbar .jasp-menu {
+    font-size: 175%;
 }
 
-h2, .h2-toolbar .jasp-menu {
-	font-size: 150% ;
+h2,
+.h2-toolbar .jasp-menu {
+    font-size: 150%;
 }
 
-h3, .h3-toolbar .jasp-menu {
-	font-size: 125% ;
-	margin-top: .5em;
-	margin-bottom: .5em;
+h3,
+.h3-toolbar .jasp-menu {
+    font-size: 125%;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
 }
 
-h4, .h4-toolbar .jasp-menu {
-	font-size: 115% ;
-	margin-top: .5em;
-	margin-bottom: .5em;
+h4,
+.h4-toolbar .jasp-menu {
+    font-size: 115%;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
 }
 
-h5, .h5-toolbar .jasp-menu {
-	font-size: 105% ;
-	margin-top: .5em;
-	margin-bottom: .5em;
+h5,
+.h5-toolbar .jasp-menu {
+    font-size: 105%;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
 }
 
-h6, .h6-toolbar .jasp-menu {
-	font-size: 100% ;
-	margin-top: .5em;
-	margin-bottom: .5em;
+h6,
+.h6-toolbar .jasp-menu {
+    font-size: 100%;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
 }
 
 .jasp-display-item.hidden-collection {
-  border:         0px none;
-  border-radius:  0px ;
-  margin-top:     0px ;
-  margin-bottom:  0px ;
-  padding-left:   0px ;
-  margin-right:   0px ;
-  padding-right:  0px ;
+    border: 0px none;
+    border-radius: 0px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+    padding-left: 0px;
+    margin-right: 0px;
+    padding-right: 0px;
 }
 
 .jasp-display-item {
-  margin-top:     0.1em;
-  margin-bottom:  0.6em;
-  padding-left:   0.6em;
-  margin-right:   0.6em;
-  padding-right:  0.6em;
+    margin-top: 0.1em;
+    margin-bottom: 0.6em;
+    padding-left: 0.6em;
+    margin-right: 0.6em;
+    padding-right: 0.6em;
 }
 
 .jasp-display-item ~ .jasp-display-item {
-	margin-top: 0.6em;
+    margin-top: 0.6em;
 }
 
 .jasp-display-item-flat {
-	padding-left: 0;
+    padding-left: 0;
 }
 
 .jasp-table-primitive {
-	padding-left: 0.6em ;
+    padding-left: 0.6em;
 }
 
 .jasp-collapsed {
-	max-width: 70em;
-	min-width: 40em;
+    max-width: 70em;
+    min-width: 40em;
 }
 
 table {
-	font-style: normal ;
-	border-collapse: collapse ;
-	margin-bottom: 2em ;
-	cursor: default;
+    font-style: normal;
+    border-collapse: collapse;
+    margin-bottom: 2em;
+    cursor: default;
 }
 
 th {
-	vertical-align: bottom ;
-	font-weight: normal ;
+    vertical-align: bottom;
+    font-weight: normal;
 }
 
 th .in-toolbar {
-	font-style: italic;
+    font-style: italic;
 }
 
 th[colspan="2"] {
-	padding-left : 1em ;
-	padding-right: 1em ;
+    padding-left: 1em;
+    padding-right: 1em;
 }
 
 td {
-	text-align: right;
-	vertical-align: bottom;
-	padding-left: 1em;
-	padding-right: 1em;
-	/* padding-top: .25em;   because algin to buttom then seems visual balanced */
-	padding-bottom: .25em;
+    text-align: right;
+    vertical-align: bottom;
+    padding-left: 1em;
+    padding-right: 1em;
+    /* padding-top: .25em;   because algin to buttom then seems visual balanced */
+    padding-bottom: 0.25em;
 }
 
 thead tr:nth-child(2) th:not(.separator) {
-	min-width: 4em ;
+    min-width: 4em;
 }
 
-th.separator, td.separator {
-	padding-left: 0px ;
-	padding-right: 0px ;
+th.separator,
+td.separator {
+    padding-left: 0px;
+    padding-right: 0px;
 }
 
 thead tr:first-child th {
-	padding: 6px 10px ;
-	font-style: bold ;
-	text-align: left ;
-	padding-left: 0 ;
+    padding: 6px 10px;
+    font-style: bold;
+    text-align: left;
+    padding-left: 0;
 }
 
 thead th {
-	text-align: center;
-	white-space: nowrap;
-	padding-top: .25em ;
-	padding-bottom: .25em ;
-	padding-left: 1em;
-	padding-right: 1em;
+    text-align: center;
+    white-space: nowrap;
+    padding-top: 0.25em;
+    padding-bottom: 0.25em;
+    padding-left: 1em;
+    padding-right: 1em;
 }
 
 tbody th {
-	text-align: left;
+    text-align: left;
 }
 
 tbody th,
 tbody td {
-	border-bottom : none ;
-	border-top : none;
-	white-space: nowrap;
+    border-bottom: none;
+    border-top: none;
+    white-space: nowrap;
 }
 
 thead tr th {
-	border-bottom: thin solid ;
+    border-bottom: thin solid;
 }
 
 thead tr.over-title th:empty {
-	border-bottom: none;
+    border-bottom: none;
 }
 
 thead tr.over-title-space th {
-	border-bottom: none;
-	padding: 0 .25em 0 .25em;
+    border-bottom: none;
+    padding: 0 0.25em 0 0.25em;
 }
 
 thead tr.over-title-space th:last-child {
-	border-bottom: none;
-	padding: 0 0 0 .25em;
+    border-bottom: none;
+    padding: 0 0 0 0.25em;
 }
 
 div.over-title-space {
-	padding-top: .25em;
-	padding-bottom: .25em;
-	vertical-align: middle;
-	margin: 0 0 0 0;
-	text-align: center;
-	border-bottom: thin solid;
+    padding-top: 0.25em;
+    padding-bottom: 0.25em;
+    vertical-align: middle;
+    margin: 0 0 0 0;
+    text-align: center;
+    border-bottom: thin solid;
 }
 
 div.over-title-space:empty {
-	border-bottom: none;
+    border-bottom: none;
 }
-
 
 tbody tr:last-child th,
 tbody tr:last-child td:not(.squash-left) {
-	border-bottom: thin solid ;
-	box-shadow: inset 0 -.15em 0 #ffffff ; /* minor gap between the bottom border and the background shadow to keep visual balance. */
+    border-bottom: thin solid;
+    box-shadow: inset 0 -0.15em 0 #ffffff; /* minor gap between the bottom border and the background shadow to keep visual balance. */
 }
 
 tbody tr td.new-sub-group-row {
-	padding-top: .4em ;
+    padding-top: 0.4em;
 }
 
 tbody tr td.new-group-row,
 tbody tr:first-child td {
-	vertical-align: top;  /* align to top for first group rows */
-	padding-top: .9em ;
+    vertical-align: top; /* align to top for first group rows */
+    padding-top: 0.9em;
 }
 
 tbody tr:nth-last-child(2) td.last-group-row,
 tbody tr:nth-last-child(2) td,
 tbody tr:nth-last-child(2) th {
-	margin-bottom: .8em ;
+    margin-bottom: 0.8em;
 }
 
-
 td.text {
-	text-align: left ;
+    text-align: left;
 }
 
 tfoot td {
-	padding-left: 0em ;
-	text-align: left;
+    padding-left: 0em;
+    text-align: left;
 }
 
-svg > text
-{
-	font-family: sans-serif ;
-	font-weight: bold;
-	font-size: 120% ;
+svg > text {
+    font-family: sans-serif;
+    font-weight: bold;
+    font-size: 120%;
 }
-
 
 .jasp-image {
-	position: relative ;
+    position: relative;
 }
 
 .jasp-image-image {
+    width: 100%;
+    height: 100%;
+}
 
-	width:  100% ;
-	height: 100% ;
+/* ----- md_text Markdown block ----- */
+.jasp-md-text {
+    padding: 0.6em 0;
+    line-height: 1.5;
+    max-width: 680px;
+}
+.jasp-md-text h1 {
+    font-size: 150%;
+    margin: 0.5em 0 0.3em;
+}
+.jasp-md-text h2 {
+    font-size: 130%;
+    margin: 0.5em 0 0.3em;
+}
+.jasp-md-text h3 {
+    font-size: 115%;
+    margin: 0.4em 0 0.2em;
+}
+.jasp-md-text p {
+    margin: 0.3em 0;
+}
+.jasp-md-text ul,
+.jasp-md-text ol {
+    margin: 0.3em 0;
+    padding-left: 1.5em;
+}
+.jasp-md-text code {
+    font-family: monospace;
+    background: rgba(0, 0, 0, 0.06);
+    padding: 0.1em 0.3em;
+    border-radius: 3px;
+}
+.jasp-md-text pre {
+    background: rgba(0, 0, 0, 0.04);
+    padding: 0.5em;
+    overflow-x: auto;
+}
+.jasp-md-text blockquote {
+    border-left: 3px solid #ccc;
+    margin: 0.3em 0;
+    padding-left: 0.8em;
+    color: #666;
+}
+.jasp-md-text table {
+    border-collapse: collapse;
+    margin: 0.3em 0;
+}
+.jasp-md-text table th,
+.jasp-md-text table td {
+    border: 1px solid #ddd;
+    padding: 0.3em 0.6em;
+    text-align: left;
+}
+.jasp-md-text table th {
+    background: rgba(0, 0, 0, 0.04);
+    font-weight: bold;
 }
 
 .etch-editor-panel {
-	position:fixed;
-    top:0;
-    width:100%;
-    z-index:100;
+    position: fixed;
+    top: 0;
+    width: 100%;
+    z-index: 100;
 }
 
 .jasp-image-resizer {
-	margin: 0px ;
+    margin: 0px;
 }
 
-
 .jasp_top_level {
-	margin-left: 1.7em ;
-	margin-right: 1.7em ;
+    margin-left: 1.7em;
+    margin-right: 1.7em;
 }
 
 :not(.error-state) > .jasp-analysis {
-	margin: 0 .7em .7em .7em ;
-	padding: 0 1em 1em 1em ;
-	position: relative;
+    margin: 0 0.7em 0.7em 0.7em;
+    padding: 0 1em 1em 1em;
+    position: relative;
 }
 
 #instructions {
-	margin: .7em ;
-	padding: 1em ;
-	/*display: inline-block ;*/
+    margin: 0.7em;
+    padding: 1em;
+    /*display: inline-block ;*/
 }
 
 div.toolbar {
-	display: block ;
-	position: relative;
+    display: block;
+    position: relative;
 }
 
 div.image-status {
-	position: absolute ;
-	top : 0 ;
-	left: 0 ;
-	width: 100% ;
-	height: 100% ;
-	background-repeat:no-repeat;
-	background-position: center center;
-	visibility: hidden ;
-	z-index: 50 ;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-repeat: no-repeat;
+    background-position: center center;
+    visibility: hidden;
+    z-index: 50;
 }
 
 div.status {
-	width: 16px ;
-	height: 16px ;
-	background-size : 100% ;
-	display: inline-block ;
-	margin-left : 6px ;
-	visibility: hidden ;
+    width: 16px;
+    height: 16px;
+    background-size: 100%;
+    display: inline-block;
+    margin-left: 6px;
+    visibility: hidden;
 }
 
 div.jasp-image-image.no-data {
-	position: relative;
-	max-height: 480px;
-	max-width: 480px;
+    position: relative;
+    max-height: 480px;
+    max-width: 480px;
 }
-
 
 .jasp-analysis.error-state div.jasp-image-image {
-	opacity: 0.33
+    opacity: 0.33;
 }
-
 
 .jasp-analysis.error-state {
-	min-width: 500px;
-	min-height: 200px;
+    min-width: 500px;
+    min-height: 200px;
 }
 
-
 .analysis-error-message {
-	min-width: 400px;
-	max-width: 1000px;
-	position: absolute;
-	top: 60px;
-	left: 50px;
-	margin-right: 50px;
+    min-width: 400px;
+    max-width: 1000px;
+    position: absolute;
+    top: 60px;
+    left: 50px;
+    margin-right: 50px;
 }
 
 .error-message-positioner {
-	height: 0px ;
-	overflow: visible ;
-	position: relative;
-	top: 10px ;
-	float: left ;
-	z-index: 100 ;
+    height: 0px;
+    overflow: visible;
+    position: relative;
+    top: 10px;
+    float: left;
+    z-index: 100;
 }
 
 .jasp-image-image .error-message-positioner {
-	position: absolute ;
-	top: 25% ;
+    position: absolute;
+    top: 25%;
 }
 
 .error-message-symbol {
-	float: left;
-	margin-right: .3em;
+    float: left;
+    margin-right: 0.3em;
 }
 
 .error-message-box {
-	z-index: 100 ;
-	padding: 1em ;
-	border-radius: .4em ;
-	min-width: 300px ;
-	white-space: normal;
+    z-index: 100;
+    padding: 1em;
+    border-radius: 0.4em;
+    min-width: 300px;
+    white-space: normal;
 }
 
-p.warningIndicator
-{
-	font-size:		30px;
-	margin:			0
+p.warningIndicator {
+    font-size: 30px;
+    margin: 0;
 }
 
-.jaspReport  {
-	z-index: 100 ;
-	padding: 1em ;
-	border-radius: 20px ;
-	min-width: 300px ;
-	white-space: normal;
+.jaspReport {
+    z-index: 100;
+    padding: 1em;
+    border-radius: 20px;
+    min-width: 300px;
+    white-space: normal;
 }
 
-.jaspReportTop
-{
-	position: 		fixed !important;
-    top: 			0px;
-	min-width:		20px;
-	left:			0%;
-	border-radius: 	10px;
-	padding:		10px;
-	white-space: 	normal;
-	
+.jaspReportTop {
+    position: fixed !important;
+    top: 0px;
+    min-width: 20px;
+    left: 0%;
+    border-radius: 10px;
+    padding: 10px;
+    white-space: normal;
 }
 
-.jaspReportTitleRow
-{
-	display: 		flex;
-	width:			100%;
-	flex-direction: row;
-	justify-content: left;
+.jaspReportTitleRow {
+    display: flex;
+    width: 100%;
+    flex-direction: row;
+    justify-content: left;
 }
 
-.jaspReportTitle
-{
-	margin-left: 	30px;
-	display: 		inline-block;
+.jaspReportTitle {
+    margin-left: 30px;
+    display: inline-block;
 }
 
-.jaspReportIcon
-{
-    width:		40px;
-	height:		40px;
-	display: 	inline-block;
+.jaspReportIcon {
+    width: 40px;
+    height: 40px;
+    display: inline-block;
 }
 
-.jaspReportIconTop
-{
-    width:		30px;
-	height:		30px;
-	display: 	block;
+.jaspReportIconTop {
+    width: 30px;
+    height: 30px;
+    display: block;
 }
 
-.jaspReportIconDo
-{
-	-webkit-mask: url(../img/triangle-exclamation.svg) no-repeat center;
-	mask: url(../img/triangle-exclamation.svg) no-repeat center;
+.jaspReportIconDo {
+    -webkit-mask: url(../img/triangle-exclamation.svg) no-repeat center;
+    mask: url(../img/triangle-exclamation.svg) no-repeat center;
 }
 
-.jaspReportIconDont
-{
-	-webkit-mask: url(../img/round-information.svg) no-repeat center;
-	mask: url(../img/round-information.svg) no-repeat center;
+.jaspReportIconDont {
+    -webkit-mask: url(../img/round-information.svg) no-repeat center;
+    mask: url(../img/round-information.svg) no-repeat center;
 }
 
 .stack-trace-selector div,
 .stack-trace-selector span {
-
-  cursor: pointer ;
-  display: inline-block ;
-  vertical-align: middle ;
+    cursor: pointer;
+    display: inline-block;
+    vertical-align: middle;
 }
 
 .stack-trace-arrow {
-  width: 16px ;
-  height: 16px ;
-  margin-left: 2px ;
+    width: 16px;
+    height: 16px;
+    margin-left: 2px;
 }
 
 .stack-trace {
-
-  display: none ;
+    display: none;
 }
 
-td.squash-left
-{
-	width: 99% ;
+td.squash-left {
+    width: 99%;
 }
 
 #intro {
-
-	padding: 1em 2em ;
-	margin: 50px auto ;
-	min-width: 300px ;
-	max-width: 500px ;
-	width: 50% ;
+    padding: 1em 2em;
+    margin: 50px auto;
+    min-width: 300px;
+    max-width: 500px;
+    width: 50%;
 }
 
 .jasp-hide {
     display: none;
-    visibility: hidden ;
+    visibility: hidden;
 }
 
 .jasp-image-holder {
-    position: relative ;
+    position: relative;
 }
 
 .jasp-resize {
@@ -467,95 +509,98 @@ td.squash-left
     z-index: 1;
 }
 
-.jasp-toolbar h1, .jasp-toolbar h2, .jasp-toolbar h3, .jasp-toolbar h4, .jasp-toolbar h5, .jasp-toolbar h6, .jasp-toolbar div , .jasp-toolbar span {
-	display: inline-block;
-	vertical-align: middle;
+.jasp-toolbar h1,
+.jasp-toolbar h2,
+.jasp-toolbar h3,
+.jasp-toolbar h4,
+.jasp-toolbar h5,
+.jasp-toolbar h6,
+.jasp-toolbar div,
+.jasp-toolbar span {
+    display: inline-block;
+    vertical-align: middle;
 }
 
 .jasp-menu {
-	width:  16px ;
-	height: 16px ;
-	margin-left: 4px ;
+    width: 16px;
+    height: 16px;
+    margin-left: 4px;
 }
 
 .jasp-collapsed .jasp-menu {
-	width:  16px ;
-	height: 16px ;
-	margin-left: 4px ;
+    width: 16px;
+    height: 16px;
+    margin-left: 4px;
 }
 
 .jasp-toolbar {
-	display: block ;
+    display: block;
 }
 
 .toolbar-clickable {
-	cursor: pointer;
+    cursor: pointer;
 }
 
 .toolbar-editing {
-	cursor: text;
+    cursor: text;
 }
-
 
 .jasp-editable {
-	padding-top: .5em ;
-	padding-bottom: .5em ;
-	background-color : inherit ;
-	word-wrap: break-word;
+    padding-top: 0.5em;
+    padding-bottom: 0.5em;
+    background-color: inherit;
+    word-wrap: break-word;
 }
 
-.jasp-editable, .jasp-editable * {
-	cursor: text;
+.jasp-editable,
+.jasp-editable * {
+    cursor: text;
 }
-
 
 .jasp-notes {
-  max-width:        70em;
-  min-width:        40em;
-  position:         relative ;
-  margin-top:       0.6em ;
-  margin-bottom:    0.6em ;
+    max-width: 70em;
+    min-width: 40em;
+    position: relative;
+    margin-top: 0.6em;
+    margin-bottom: 0.6em;
 }
-
 
 .jasp-firstNote-note {
-	margin-bottom: 0.5em;
+    margin-bottom: 0.5em;
 }
 
-[contenteditable]:focus
-{
-	outline: 0px solid transparent;
-
+[contenteditable]:focus {
+    outline: 0px solid transparent;
 }
-
 
 .jasp-ghost-text {
-	font-weight: bold ;
-	cursor: text;
-	padding-top: .5em ;
-	padding-bottom: .5em ;
+    font-weight: bold;
+    cursor: text;
+    padding-top: 0.5em;
+    padding-bottom: 0.5em;
 }
 
 pre {
-	display: inline;
+    display: inline;
 }
 
-.in-toolbar, .jasp-editable {
-	min-width: 1em;
+.in-toolbar,
+.jasp-editable {
+    min-width: 1em;
 }
 
 .jasp-progressbar-container {
-	min-height: 1.25em;
+    min-height: 1.25em;
 }
 
 .jasp-progressbar {
-	display: table;
+    display: table;
 }
 
 .jasp-progressbar-label {
-	display: table-cell;
-	vertical-align: middle;
-	padding-left: 15px;
+    display: table-cell;
+    vertical-align: middle;
+    padding-left: 15px;
 }
 
 .jasp-progressbar-label-sep {
@@ -579,60 +624,61 @@ pre {
 }*/
 
 .jasp-code {
-  font-family: monospace, monospace;
+    font-family: monospace, monospace;
 }
 
 /* quill editor of jasp annotations styles */
 
 iframe.ql-video {
-	width: 100%;
-	padding: 15px;
-	min-height: 360px;
-  }
+    width: 100%;
+    padding: 15px;
+    min-height: 360px;
+}
 
 /* The following code convinces webengine to have scrollbars that look sorta like JASPScrollBar */
 /* width */
 ::-webkit-scrollbar {
- width: 16px;
- height: 16px;
+    width: 16px;
+    height: 16px;
 }
 
 /* jaspNote Latex editor */
 .jasp-latex-container {
-	display: flex;
-	background-color: #ffffff;
-	z-index: 1;
-	border-radius: 5px;
-	position: absolute;
-	left: 10px;
+    display: flex;
+    background-color: #ffffff;
+    z-index: 1;
+    border-radius: 5px;
+    position: absolute;
+    left: 10px;
 }
 
 .jasp-latex-input {
-	border: 2px solid #726565;
-	background-color: #ffffff;
-	flex-grow: 1;
-	margin-right:3px;
+    border: 2px solid #726565;
+    background-color: #ffffff;
+    flex-grow: 1;
+    margin-right: 3px;
 }
 
-.jasp-latex-input, .jasp-latex-preview {
-	border-radius: 5px;
-	min-height: 3em;
-	min-width: 5em;
-	padding: 0.5em;
+.jasp-latex-input,
+.jasp-latex-preview {
+    border-radius: 5px;
+    min-height: 3em;
+    min-width: 5em;
+    padding: 0.5em;
 }
 
 .jasp-latex-preview {
-	display: none;
-	background-color: #eeeeee;
-	border: 2px solid #0099cc;
-	animation: slide-in 0.5s ease-in-out;
+    display: none;
+    background-color: #eeeeee;
+    border: 2px solid #0099cc;
+    animation: slide-in 0.5s ease-in-out;
 }
 
 @keyframes slide-in {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(0);
-  }
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(0);
+    }
 }

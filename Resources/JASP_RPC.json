@@ -235,6 +235,67 @@
 			}
 		},
 		{
+			"name": "analysis_setResults",
+			"summary": "Override the results of an existing analysis with an annotated, reordered, or otherwise modified version. The results object must follow the same structure as the one returned by analysis_results.",
+			"params": [
+				{
+					"name": "analysisId",
+					"required": true,
+					"description": "The integer identifier of the analysis to modify.",
+					"schema": {
+						"type": "integer"
+					}
+				},
+				{
+					"name": "results",
+					"required": true,
+					"description": "The full results as a JSON-encoded string (not a nested object). The handler JSON-parses this on the JASP side.",
+					"schema": {
+						"type": "string"
+					}
+				},
+				{
+					"name": "status",
+					"required": false,
+					"description": "Optional analysis status to apply. Defaults to 'complete'. Valid values: 'complete', 'fatalError'.",
+					"schema": {
+						"type": "string",
+						"default": "complete"
+					}
+				}
+			],
+			"result": {
+				"name": "analysis_setResults_result",
+				"description": "Confirmation that the results were successfully replaced.",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"status": {
+							"type": "string",
+							"description": "'success' or 'error'."
+						},
+						"analysisId": {
+							"type": "integer",
+							"description": "The analysis identifier."
+						},
+						"module": {
+							"type": "string",
+							"description": "The module name."
+						},
+						"analysis": {
+							"type": "string",
+							"description": "The analysis name."
+						},
+						"message": {
+							"type": "string",
+							"description": "Error message when status is 'error'."
+						}
+					},
+					"required": ["status", "analysisId", "module", "analysis"]
+				}
+			}
+		},
+		{
 			"name": "analysis_status",
 			"summary": "Query the run status of an analysis by ID.",
 			"params": [
@@ -575,6 +636,89 @@
 						}
 					},
 					"required": ["status", "loaded"]
+				}
+			}
+		},
+		{
+			"name": "analysis_composeResults",
+			"summary": "Compose the display order and markdown notes for an existing analysis. References result elements by name (from .meta) and allows inserting md_text blocks with full Markdown/HTML formatting. The C++ handler slices the specified elements together into the final results JSON.",
+			"params": [
+				{
+					"name": "analysisId",
+					"required": true,
+					"description": "The integer identifier of the analysis to compose.",
+					"schema": {
+						"type": "integer"
+					}
+				},
+				{
+					"name": "elements",
+					"required": true,
+					"description": "Ordered array of element specifications. Each element either references a result element by name (from the .meta array), or defines a new md_text block with Markdown content.",
+					"schema": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"name": {
+									"type": "string",
+									"description": "The name of an existing result element from the .meta array (e.g. 'ttest', 'descriptivesTable'). Mutually exclusive with 'type'."
+								},
+								"type": {
+									"type": "string",
+									"description": "Set to 'md_text' to insert a Markdown block. Mutually exclusive with 'name'.",
+									"enum": ["md_text"]
+								},
+								"content": {
+									"type": "string",
+									"description": "Markdown/HTML content for the md_text block. Required when type is 'md_text'."
+								},
+								"title": {
+									"type": "string",
+									"description": "Optional title for the md_text block. Only applies when type is 'md_text'."
+								}
+							}
+						}
+					}
+				},
+				{
+					"name": "status",
+					"required": false,
+					"description": "Optional analysis status to apply. Defaults to 'complete'. Valid values: 'complete', 'fatalError'.",
+					"schema": {
+						"type": "string",
+						"default": "complete"
+					}
+				}
+			],
+			"result": {
+				"name": "analysis_composeResults_result",
+				"description": "Confirmation that the results were composed successfully.",
+				"schema": {
+					"type": "object",
+					"properties": {
+						"status": {
+							"type": "string",
+							"description": "'success' or 'error'."
+						},
+						"analysisId": {
+							"type": "integer",
+							"description": "The analysis identifier."
+						},
+						"module": {
+							"type": "string",
+							"description": "The module name."
+						},
+						"analysis": {
+							"type": "string",
+							"description": "The analysis name."
+						},
+						"message": {
+							"type": "string",
+							"description": "Error message when status is 'error'."
+						}
+					},
+					"required": ["status", "analysisId", "module", "analysis"]
 				}
 			}
 		},

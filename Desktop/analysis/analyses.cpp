@@ -972,7 +972,176 @@ void Analyses::registerRpcHandlers()
 			return response;
 		});
 
-	disp->registerMethodByName("analysis_status", [](const Json::Value& params) -> Json::Value
+		// (analysis_setResults commented out — use analysis_composeResults instead)
+		/*
+		disp->registerMethodByName("analysis_setResults", [](const Json::Value& params) -> Json::Value
+		{
+			int analysisId = params["analysisId"].asInt();
+			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
+			if (!a)
+				return JaspRpcDispatcher::errorResult(
+					"Analysis not found: " + std::to_string(analysisId));
+
+			// 'results' is a JSON-encoded string — parse on our side
+			Json::Reader reader;
+			Json::Value results;
+			if (!reader.parse(params["results"].asString(), results))
+				return JaspRpcDispatcher::errorResult(
+					"Failed to parse results JSON: " + reader.getFormattedErrorMessages());
+
+			// Map the requested status string to Analysis::Status.
+			// Default is Complete; also accept fatalError.
+			Analysis::Status status = Analysis::Complete;
+			if (params.isMember("status") && params["status"].asString() == "fatalError")
+				status = Analysis::FatalError;
+
+			a->setResults(results, status);
+
+			Json::Value response = JaspRpcDispatcher::successResult();
+			response["analysisId"] = analysisId;
+			response["module"]     = a->module();
+			response["analysis"]   = a->name();
+			return response;
+		});
+		*/
+
+		disp->registerMethodByName("analysis_composeResults", [](const Json::Value& params) -> Json::Value
+		{
+			int analysisId = params["analysisId"].asInt();
+			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
+			if (!a)
+				return JaspRpcDispatcher::errorResult(
+					"Analysis not found: " + std::to_string(analysisId));
+
+			const Json::Value& currentResults = a->results();
+			if (currentResults.isNull() || !currentResults.isMember(".meta"))
+				return JaspRpcDispatcher::errorResult(
+					"Analysis has no results with .meta — run the analysis first");
+
+			// --- Recursive helper: find an element by name in the results tree ---
+			// Returns a pair {metaEntry, data} for the named element, or Json::nullValue if not found.
+			// Searches the .meta array and nested collections.
+			std::function<Json::Value(const Json::Value& results, const std::string& targetName)> findElement;
+			findElement = [&findElement](const Json::Value& results, const std::string& targetName) -> Json::Value
+			{
+				if (!results.isMember(".meta"))
+					return Json::nullValue;
+
+				const Json::Value& meta = results[".meta"];
+				for (const auto& entry : meta)
+				{
+					std::string name = entry.get("name", "").asString();
+					if (name == targetName)
+					{
+						// Found at this level — return the meta entry and the data
+						Json::Value result(Json::objectValue);
+						result["meta"] = entry;
+						if (results.isMember(name))
+							result["data"] = results[name];
+						return result;
+					}
+
+					// If this is a collection, search inside its collection children
+					std::string type = entry.get("type", "").asString();
+					if (type == "collection" && results.isMember(name))
+					{
+						const Json::Value& collData = results[name];
+						if (collData.isMember("collection"))
+						{
+							// Build a pseudo-results for the collection's children.
+							// The collection's "collection" object has the child data;
+							// the collection's meta entry has the child .meta array.
+							Json::Value collResults = collData["collection"];
+							if (entry.isMember("meta"))
+								collResults[".meta"] = entry["meta"];
+							// Recurse into collection
+							Json::Value found = findElement(collResults, targetName);
+							if (!found.isNull())
+								return found;
+						}
+					}
+				}
+				return Json::nullValue;
+			};
+
+			// --- Build composed results ---
+			Json::Value composed(Json::objectValue);
+			Json::Value newMeta(Json::arrayValue);
+			int mdTextCounter = 0;
+
+			for (const auto& el : params["elements"])
+			{
+				if (el.isMember("type") && el["type"].asString() == "md_text")
+					{
+						// --- md_text block ---
+						std::string content = el.get("content", "").asString();
+						std::string title   = el.get("title",   "").asString();
+
+						std::string mdName = "_md_text_" + std::to_string(mdTextCounter++);
+
+						// Meta entry
+						Json::Value mdMeta(Json::objectValue);
+						mdMeta["name"]  = mdName;
+						mdMeta["type"]  = "md_text";
+						mdMeta["title"] = title;
+						newMeta.append(mdMeta);
+
+						// Data entry
+						Json::Value mdData(Json::objectValue);
+						mdData["name"]    = mdName;
+						mdData["title"]   = title;
+						mdData["content"] = content;
+						mdData["status"]  = "complete";
+						composed[mdName] = mdData;
+					}
+				else if (el.isMember("name"))
+				{
+					// --- Named result element ---
+					std::string name = el["name"].asString();
+					Json::Value found = findElement(currentResults, name);
+					if (found.isNull())
+						return JaspRpcDispatcher::errorResult(
+							"Element not found in results: '" + name + "'");
+
+					const Json::Value& metaEntry = found["meta"];
+					const Json::Value& data      = found["data"];
+
+					newMeta.append(metaEntry);
+					composed[name] = data;
+				}
+				else
+				{
+					return JaspRpcDispatcher::errorResult(
+						"Each element must have either 'name' (to reference a result element) or 'type': 'md_text' (for a Markdown block)");
+				}
+			}
+
+			// --- Copy over any top-level keys that aren't element data ---
+			// (e.g. citation, name, ...)
+			for (const auto& key : currentResults.getMemberNames())
+			{
+				if (key == ".meta") continue;
+				if (!composed.isMember(key))
+					composed[key] = currentResults[key];
+			}
+
+			composed[".meta"] = newMeta;
+
+			// Map status
+			Analysis::Status status = Analysis::Complete;
+			if (params.isMember("status") && params["status"].asString() == "fatalError")
+				status = Analysis::FatalError;
+
+			a->setResults(composed, status);
+
+			Json::Value response = JaspRpcDispatcher::successResult();
+			response["analysisId"] = analysisId;
+			response["module"]     = a->module();
+			response["analysis"]   = a->name();
+			return response;
+		});
+
+		disp->registerMethodByName("analysis_status", [](const Json::Value& params) -> Json::Value
 		{
 			int analysisId = params["analysisId"].asInt();
 			Analysis* a = Analyses::analyses()->get(static_cast<size_t>(analysisId));
