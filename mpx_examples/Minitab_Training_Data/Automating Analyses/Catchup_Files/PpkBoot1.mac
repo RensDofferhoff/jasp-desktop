@@ -1,0 +1,23 @@
+Gmacro
+ppkboot
+
+Do k1 = 1:1000
+
+   Sample 200 c1 c2;
+     Replace.
+
+   Name c3 "Ppk1"
+
+   NNCapa C2; 
+     NoChart;
+     LNormal;
+     Uspec 30;
+     Toler 6;
+     CStat;
+     PPK  'Ppk1'.
+
+   Stack c4 'Ppk1' c4
+
+Enddo
+
+Endmacro 

@@ -16,6 +16,7 @@
 // <http://www.gnu.org/licenses/>.
 //
 #include <QDir>
+#include "jaspclient/jaspclient.h"
 
 #include <QFile>
 #include <QUrl>
@@ -45,7 +46,6 @@
 #include "ALTNavigation/altnavcontrol.h"
 #include "utilities/messageforwarder.h"
 
-#include "modules/installedmodules.h"
 #include "modules/dynamicmodules.h"
 #include "utilities/reporter.h"
 #include "modules/menumodel.h"
@@ -115,12 +115,25 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 	_dynamicModules			= new DynamicModules(this);
 	_upgrader				= new Upgrader(this);
 	_analyses				= new Analyses();
-	_engineSync				= new EngineSync(this);
+
+	// NEO alpha: the orchestrator client replaces the deleted EngineSync. Anything that wants
+	// to run work / edit data talks to this facade (submit / abort / ...).
+	_jaspClient				= new JaspClient(this);
+	// Default matches the orchestrator's own default (orchestrator/src/main.rs) and the runner +
+	// launch_alpha.sh. The shipping desktop target is an ipc:// socket (§17.2); the alpha uses tcp.
+	QString orchUrl = QString::fromLocal8Bit(qgetenv("JASP_ORCH_URL"));
+	if (orchUrl.isEmpty()) orchUrl = "tcp://127.0.0.1:9555";
+	_jaspClient->connectToOrchestrator(orchUrl.toStdString());
+	// NEO discovery wiring (modulesUpdated -> applyCatalog) happens in loadQML(), AFTER the
+	// initial catalog load — so the ribbon's special buttons are added first and modules slot
+	// in on the correct side of the divider. Pushes that arrive before then are cached by the
+	// client and applied wholesale by that initial load.
+
 	_datasetTableModel		= new DataSetTableModel();
 	_dataSetModelVarInfo	= new DataSetTableModel(false);
 	_columnModel			= new ColumnModel(_datasetTableModel);
 	
-	initLog(); //initLog needs _preferences and _engineSync!
+	initLog(); //initLog needs _preferences!
 
 	Log::log() << "JASP " << AppInfo::version.asString() << " from commit " << AppInfo::gitCommit << " and branch " << AppInfo::gitBranch << " is continuing initialization." << std::endl;
 
@@ -176,8 +189,6 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 
 	_languageModel->setApplicationEngine(_qml);
 
-	_engineSync->start();
-	
 	checkForUpdates();
 
 	QTimer::singleShot(0, this, [&]() { _jaspConfiguration->processConfiguration();  });
@@ -242,8 +253,6 @@ MainWindow::~MainWindow()
 	delete _aiBridge;
 	delete _rpcServer;
 	delete _rpcDispatcher;
-
-	_engineSync->killProcessTimer();
 
 	try
 	{
@@ -491,7 +500,6 @@ void MainWindow::makeConnections()
 	connect(_package,				&DataSetPackage::newDataLoaded,						this,					&MainWindow::populateUIfromDataSet							);
 	connect(_package,				&DataSetPackage::newDataLoaded,						_fileMenu,				[&](){ _fileMenu->enableButtonsForOpenedWorkspace(); }		);
 	connect(_package,				&DataSetPackage::dataModeChanged,					_analyses,				&Analyses::dataModeChanged									);
-	connect(_package,				&DataSetPackage::dataModeChanged,					_engineSync,			&EngineSync::dataModeChanged								);
 	connect(_package,				&DataSetPackage::dataModeChanged,					this,					&MainWindow::onDataModeChanged								);
 	connect(_package,				&DataSetPackage::askUserForExternalDataFile,		this,					&MainWindow::startDataEditorHandler							);
 	connect(_package,				&DataSetPackage::makeAnAutoSave,					this,					&MainWindow::saveTmpFileHandler								);
@@ -502,25 +510,12 @@ void MainWindow::makeConnections()
 	connect(_package,				&DataSetPackage::workspaceEmptyValuesChanged,		_analyses,				&Analyses::refreshAllAnalyses								);
 	connect(_package,				&DataSetPackage::refreshAllAnalyses,				_analyses,				&Analyses::refreshAllAnalyses,								Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::refreshAllCompCols,				_computedColumnsModel,	&ComputedColumnModel::invalidateAllColumns,					Qt::QueuedConnection);
-	
-	connect(_engineSync,			&EngineSync::computeColumnSucceeded,				_computedColumnsModel,	&ComputedColumnModel::computeColumnSucceeded				);
-	connect(_engineSync,			&EngineSync::computeColumnRemoved,					_computedColumnsModel,	&ComputedColumnModel::computeColumnRemoved					);
-	connect(_engineSync,			&EngineSync::computeColumnFailed,					_computedColumnsModel,	&ComputedColumnModel::computeColumnFailed					);
-	connect(_engineSync,			&EngineSync::engineTerminated,						this,					&MainWindow::fatalError										);
-	connect(_engineSync,			&EngineSync::columnDataTypeChanged,					_columnsModel,			&ColumnsModel::columnTypeChanged							);
-	connect(_engineSync,			&EngineSync::refreshAllPlotsExcept,					_analyses,				&Analyses::refreshAllPlots									);
-	connect(_engineSync,			&EngineSync::processNewFilterResult,				_filterModel,			&FilterModel::processFilterResult							);
-	connect(_engineSync,			&EngineSync::processFilterErrorMsg,					_filterModel,			&FilterModel::processFilterErrorMsg							);
-	connect(_engineSync,			&EngineSync::computeColumnSucceeded,				_filterModel,			&FilterModel::computeColumnSucceeded						);
-	connect(_engineSync,			&EngineSync::plotEditorRefresh,						_plotEditorModel,		&PlotEditorModel::refresh									);
-	connect(_engineSync,			&EngineSync::checkDataSetForUpdates,				_package,				&DataSetPackage::checkDataSetForUpdates,					Qt::QueuedConnection);
 
 	qRegisterMetaType<columnType>();
 	qRegisterMetaType<ListModel*>();
 	qRegisterMetaType<DbType>();
 	qRegisterMetaType<PlotEditor::References::ReferenceType>();
 
-	connect(_computedColumnsModel,	&ComputedColumnModel::sendComputeCode,				_engineSync,			&EngineSync::computeColumn,									Qt::QueuedConnection);
 	connect(_computedColumnsModel,	&ComputedColumnModel::dataColumnAdded,				_fileMenu,				&FileMenu::dataColumnAdded									);
 	connect(_computedColumnsModel,	&ComputedColumnModel::showAnalysisForm,				_analyses,				&Analyses::selectAnalysis									);
 	connect(_computedColumnsModel,	&ComputedColumnModel::showAnalysisForm,				this,					&MainWindow::showAnalysis									);
@@ -596,8 +591,6 @@ void MainWindow::makeConnections()
 	connect(_preferences,			&PreferencesModel::currentThemeNameChanged,			_fileMenu,				&FileMenu::refresh											);
 	connect(_preferences,			&PreferencesModel::uiScaleChanged,					_fileMenu,				&FileMenu::refresh											);
 	connect(_preferences,			&PreferencesModel::resultFontChanged,				_resultsJsInterface,	&ResultsJsInterface::setFontFamily							);
-	connect(_preferences,			&PreferencesModel::resultFontChanged,				_engineSync,			&EngineSync::refreshAllPlots								);
-	connect(_preferences,			&PreferencesModel::restartAllEngines,				_engineSync,			&EngineSync::haveYouTriedTurningItOffAndOnAgain				);
 	connect(_preferences,			&PreferencesModel::developerFolderChanged,			_dynamicModules,		&DynamicModules::uninstallJASPDeveloperModule				);
 	connect(_preferences,			&PreferencesModel::showRSyntaxInResultsChanged,		_analyses,				&Analyses::showRSyntaxInResults								);
 	connect(_preferences,			&PreferencesModel::ALTNavModeActiveChanged,			ALTNavControl::ctrl(),	&ALTNavControl::enableAlTNavigation							);
@@ -626,7 +619,6 @@ void MainWindow::makeConnections()
 	connect(_filterModel,			&FilterModel::updateColumnsUsedInConstructedFilter, _package,				&DataSetPackage::setColumnsUsedInEasyFilter					);
 	connect(_filterModel,			&FilterModel::filterUpdated,						_package,				&DataSetPackage::refresh									);
 	connect(_filterModel,			&FilterModel::filterUpdated,						[&]() { _package->resetFilterCounters(); emit _columnsModel->filterChanged(); }		);
-	connect(_filterModel,			&FilterModel::sendFilter,							_engineSync,			&EngineSync::sendFilter										);
 
 	connect(_labelFilterGenerator,	&labelFilterGenerator::setGeneratedFilter,			_filterModel,			&FilterModel::setGeneratedFilter,							Qt::QueuedConnection);
 
@@ -644,8 +636,6 @@ void MainWindow::makeConnections()
 	connect(_dynamicModules,		&DynamicModules::moduleEnabledChanged,				_preferences,			&PreferencesModel::moduleEnabledChanged						);
 	connect(_dynamicModules,		&DynamicModules::loadModuleTranslationFile,			_languageModel,			&LanguageModel::loadModuleTranslationFiles					);
 	connect(_dynamicModules,		&DynamicModules::reloadQmlImportPaths,				this,					&MainWindow::setQmlImportPaths,								Qt::QueuedConnection); //If this is queued this should make the loadingprocess of qml a bit less weird I think.
-	connect(_dynamicModules,		&DynamicModules::dynamicModuleUnloadBegin,			_engineSync,			&EngineSync::killModuleEngine								);
-	connect(_dynamicModules,		&DynamicModules::isModuleInstallRequestActive,		_engineSync,			&EngineSync::isModuleInstallRequestActive					);
 	
 	connect(_dynamicModules,		&DynamicModules::storeAnalysesJson,					_analyses,				&Analyses::saveAnalysesJsonForReload						);
 	connect(_dynamicModules,		&DynamicModules::reloadAnalysesJson,				_analyses,				&Analyses::reloadSavedAnalysesJson,							Qt::QueuedConnection);
@@ -658,8 +648,6 @@ void MainWindow::makeConnections()
 	connect(_languageModel,			&LanguageModel::currentLanguageChanged,				_analyses,				&Analyses::languageChangedHandler,							Qt::QueuedConnection);
 	connect(_languageModel,			&LanguageModel::currentLanguageChanged,				_helpModel,				&HelpModel::generateJavascript,								Qt::QueuedConnection);
 	connect(_languageModel,			&LanguageModel::currentLanguageChanged,				this,					&MainWindow::contactTextChanged,							Qt::QueuedConnection); //Probably not necessary but we can check once there actually are translations
-	connect(_languageModel,			&LanguageModel::stopEngines,						_engineSync,			&EngineSync::stopEngines									);
-	connect(_languageModel,			&LanguageModel::resumeEngines,						_engineSync,			&EngineSync::resumeEngines,									Qt::QueuedConnection);
 
 	connect(_qml,					&QQmlApplicationEngine::warnings,					this,					&MainWindow::printQmlWarnings								);
 
@@ -704,7 +692,6 @@ void MainWindow::loadQML()
 	_qml->rootContext()->setContextProperty("fileMenuModel",							_fileMenu										);
 	_qml->rootContext()->setContextProperty("filterModel",								_filterModel									);
 	_qml->rootContext()->setContextProperty("ribbonModel",								_ribbonModel									);
-	_qml->rootContext()->setContextProperty("engineSync",								_engineSync										);
 	_qml->rootContext()->setContextProperty("helpModel",								_helpModel										);
 	_qml->rootContext()->setContextProperty("allHelp",									_allHelp										);
 	_qml->rootContext()->setContextProperty("jaspTheme",								nullptr											); //Will be set from jaspThemeChanged()!
@@ -827,7 +814,12 @@ void MainWindow::loadQML()
 	disconnect(exitOnFailConnection);
 
 	//Load the ribbonmodel modules now because we have an actual qml context to do so in.
-	_ribbonModel->loadModules(InstalledModules::getModules());
+	//NEO: from the orchestrator's catalog (cached connect-time push + live updates), not a local scan.
+	_ribbonModel->loadModules();
+
+	//NEO discovery live updates: wired AFTER the initial load so late pushes reconcile live
+	//without disturbing the ribbon's initial button order.
+	connect(_jaspClient, &JaspClient::modulesUpdated, _dynamicModules, &DynamicModules::applyCatalog);
 	
 	qmlLoaded();	
 }
@@ -1042,7 +1034,7 @@ void MainWindow::onDataModeChanged(bool dataMode)
 
 void MainWindow::initLog()
 {
-	assert(_engineSync != nullptr && _preferences != nullptr);
+	assert(_preferences != nullptr);
 
 	static boost::iostreams::stream<boost::iostreams::null_sink> nullstream((boost::iostreams::null_sink())); //https://stackoverflow.com/questions/8243743/is-there-a-null-stdostream-implementation-in-c-or-libraries
 
@@ -1053,7 +1045,6 @@ void MainWindow::initLog()
 	logRemoveSuperfluousFiles(_preferences->logFilesMax());
 
 	connect(_preferences, &PreferencesModel::logToFileChanged,		this,			&MainWindow::logToFileChanged									); //Not connecting preferences directly to Log to keep it Qt-free (for Engine/R-Interface)
-	connect(_preferences, &PreferencesModel::logToFileChanged,		_engineSync,	&EngineSync::logToFileChanged,			Qt::QueuedConnection	);
 	connect(_preferences, &PreferencesModel::logFilesMaxChanged,	this,			&MainWindow::logRemoveSuperfluousFiles							);
 }
 
@@ -1265,7 +1256,9 @@ void MainWindow::plotPPIChangedHandler(int, bool wasUserAction)
 void MainWindow::refreshPlotsHandler(bool askUserForRefresh)
 {
 	if (_analyses->allFresh())
-		_engineSync->refreshAllPlots();
+	{
+		// NEO: plot refresh via runner not wired yet
+	}
 	else if (askUserForRefresh && MessageForwarder::showYesNo(tr("Version incompatibility"), tr("Your analyses were created in an older version of JASP, to change the PPI of the images they must be refreshed first.\n\nRefresh all analyses?")))
 		_analyses->refreshAllAnalyses();
 }
@@ -1952,7 +1945,9 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 			_filterModel->reset();
 
 			if(!_applicationExiting)
-				_engineSync->cleanRestart();
+			{
+				// NEO: engine restart removed
+			}
 			else
 				emit exitSignal();
 		}
@@ -2108,7 +2103,7 @@ void MainWindow::openGitHubBugReport() const
 	}
 	catch(...)	{ debugInfo << "No Log files path found"; }
 
-	try			{ debugInfo << "Debug information: " << _engineSync->currentStateForDebug() << std::endl; }
+	try			{ debugInfo << "Debug information: " << "engine scheduler removed in NEO gut" << std::endl; }
 	catch(...)	{ debugInfo << "No debug information found"; }
 
 	try
@@ -2146,8 +2141,6 @@ void MainWindow::fatalError()
 	if (exiting == false)
 	{
 		exiting = true;
-		
-		_engineSync->killProcessTimer();
 		
 		MessageForwarder::DialogResponse response = MessageForwarder::showYesNoCancel(
 					tr("Error"), 
@@ -2347,9 +2340,6 @@ void MainWindow::clearModulesFoldersUser()
 {
 	if(!MessageForwarder::showYesNo(tr("Clean user installed modules and pkgs"), tr("Cleaning up your modules and packages will make sure you only use those bundled with JASP. \n\nMake sure to restart JASP afterwards!"), tr("Clean"), tr("Cancel")))
 		return;
-	
-	delete _engineSync;
-	_engineSync = nullptr;
 	
 	QDir	renvroot(AppDirs::renvRootLocation()),
 			usermods(AppDirs::userModulesDir());
@@ -2577,7 +2567,8 @@ void MainWindow::saveTmpFileHandler()
 
 bool MainWindow::enginesInitializing()
 {
-	return _engineSync->allEnginesInitializing();
+	// NEO: in-process engines removed; nothing initializes anymore
+	return false;
 }
 
 void MainWindow::setProgressBarVisible(bool progressBarVisible, bool wasAutoSave)

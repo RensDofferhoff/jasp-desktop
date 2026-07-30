@@ -1,0 +1,453 @@
+macro
+#
+#    Macro: ECAPA.MAC
+#   Author: Cathy Akritas
+#  Version: Version 19 and above
+#
+#  The output from this macro matches the output created the nonparametric capability analysis in Minitab 22.  
+#  This macro calculates capability indices (Cnpk) using the empirical percentile method as described 
+#  in the reference  
+#
+#    D. W. McCormack Jr.,  Ian R. Harris,  Arnon M. Hurwitz, and Patrick D. Spagon (2000). "Capability 
+#    Indices for Non-Normal Data," Quality Engineering, 12 (4), 489-495.  
+#
+#  Typically you would only use this method when your data does not follow the normal distribution 
+#  or any of the other distributions that can be used in a capability analysis in Minitab.  The author of
+#  this macro strongly suggests that you use Stat > Quality Tools > Individual Distribution Identification
+#  to determine if your data follows any of the distributions listed.  These distributions are normal,
+#  lognormal, 3-parameter lognormal, exponential, 2-parameter exponential, Weibull, 3-parameter 
+#  Weibull, largest extreme value, smallest extreme value, gamma, 3-parameter gamma, logistic, 
+#  loglogistic, and 3-parameter loglogistic.
+#
+#  Suppose your data is in C2 and you have a lower spec limit (LSL) of 12 and an upper spec limit (USL) 
+#  of 16. Type the following in the Command Line pane (if not visible, go to View > Command Line/
+#  History):
+#
+#  %ecapa C2;
+#    LSL 12;
+#    USL 16.  
+#
+#  Click on Run.
+#
+#  If you have just a lower spec limit, then use the following commands
+#
+#  %ecapa C2;
+#    LSL 12.
+#
+#  If you have just an upper spec limit, then use the following commands
+#
+#  %ecapa C2;
+#    USL 16. 
+#
+###########################################################################
+#
+#  Neither Minitab, LLC nor the author(s) of this MACRO makes any claim 
+#  of or offers any Warranty whatsoever with regard to the accuracy of 
+#  this MACRO or its suitability for use.  Minitab, LLC and the author(s) 
+#  of this MACRO each hereby disclaims any Warranty and/or liability with 
+#  respect thereto. 
+#
+###########################################################################
+
+ecapa x;
+  usl u;
+  lsl l;
+  target t.
+
+mcolumn x y tmp lab1 lab2 lab3 lab4 lab5 xtab1 xtab2 xtab3 xtab4 xtab5 xtab6 ytab1 
+mcolumn ytab2 ytab3 ytab4
+mconstant xtype cnt u l t lo hi m Cnp Cnpl Cnpu Cnpk ppmup ppmlo ppmtotal
+mconstant xbar s t1 t2 t3 xname FN
+
+brief 0
+noecho
+endmtitle
+
+#Check data type and length
+let cnt = n(x) 
+
+#  mtitle "Capability using the Emperical Percentile Method";
+#    notitle. 
+#  brief 2
+#  Print "   *** Error ***     More than 100 data points for this capability analysis to produce valid results "
+#  Print " "
+#  Print "   *** Macro is exiting ***"
+#  endmtitle
+#  exit 
+#endif
+
+dtype x xtype
+
+if xtype = 0 or xtype = 10
+  mtitle "Capability using the Emperical Percentile Method Macro Error";
+    notitle. 
+ brief 1
+  print "   *** Error ***    Data must be numeric or date/time"
+  Print "   *** Macro is exiting ***"
+  endmtitle
+  exit 
+endif
+
+set tmp
+#  .005 .5 .995
+  .00135  .5 .99865
+end
+
+let y = percentile(x, tmp)
+
+unstack y lo m hi
+
+let xbar = mean(x)
+let s = stdev(x)
+#if s = 0
+#  mtitle "Capability using the Emperical Percentile Method Macro Error";
+#    notitle. 
+#  brief 1
+#  print "   *** Error ***    No variation in the data"
+#
+#  print "   *** Macro is exiting ***"
+#  endmtitle 
+#  exit
+#endif
+  
+tset lab1
+  "LSL           "
+  "USL           "
+  "Sample Median " 
+  "Sample Mean   "
+  "Sample StDev  "
+  "Sample N      "
+end
+
+tset lab3
+  "PPM < LSL "
+  "PPM > USL "
+  "PPM Total "
+end
+
+tset lab5
+  "Cnp "
+  "Cnpl "
+  "Cnpu "
+  "Cnpk "
+end
+
+kkset t1 "Empirical Process Capability of "
+kkname xname x
+kkcat t1 xname t2
+
+If usl = 1 and lsl = 1
+  if l >= u
+    Mtitle "Capability using the Emperical Percentile Method Macro Error";
+    notitle. 
+    brief 1
+    note
+    note   ***Error*** Lower spec must be less than Upper Spec 
+    note
+    note   ***Macro exiting***
+    note 
+    exit
+	endmtitle
+  endif
+#u = usl
+#l = lsl
+#hi = 99.865th percentile  ###Changed to match MSS 22
+#lo =.135th percentile     ###Changed to match MSS 22
+  let Cnp = (u-l)/(hi - lo)
+  let Cnpl = (m - l)/(m - lo)
+  let Cnpu = (u - m)/(hi - m)
+  stack Cnpl Cnpu tmp
+  let Cnpk = mini(tmp)
+  let tmp = (x < l)
+  let ppmlo = sum(tmp)/cnt*1000000
+  let tmp = (x > u)
+  let ppmup = sum(tmp)/cnt*1000000
+  let ppmtotal = ppmlo + ppmup
+
+ elseif usl = 1 and lsl = 0
+  let Cnp = '*'
+  let l = '*'
+  let Cnpl = '*'
+  let Cnpu = (u - m)/(hi - m)
+  let Cnpk = Cnpu
+  let ppmlo = '*'
+  let tmp = (x > u)
+  let ppmup = sum(tmp)/cnt*1000000
+  let ppmtotal = ppmup
+
+elseif usl = 0 and lsl = 1
+  let Cnp = '*'
+  let u = '*'
+  let Cnpl = (m - l)/(m - lo)
+  let Cnpu = '*'
+  let Cnpk = Cnpl
+  let ppmup = '*'
+  let tmp = (x < l)
+  let ppmlo = sum(tmp)/cnt*1000000
+  let ppmtotal = ppmlo
+
+else
+  mtitle "Capability using the Emperical Percentile Method Macro Error";
+    notitle. 
+  brief 1  
+  print "   ***Error*** No specification limits entered "
+  print " "              
+  print "   ***Macro exiting***"
+  endmtilte
+  exit
+endif
+
+erase tmp 
+let tmp[1] = cnt
+
+text tmp tmp;
+  decimal 0.
+stack l u m xbar s lab2
+
+text lab2 lab2
+If s = '*'
+  Let lab2[5] = "*"
+endif  
+stack lab2 tmp lab2
+
+set xtab1
+  6(.025)
+end
+
+let xtab2 = xtab1 + .135
+
+set ytab1
+  .7825:.6450/-.0275
+end
+
+set ytab3
+  .28:.2250/-.0275
+end
+
+stack ppmlo ppmup ppmtotal lab4
+
+text lab4 lab4;
+  maxwidth 80.
+
+set xtab3
+  3(.025)
+end
+
+let xtab4 = xtab3 + .12
+
+set xtab5
+  4(.03)
+end
+let xtab6 = xtab5 + .11
+set ytab4
+  .53:.4475/-.0275
+end
+
+stack Cnp Cnpl Cnpu Cnpk tmp
+
+let tmp = round(tmp, 3)
+text tmp tmp;
+  maxwidith 30.
+If Cnp = '*'
+  Let tmp[1] = "*"  
+endif
+If Cnpl = '*'
+  Let tmp[2] = "*"
+endif   
+If Cnpu = '*'
+  Let tmp[3] = "*"
+endif
+If Cnpk = '*'
+  Let tmp[4] = "*"
+endif
+
+if usl = 1 and lsl = 1
+  hist x;
+    Graph 7.8 5.85;
+    #Cutpoint;
+    Data 0.25 0.9533 0.1373 0.8375;
+    title t2;
+      offset 0 -.035;
+    wtitle t2;
+    subtile "Using the Empirical Percentile Method";
+      offset 0 -.085;
+    Scale 2;
+      LDisplay 1 0 0 0;
+    AxLabel 1;
+      ADisplay 0;
+    AxLabel 2;
+      ADisplay 0;
+    reference 1 u;
+      label "USL";
+        offset 0 -.00725;
+        Tcolor 8;
+      Type 2;
+      Color 8;
+      Size 1; 
+    reference 1 l;
+      label "LSL";
+        offset 0 -.00725;
+        Tcolor 8;
+      Type 2;
+      Color 8;
+      Size 1;
+    Bar;
+    NoDTitle;
+    text .05 .815 "Process Data";
+      unit 0;
+      psize 8.5;
+      #bold; 
+    text xtab1 ytab1 lab1;
+      psize 7.5;
+      unit 0;
+    text xtab2 ytab1 lab2;
+      unit 0;
+      psize 7.5;
+    text .035 .56 "Capability Indices";
+      unit 0;
+      psize 8.5;
+      #Bold;
+    text  xtab5 ytab4 lab5;
+      unit 0;
+      psize 7.5;
+    text  xtab6 ytab4 tmp;
+      unit 0;
+      psize 7.5;
+    text .0125 .315 "Observed Performance";
+      unit 0;
+      psize 8.5;
+      #bold;
+    text xtab3 ytab3 lab3;
+      unit 0;
+      psize 7.5;
+    text xtab4 ytab3 lab4;
+      unit 0;
+      psize 7.5;
+	Footnote "The actual process spread is represented by 6 sigma.".
+  
+elseif usl = 0 and lsl = 1
+
+  let lab2[2] = "*"
+  let tmp[1] = "*"
+  let tmp[3] = "*"
+  let lab4[2] = "*"
+  hist x;
+  Graph 7.8 5.85;
+    #Cutpoint;
+    Data 0.25 0.9533 0.1373 0.8375;
+    title t2;
+      offset 0 -.035;
+    wtitle t2;
+    subtile "Using the Empirical Percentile Method";
+      offset 0 -.085;
+    Scale 2;
+      LDisplay 1 0 0 0;
+    AxLabel 1;
+      ADisplay 0;
+    AxLabel 2;
+      ADisplay 0;
+    reference 1 l;
+      label "LSL";
+        offset 0 -.00725;
+        Tcolor 8;
+      Type 2;
+      Color 8;
+      Size 1;
+    Bar;
+    NoDTitle;
+    text .05 .815 "Process Data";
+      unit 0;
+      psize 8.5;
+      #bold;
+    text xtab1 ytab1 lab1;
+      psize 7.5;
+      unit 0;
+    text xtab2 ytab1 lab2;
+      unit 0;
+      psize 7.5;
+    text .035 .56 "Capability Indices";
+      unit 0;
+      psize 8.5;
+      #Bold;
+    text  xtab5 ytab4 lab5;
+      unit 0;
+      psize 7.5;
+    text  xtab6 ytab4 tmp;
+      unit 0;
+      psize 7.5;
+    text .0125 .315 "Observed Performance";
+      unit 0;
+      psize 8.5;
+      #bold;
+    text xtab3 ytab3 lab3;
+      unit 0;
+      psize 7.5;
+    text xtab4 ytab3 lab4;
+      unit 0;
+      psize 7.5;
+	Footnote "The actual process spread is represented by 6 sigma.".
+
+elseif usl = 1 and lsl = 0
+
+  let lab2[1] = "*"
+  let tmp[1] = "*"
+  let tmp[2] = "*"
+  let lab4[1] = "*"
+  hist x;
+    Graph 7.8 5.85;
+    #Cutpoint;
+    Data 0.25 0.9533 0.14 0.8375;
+    title t2;
+      offset 0 -.035;
+    wtitle t2;
+    subtile "Using the Empirical Percentile Method";
+      offset 0 -.085;
+    Scale 2;
+      LDisplay 1 0 0 0;
+    AxLabel 1;
+      ADisplay 0;
+    AxLabel 2;
+      ADisplay 0;
+    reference 1 u;
+      label "USL";
+        offset 0 -.00725;
+        Tcolor 8;
+      Type 2;
+      Color 8;
+      Size 1; 
+    Bar;
+    NoDTitle;
+    text .05 .815 "Process Data";
+      unit 0;
+      psize 8.5;
+      #bold; 
+    text xtab1 ytab1 lab1;
+      psize 7.5;
+      unit 0;
+    text xtab2 ytab1 lab2;
+      unit 0;
+      psize 7.5;
+    text .035 .56 "Capability Indices";
+      unit 0;
+      psize 8.5;
+      #bold;
+    text  xtab5 ytab4 lab5;
+      unit 0;
+      psize 7.5;
+    text  xtab6 ytab4 tmp;
+      unit 0;
+      psize 7.5;
+    text .0125 .315 "Observed Performance";
+      unit 0;
+      psize 8.5;
+      #bold;
+    text xtab3 ytab3 lab3;
+      unit 0;
+      psize 7.5;
+    text xtab4 ytab3 lab4;
+      unit 0;
+      psize 7.5;
+	Footnote "The actual process spread is represented by 6 sigma.".
+  
+endif
+endmacro

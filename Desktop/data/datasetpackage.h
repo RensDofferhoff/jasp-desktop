@@ -32,7 +32,6 @@
 #include "datasetpackageenums.h"
 #include "undostack.h"
 
-class EngineSync;
 class DataSetPackageSubNodeModel;
 
 ///
@@ -67,7 +66,6 @@ public:
 							~DataSetPackage();
 		static Filter	*	filter();
 		DataSet			*	dataSet() { return _dataSet; }
-		void				setEngineSync(EngineSync * engineSync);
 		void				reset(bool newDataSet = true);
 		void				setDataSetSize(size_t columnCount, size_t rowCount);
 		void				setDataSetRowCount(size_t rowCount)					{ setDataSetSize(dataColumnCount(),		rowCount); }
@@ -361,7 +359,6 @@ public slots:
 				void				handleAutoSavePrefChange();
 				
 private:
-				bool				isThisTheSameThreadAsEngineSync();
 				bool				setLabelAllowFilter(	const QModelIndex & index, bool newAllowValue);
 				bool				setLabelDescription(	const QModelIndex & index, const QString & newDescription);
 				bool				setLabelDisplay(		const QModelIndex & index, const QString & newLabel);
@@ -375,7 +372,6 @@ private:
 	static DataSetPackage	*	_singleton;
 	DatabaseInterface		*	_db							= nullptr;
 	DataSet					*	_dataSet					= nullptr;
-	EngineSync				*	_engineSync					= nullptr;
 
 	QString						_currentFile,
 								_folder,

@@ -1,0 +1,27 @@
+gmacro
+loopthru
+
+Worksheet "Stability.MTW"
+let k2 = count(c1)
+name k2 'NumberFiles'
+
+do k1 = 1:k2
+
+  # Create the path to each different Excel file.
+  # Set k4 to be the values of Excel files in c1
+  # Set k5 to the directory where the Excel files are located
+  # Set k6 to be the concatenation of k4 and k5. k6 is the complete file path
+  let k4 = c1[k1]
+  let k5 = "C:\Users\Username\Desktop\Minitab Macros\Stability\"
+  kkcat k5 k4 k6
+
+  # Insert WOpen statement here.
+
+  
+  # Insert Describe statement here.
+
+  # Necessary as constant k1 needs to be updated and it is stored in WSheet1
+  Worksheet "Stability.MTW"  
+
+enddo
+endmacro

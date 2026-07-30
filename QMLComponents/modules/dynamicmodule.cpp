@@ -50,15 +50,21 @@ const char * standardRIndent = "  ";
 
 std::string DynamicModule::_developmentModuleName = "?";
 
-///This constructor takes the path to an installed jasp-module as path (aka a directory that contains a library of R packages, one of which is the actual module with QML etc)
-DynamicModule::DynamicModule(QString moduleDirectory, QObject *parent, bool bundled, bool isCommon)
-	: QObject(parent), _moduleFolder(moduleDirectory), _bundled(bundled), _isCommon(isCommon)
+///This constructor takes the path to the module's **package directory** — the dir containing
+///Description.qml, qml/, icons/, help/ (an installed R package dir, which is named after the
+///package). `_moduleFolder` is stored WITHOUT trailing slash: `absolutePath()` is then its
+///PARENT — the R library containing the package — which is what `moduleRLibrary()` reports and
+///what `moduleInstFolder()` / `initialize()` reconstruct from (`moduleInstFolder()` == this
+///package dir, tautologically, for any parent dir name). Trailing slashes in the argument are
+///normalized away. (The old contract took a *library* dir and assumed it was named after the
+///module — an assumption arbitrary `base_uri`s from the orchestrator catalog do not satisfy.)
+DynamicModule::DynamicModule(QString modulePackageDir, QObject *parent, bool bundled, bool isCommon)
+	: QObject(parent), _moduleFolder(QDir(modulePackageDir).absolutePath()), _bundled(bundled), _isCommon(isCommon)
 {
-	QDir moduleDir(_moduleFolder.absoluteDir());
-	if(!moduleDir.exists())
-		throw ModuleException("???", "Module folder '" + moduleDir.absolutePath().toStdString() + "' does not exist so cannot load from there!");
+	if(!_moduleFolder.isDir())
+		throw ModuleException("???", "Module folder '" + _moduleFolder.absoluteFilePath().toStdString() + "' does not exist so cannot load from there!");
 
-	_name		= stringUtils::stripNonAlphaNum(moduleDir.dirName().toStdString());
+	_name		= stringUtils::stripNonAlphaNum(_moduleFolder.fileName().toStdString());
 
 	setInstalled(true);
 }
@@ -690,7 +696,7 @@ void DynamicModule::reloadDescription(QQmlContext * context)
 {
 	try
 	{
-		std::string folder = fq(_moduleFolder.absoluteFilePath() + "/" + nameQ() + "/");
+		std::string folder = moduleInstFolder();
 		loadDescriptionFromFolder(context, folder, false);
 		loadDESCRIPTION(tq(getDESCRIPTIONFromFolder(folder)));
 	}

@@ -20,13 +20,7 @@ qt_add_executable(
   testdebugdata.h testdebugdata.cpp
 )
 
-qt_add_executable(
-  JASPTestEngine
-  ${SYSTEM_TYPE}
-  $<$<PLATFORM_ID:Darwin>:${_R_Framework}>
-  $<$<PLATFORM_ID:Windows>:${CMAKE_SOURCE_DIR}/Desktop/JASP.exe.manifest>
-  testengine.h testengine.cpp
-)
+# NEO gut: JASPTestEngine removed — it drove the deleted EngineSync/EngineRepresentation.
 
 qt_add_executable(
   JASPQuickTest
@@ -58,7 +52,6 @@ qt_add_executable(
 
 add_dependencies(JASPTest           JASPDesktopLib)
 add_dependencies(JASPTestDebugData  JASPDesktopLib)
-add_dependencies(JASPTestEngine     JASPDesktopLib)
 add_dependencies(JASPQuickTest      JASPDesktopLib)
 add_dependencies(JASPTestCsvPrev    JASPDesktopLib)
 add_dependencies(JASPTestColumnEncoderContext Common)
@@ -76,12 +69,6 @@ target_include_directories(
 
   PRIVATE
   Qt6::Core
-)
-
-target_include_directories(
-  JASPTestEngine
-  PUBLIC
-  JASPDesktopLib
 )
 
 target_include_directories(
@@ -138,13 +125,6 @@ target_link_libraries(
 )
 
 target_link_libraries(
-  JASPTestEngine
-  PUBLIC
-  JASPDesktopLib
-  Qt::Test
-)
-
-target_link_libraries(
   JASPTestCsvPrev
   PUBLIC
   JASPDesktopLib
@@ -169,11 +149,6 @@ target_compile_definitions(
 )
 
 target_compile_definitions(
-  JASPTestEngine
-  PUBLIC TESTLIBRARY_DIR=${CMAKE_SOURCE_DIR}/Tests/TestLibrary
-)
-
-target_compile_definitions(
   JASPTestCsvPrev
   PUBLIC TESTLIBRARY_DIR=${CMAKE_SOURCE_DIR}/Tests/TestLibrary
 )
@@ -192,7 +167,6 @@ enable_testing(true)
 add_test(NAME testDataImport  COMMAND JASPTest)
 add_test(NAME testCsvPreview  COMMAND JASPTestCsvPrev)
 add_test(NAME testDebugData   COMMAND JASPTestDebugData)
-add_test(NAME testEngine      COMMAND JASPTestEngine)
 add_test(NAME testQuick       COMMAND JASPQuickTest)
 add_test(NAME testColumnEncoderContext COMMAND JASPTestColumnEncoderContext)
 

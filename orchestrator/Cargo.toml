@@ -1,0 +1,16 @@
+[package]
+name = "jasp-orchestrator"
+version = "0.1.0"
+edition = "2024"
+description = "NEO JASP orchestrator (alpha): PAIR v1 broker that forwards work frontend->runner and result runner->frontend."
+
+[[bin]]
+name = "jasp-orchestrator"
+path = "src/main.rs"
+
+[dependencies]
+nng = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Generates a JSON Schema *from* the Rust message types — the shared-schema source of truth.
+schemars = "0.8"

@@ -1,0 +1,21 @@
+GMacro
+MyCustomTS
+
+# Store the number of rows in column 'Units Sold' in constant k1
+Let k1 = count('Units Sold')
+
+If k1 > 90
+  Let k2 = k1 - 90 + 1
+  TSPlot 'Units Sold';
+    Stamp 'Date';
+    Footnote "Not all observations are displayed.";
+    Symbol;
+    Connect;
+    Include;
+      Rows k2 : k1.
+Else
+  TSPlot 'Units Sold';
+    Stamp 'Date'.
+EndIf
+
+EndMacro

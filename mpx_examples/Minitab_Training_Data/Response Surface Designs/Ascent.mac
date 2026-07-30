@@ -1,0 +1,407 @@
+macro
+###########################################################################
+#
+#         Macro:  ASCENT.MAC 
+#    Written by:  Daniel Griffith and Eduardo Santiago---November 2007
+#                                                Updated September 2008
+#                                                Updated March 2009
+#                                                Updated for Minitab 19
+#
+#  This macro computes a certain number of runs along the path of steepest 
+#  ascent or descent. The macro is flexible enough to accomodate for 
+#  different base factors, step sizes and number of runs.
+#  
+#  The required inputs for this macro include the columns storing the 
+#  factors of your DOE and a column containing your responses. The 
+#  subcommands will allow the user to store the results in the worksheet, 
+#  customize the step size, choose a different coefficient to be the base 
+#  factor, compute the path of steepest descent or specified the number of 
+#  runs to compute.
+#  
+#  Suppose you have a two factor design and the factors are stored in c5 
+#  and c6, the responses are in c7. You want to find a path that 
+#  potentially maximizes your response. In addition, you want to store 
+#  this path in the worksheet in columns c9-c10; the step size between 
+#  runs should be of 2 (in coded units) and the factor contained in c5 
+#  will be the base factor. Finally, you would like to compute eight
+#  runs along the path of steepest ascent. To run the macro to display 
+#  the results, choose View > Command Line/History.  In the Command Line 
+#  pane enter the following commands.
+#  
+#  %ascent c7 c5-c6;
+#   store c9-c10;
+#   step 2;
+#   base c5;
+#   runs 8.
+#  
+#  Click Run.
+#
+###########################################################################
+#
+#  Neither Minitab, LLC nor the author(s) of this MACRO makes any claim 
+#  of or offers any Warranty whatsoever with regard to the accuracy of 
+#  this MACRO or its suitability for use.  Minitab, LLC and the author(s)
+#  of this MACRO each hereby disclaims any Warranty and/or liability with 
+#  respect thereto. 
+#
+################################################################################
+ascent y x.1-x.n;
+store u.1-u.j;
+step s;
+base b;
+descent;
+runs r.
+
+mcolumn y x.1-x.n z.1-z.15 coef ay index w.1-w.15 alpha u.1-u.j concl conc methtit 
+mcolumn methtit1 metho met mov ll ul blanks namcoef itable cnam b kk
+mcolumn mlev tconcl tconcl2 spac
+mconstant s m r i brow bcoef ncoef nalpha p meth1 tfact tfact1 num num1 nc 
+mconstant t meth2 btype rtype aa ll1 ll2 hl1 hl2 kk1 tcoef bname
+default r=5 s=1
+
+noecho
+brief 0
+endmtitle
+
+if descent=0
+  let m=1
+else
+  let m=-1
+endif
+
+dtype r rtype
+#error checks
+do i=1:n
+  if max(x.i)>min(x.i)
+    let mlev[i]=1
+  endif
+enddo
+if sum(mlev)=n
+  if store=0 or j=n
+    if rtype=2 and r>0
+      if s>0 and s<=3
+        if m=1 or m=-1 
+          if n>1
+            do i=1:n
+              kkname aa x.i 
+              let cnam[i+1]=aa
+            enddo
+            let methtit[1]="Path of Steepest "
+            if m=1
+              let metho[1]= "Ascent"
+            else
+              let metho[1]= "Descent"
+            endif
+            do i=1:n
+              let z.i=(x.i-((max(x.i)+min(x.i))/2))/(RANGE(x.i)/2)
+            enddo
+            Regress;
+              Response y;
+              Continuous z.1-z.n;
+              terms z.1 - z.n;
+              Coefficients coef;
+              Nodefault;
+              Constant.
+            let ncoef=count(coef)
+            copy coef coef;
+              include;
+              rows 2:ncoef.
+            let ncoef=count(coef)
+            set index
+              1:ncoef
+            end
+
+#### Section from path macro
+            let tfact1=0
+            let num1=0
+            do i=1:n
+              dtype x.i tfact
+              if tfact=0 or tfact=3 or tfact=10
+                let tfact1=1
+              else
+                let namcoef[i+1]=coef[i]
+                let ll[i+1]=min(x.i)
+                let ul[i+1]=max(x.i)
+              endif
+              let num=count(x.i)
+              if num<2
+                let num1=1
+              endif
+            enddo
+
+            text ll ul namcoef ll ul namcoef;
+              maxwidth 80.
+            let nc = ncoef + 1     
+            tset blanks            
+              ("    ")nc
+            end
+
+            concat blanks ll ll     
+            concat blanks ul ul     
+            concat blanks namcoef namcoef     
+            concat blanks cnam cnam
+            let cnam[1]="Factor Name"
+            let ll[1]="Low Level"
+            let ul[1]="High Level"
+            let namcoef[1]=" Coded Coef."
+
+####EndSection from Path macro
+            let kk=0
+ 
+            if base =0
+              let ay=abs(coef)
+              sort ay index ay index;
+                by ay;
+                descending ay.
+              let brow=index[1]
+              let bcoef=coef[brow]
+            else
+              do i=1:n
+                if b=x.i
+                  let bcoef=coef[i]
+                  let brow=i
+                else 
+                  let kk[i]=1
+                endif
+              enddo
+            endif
+
+            let kk1=sum(kk)
+
+            if kk1<>n
+              tset alpha
+                "X.1" "X.2" "X.3" "X.4" "X.5" "X.6" "X.7" "X.8"
+              end
+
+              if store = 0
+                do i=1:n
+                  let w.i[2]=(max(x.i)+min(x.i))/2
+                  let nalpha=alpha[i]
+                  name w.i nalpha
+                enddo
+
+                do i=1:n
+                  do p=2:r 
+                    if m=1
+                      if brow=i
+                        if bcoef>0
+                          let w.i[p+1]=round(((max(x.i)-min(x.i))/2)*(p-1)*(s) + w.i[2],2)
+                        else
+                          let w.i[p+1]=round((-1)*((max(x.i)-min(x.i))/2)*(p-1)*(s) + w.i[2],2)
+                        endif
+                      else 
+                        if bcoef>0
+                          let w.i[p+1]=round((coef[i]/bcoef)*(p-1)*((max(x.i)-min(x.i))/2)*(s)+w.i[2],2)
+                        else 
+                          let w.i[p+1]=round((-1)*(coef[i]/bcoef)*(p-1)*((max(x.i)-min(x.i))/2)*(s)+w.i[2],2)
+                        endif
+                      endif
+                    else 
+                      if brow=i 
+                        if bcoef>0
+                          let w.i[p+1]=round((-1)*((max(x.i)-min(x.i))/2)*(p-1)*(s) + w.i[2],2)
+                        else
+                          let w.i[p+1]=round(((max(x.i)-min(x.i))/2)*(p-1)*(s) + w.i[2],2)
+                        endif
+                      else
+                        if bcoef>0
+                          let w.i[p+1]=round((-1)*(coef[i]/bcoef)*(p-1)*((max(x.i)-min(x.i))/2)*(s)+w.i[2],2)
+                        else 
+                          let w.i[p+1]=round((coef[i]/bcoef)*(p-1)*((max(x.i)-min(x.i))/2)*(s)+w.i[2],2)
+                        endif
+                      endif
+                    endif
+                  enddo
+                enddo
+###section from path
+                LET NC = N(ALPHA)      
+                TSET BLANKS             
+                  ("     ")NC
+                END
+                concat blanks alpha alpha
+                LET NC = N(w.1) + 1    
+                TSET BLANKS            
+                  ("     ")NC
+                END
+                do i=1:n
+                  text w.i w.i;
+                    maxwidth 80.
+                  concat blanks w.i w.i      
+                  let w.i[1]=alpha[i]
+                enddo
+
+                kkname bname x.brow
+               
+                let met=" Table"
+                stack r n tconcl
+                text tconcl tconcl
+                stack tconcl bname tconcl
+                stack s bcoef tconcl2 
+                text tconcl2 tconcl2;
+                  maxwidth 80.
+                if bcoef < 0
+                  tset spac
+                  3(" ")
+                  end
+                  let tconcl = concat(spac, tconcl)
+                endif
+                stack tconcl tconcl2 concl
+
+                let conc[1]= "Total # of Runs                   "
+                let conc[2]= "Total # of Factors                "
+                let conc[4]= "Step Size of Base Factor          "
+                let conc[5]= "Coded Coefficient of Base Factor  "
+                let conc[3]= "Base Factor Name                   "
+                let mov[1]=" Overview"
+                concat methtit metho mov methtit1
+                let meth1=methtit1[1]
+                mtitle meth1;
+		  notitle.
+                brief 1 
+                write conc concl
+                write cnam namcoef ll ul
+                concat methtit metho met methtit
+                let meth2=methtit[1]
+                endmtitle
+	brief 0
+                mtitle meth2;
+                notitle.
+                let t=r-1
+
+                do i=1:t
+                  let itable[i+2]=s+s*(i-1)
+                enddo
+                  let itable[2]=0
+                  text itable itable;
+                    maxwidth 80.
+                  concat blanks itable itable   
+                  let itable[1]="Step Size"
+                  brief 2
+                  write itable w.1-w.n
+		  endmtitle
+###Endsection from path
+                else
+                  
+                  do i=1:n
+		    erase u.i
+                    let u.i[1]=(max(x.i)+min(x.i))/2
+                    let nalpha=alpha[i]
+                    name u.i nalpha
+
+                  enddo
+
+                  do i=1:n
+                    do p=2:r 
+                      if m=1
+                        if brow=i
+                          if bcoef>0
+                            let u.i[p]=round(((max(x.i)-min(x.i))/2)*(p-1)*(s) + u.i[1],2)
+                          else
+                            let u.i[p]=round((-1)*((max(x.i)-min(x.i))/2)*(p-1)*(s) + u.i[1],2)
+                          endif
+                        else 
+                          if bcoef>0
+                            let u.i[p]=round((coef[i]/bcoef)*(p-1)*((max(x.i)-min(x.i))/2)*(s)+u.i[1],2)
+                          else 
+                            let u.i[p]=round((-1)*(coef[i]/bcoef)*(p-1)*((max(x.i)-min(x.i))/2)*(s)+u.i[1],2)
+                          endif
+                        endif
+                      else 
+                        if brow=i 
+                          if bcoef>0
+                            let u.i[p]=round((-1)*((max(x.i)-min(x.i))/2)*(p-1)*(s) + u.i[1],2)
+                          else
+                            let u.i[p]=round(((max(x.i)-min(x.i))/2)*(p-1)*(s) + u.i[1],2)
+                          endif                
+                        else
+                          if bcoef>0
+                            let u.i[p]=round((-1)*(coef[i]/bcoef)*(p-1)*((max(x.i)-min(x.i))/2)*(s)+u.i[1],2)
+                          else 
+                            let u.i[p]=round((coef[i]/bcoef)*(p-1)*((max(x.i)-min(x.i))/2)*(s)+u.i[1],2)
+                          endif
+                        endif
+                      endif
+                    enddo
+                  enddo
+                  kkname bname x.brow
+		####
+                stack r n tconcl
+                text tconcl tconcl
+                stack tconcl bname tconcl
+                stack s bcoef tconcl2
+                text tconcl2 tconcl2;
+                  maxwidth 80.
+                if bcoef < 0
+                  tset spac
+                  3(" ")
+                  end
+                  let tconcl = concat(spac, tconcl)
+                endif
+                stack tconcl tconcl2 concl
+                  let conc[1]= "Total # of Runs                   "
+                  let conc[2]= "Total # of Factors                "
+                  let conc[4]= "Step Size Base Factor by          "
+                  let conc[5]= "Coded Coefficient of Base Factor  " 
+                  let conc[3]= "Base Factor Name                   "
+                  brief 1
+                  let mov[1]=" Overview"
+                  concat methtit metho mov methtit1
+                  let meth1=methtit1[1]
+                  brief 0
+                  mtitle meth1;
+		    notitle.
+		  brief 1
+                  write conc concl
+                  write cnam namcoef ll ul
+		  endmtitle		
+                endif
+              else
+		mtitle "Path of Steepest Ascent Macro Error";
+		  notitle.
+                brief 1
+                print "     ***Error: Base Factor must be same as Predictor."
+                endmtitle
+              endif
+            else
+	      mtitle "Path of Steepest Ascent Macro Error";
+		notitle.
+              brief 1
+              print "      ***Error: Must have more than 1 Factor."
+	      endmtitle	
+            endif
+          else
+	    mtitle "Path of Steepest Ascent Macro Error";
+		notitle.
+            brief 1
+	    Print "    ***Error: Method must equal 1 or -1.  1 for  Ascent, -1 for Descent."
+	    endmtitle
+        endif
+      else
+	mtitle "Path of Steepest Ascent Macro Error";
+	notitle.
+        brief 1
+        print "      ***Error: Step Size needs to be between (0,3]."
+        endmtitle
+      endif
+    else
+	mtitle "Path of Steepest Ascent Macro Error";
+		notitle.
+	brief 1
+      print "      ***Error: Number of Runs must be an integer greater than zero."
+      endmtitle
+    endif
+  else
+	mtitle "Path of Steepest Ascent Macro Error";
+	notitle.
+    brief 1
+    print "      ***Error: Number of columns stored must equal number of factors."
+    endmtitle
+    endif
+  else
+mtitle "Path of Steepest Ascent Macro Error";
+		notitle.
+    brief 1
+    print "      ***Error: Factor Column only has 1 level."
+    endmtitle
+  endif
+endmacro

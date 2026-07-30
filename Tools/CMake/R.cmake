@@ -950,28 +950,15 @@ set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES ${R_CPP_INCLUDES_L
 # if(NOT EXISTS ${RENV_PATH})
 #     message(FATAL_ERROR "'renv' installation has failed!")
 # endif()
-if(NOT EXISTS ${RCPP_PATH})
-    message(FATAL_ERROR "'Rcpp' installation has failed!")
-endif()
-if(NOT EXISTS ${RINSIDE_PATH})
-    message(FATAL_ERROR "'RInside' installation has failed!")
-endif()
+# NEO gut: the desktop no longer embeds R (R-Interface removed) and its C++ only touches Rcpp
+# behind #ifndef BUILDING_JASP, so configure must not hard-fail when Rcpp/RInside are absent.
+# They ARE still required for R module builds — which need a compatible R (see GUT_TODO.md §2
+# "R toolchain": compile R from source, not CRAN 4.6.1, which breaks the pinned Rcpp 1.1.1).
+message(STATUS "NEO gut: skipping Rcpp/RInside presence check (desktop no longer embeds R)")
 
-if(APPLE OR LINUX)
-  message(CHECK_START "Checking for 'libRInside'")
-  find_library(
-    _LIB_RINSIDE
-    NAMES "libRInside.a"
-    PATHS ${RINSIDE_PATH}/lib
-    NO_DEFAULT_PATH NO_CACHE REQUIRED)
-
-  if(_LIB_RINSIDE)
-    message(CHECK_PASS "found")
-    message(STATUS "  ${_LIB_RINSIDE}")
-  else()
-    message(CHECK_FAIL "not found in ${RINSIDE_PATH}/lib")
-  endif()
-endif()
+# NEO gut: libRInside belonged to the removed R-Interface; skip the REQUIRED find_library so the
+# desktop configure does not abort on it.
+message(STATUS "NEO gut: skipping libRInside check (desktop no longer embeds R)")
 
 # ----- jags -----
 #

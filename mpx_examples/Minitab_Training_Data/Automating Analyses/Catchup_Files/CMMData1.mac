@@ -1,0 +1,47 @@
+GMacro 
+CMMData
+
+# This macro reads in data from a known Excel format into a Minitab worksheet
+# Each Excel file contains measurements of many characteristics on a single part
+
+# Prompt the user for how many files will be read in
+
+Note
+Note How many files are there to read in?
+
+Set c500;     # Read the value into an unused column
+   File "Terminal";
+   NObs 1.
+Copy c500 k10.
+Erase c500
+
+# Store the file information in a text constant
+Copy "C:\Users\username\Desktop\Minitab Macros\CMM Data\file" k11
+# Store the file extension in a constant
+Copy ".xls" k12
+
+Do k1 = 1:k10
+
+Let k2=text(k1)
+kkcat k11 k2 k13
+kkcat k13 k12 k13
+Name k13 "filepath"
+
+IF K1 = 1
+
+ODBC;
+Connect "DSN=Excel Files;DBQ=" filepath ";";
+SQLString "SELECT `CMM Measurement Results`,`F2`,`F3`,`F4`,`F5` FROM `Sheet1$` where Len( `F5`) > 0 AND  `F5`<>'Measured'".
+
+ELSE
+
+ODBC;
+Connect "DSN=Excel Files;DBQ=" filepath ";";
+SQLString "SELECT `F5` FROM `Sheet1$` where Len( `F5`) > 0 AND  `F5`<>'Measured'".
+
+ENDIF
+
+
+EndDo
+
+EndMacro

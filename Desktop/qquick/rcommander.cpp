@@ -1,5 +1,4 @@
 #include "rcommander.h"
-#include "engine/enginesync.h"
 #include "mainwindow.h"
 #include "modules/dynamicmodules.h"
 
@@ -9,13 +8,9 @@ RCommander::RCommander()
 {
 	_lastCommander = this;
 
-	_engine = EngineSync::singleton()->createRCmdEngine();
+	// NEO gut: the R-commander's dedicated engine (createRCmdEngine) is gone. The R prompt will be
+	// re-routed over the orchestrator as an `rcode` work-unit (see GUT_TODO.md); inert until then.
 
-	connect(_engine,				&EngineRepresentation::rCodeReturned,		this, &RCommander::rCodeReturned);
-	connect(_engine,				&EngineRepresentation::rCodeReturnedLog,	this, &RCommander::rCodeReturnedLog);
-	connect(_engine,				&EngineRepresentation::stateChanged,		this, &RCommander::processEngineChanges);
-	connect(_engine,				&EngineRepresentation::moduleChanged,		this, &RCommander::processEngineChanges);
-	
 	connect(DataSetPackage::pkg(),	&DataSetPackage::currentFileChanged,		this, [&](){ RCommander::_wdWasSet = false;  });
 
 	_scrollTimer = new QTimer(this);
@@ -30,8 +25,6 @@ RCommander::RCommander()
 
 RCommander::~RCommander()
 {
-	_engine = nullptr;
-
 	if(_lastCommander == this)
 		_lastCommander = nullptr;
 }
@@ -43,27 +36,9 @@ void RCommander::makeActive()
 
 bool RCommander::runCode(const QString & code)
 {
-	if(running() || !_engine->idle() || code == "")
-		return false;
-
-	setRunning(true);
-	
-	if(!_wdWasSet)
-	{
-		_wdWasSet = true;
-		QFileInfo currentFile(DataSetPackage::pkg()->currentFile());
-		
-		QString path = !currentFile.isFile() ? "~" : currentFile.dir().absolutePath();
-		_engine->runScriptOnProcess("setwd('"+path+"');\n" + code);
-	}
-	else
-		_engine->runScriptOnProcess(code);
-
-	setLastCmd(code);
-
-	appendToOutput("> " + code);
-
-	return true;
+	// NEO gut: no engine to run on yet; the R prompt is inert (see GUT_TODO.md).
+	Log::log() << "RCommander::runCode ignored (engine removed): " << fq(code) << std::endl;
+	return false;
 }
 
 bool RCommander::parseAnalysisCode(const QString& code, QString& moduleName, QString& analysisName) const
@@ -93,29 +68,9 @@ bool RCommander::parseAnalysisCode(const QString& code, QString& moduleName, QSt
 
 bool RCommander::addAnalysis(const QString &code)
 {
-	if(running() || !_engine->idle() || code == "")
-		return false;
-
-	setRunning(true);
-
-	QString moduleName, analysisName;
-	if (parseAnalysisCode(code, moduleName, analysisName))
-	{
-		Analysis* analysis = Analyses::analyses()->createAnalysis(moduleName, analysisName);
-		if (analysis)
-			analysis->sendRScript(code, AnalysisForm::rSyntaxControlName, false);
-		else
-			appendToOutput("> " + tr("Analysis not found"));
-	}
-	else
-		appendToOutput("> " + tr("Not an analysis function: <module name>::<analysis name>(...)"));
-
-	setRunning(false);
-	setLastCmd(code);
-
-	appendToOutput("> " + code);
-
-	return true;
+	// NEO gut: analysis creation via the R prompt depended on the engine path; inert for now.
+	Log::log() << "RCommander::addAnalysis ignored (engine removed): " << fq(code) << std::endl;
+	return false;
 }
 
 void RCommander::setIsAnalysisCode(bool isAnalysisCode)
@@ -184,64 +139,11 @@ void RCommander::setOutput(const QString & output)
 
 void RCommander::loadModule(const QString & moduleName)
 {
-	if(!_engine)
-	{
-		Log::log() << "R Commander tried to load a module '" << moduleName << "' but has no engine..." << std::endl;
-		return;
-	}
-
-	if(_engine->module() != fq(moduleName) && _engine->module() != "")
-	{
-		_engine->shutEngineDown();
-		EngineSync::singleton()->restartAKilledOrStoppedEngine(_engine);
-	}
-
-	_engine->setDynamicModule(fq(moduleName));
+	// NEO gut: module loading for the R prompt went through a dedicated engine; inert for now.
+	Log::log() << "RCommander::loadModule ignored (engine removed): " << fq(moduleName) << std::endl;
 }
 
 void RCommander::processEngineChanges()
 {
-	static	QString lastState,
-					lastModule;
-			QString newState,
-					newModule = tq(_engine->module());
-
-	//The users really dont want to see all the gritty functioning of the engines the below should be enough
-	switch(_engine->state())
-	{
-	case engineState::initializing:
-		newState = tr("R is (re)starting");
-		break;
-
-	case engineState::moduleInstallRequest:
-	case engineState::moduleLoadRequest:
-		newState = tr("R is installing or loading a module %1").arg(newModule);
-		break;
-
-	case engineState::killed:
-	case engineState::stopped:
-		newState = tr("R stopped");
-		break;
-
-	case engineState::idle:
-		newState = tr("R awaits commands");
-		break;
-
-	default:
-		newState = lastState;
-		break;
-	}
-
-	bool	stateChanged  = newState  != lastState,
-			moduleChanged = newModule != lastModule;
-
-	if(stateChanged || moduleChanged)
-	{
-		lastState  = newState;
-		lastModule = newModule;
-
-		_output += "\n" + (stateChanged ? lastState : "") + (!moduleChanged ? "" : (stateChanged ? tr(" and ") : "R ") + (newModule == "" ? tr("has unselected module") : (tr("has selected module ") + newModule)));
-		emit outputChanged(_output);
-	}
-
+	// NEO gut: no engine state to reflect anymore.
 }

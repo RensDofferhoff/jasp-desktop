@@ -19,8 +19,8 @@
 #include "log.h"
 #include "utilities/qutils.h"
 #include <QThread>
-#include "engine/enginesync.h"
 #include "columnencoder.h"
+#include "analysis/analysis.h" // NEO gut: was transitive via engine/enginesync.h; now explicit
 #include "timers.h"
 #include "utilities/appdirs.h"
 #include "utils.h"
@@ -45,7 +45,7 @@ DataSetPackage::DataSetPackage(QObject * parent) : QAbstractItemModel(parent)
 {
 	if(_singleton) throw std::runtime_error("DataSetPackage can be constructed only once!");
 	_singleton = this;
-	//True init is done in setEngineSync!
+	//True init is done on data load.
 	
 	_db			= new DatabaseInterface(true);
 
@@ -97,40 +97,18 @@ Filter * DataSetPackage::filter()
 	return !pkg()->_dataSet ? nullptr : pkg()->_dataSet->filter();
 }
 
-void DataSetPackage::setEngineSync(EngineSync * engineSync)
-{
-	_engineSync = engineSync;
-
-	//These signals should *ONLY* be called from a different thread than _engineSync!
-	connect(this,	&DataSetPackage::enginesPrepareForDataSignal,	_engineSync,	&EngineSync::enginesPrepareForData,	Qt::QueuedConnection);
-	connect(this,	&DataSetPackage::enginesReceiveNewDataSignal,	_engineSync,	&EngineSync::enginesReceiveNewData,	Qt::QueuedConnection);
-
-	reset();
-}
-
-bool DataSetPackage::isThisTheSameThreadAsEngineSync()
-{
-	return	_engineSync && QThread::currentThread() == _engineSync->thread();
-}
-
 void DataSetPackage::enginesPrepareForData()
 {
-	if(_dataMode)
-		return;
-
-	if(isThisTheSameThreadAsEngineSync())	_engineSync->enginesPrepareForData();
-	else									emit enginesPrepareForDataSignal();
+	// NEO: legacy engine scheduler removed; nothing to prepare
 }
 
 void DataSetPackage::enginesReceiveNewData()
 {
-	if(!_dataMode)
-	{
-		if(isThisTheSameThreadAsEngineSync())	_engineSync->enginesReceiveNewData();
-		else									emit enginesReceiveNewDataSignal();
-	}
-
-	ColumnEncoder::setCurrentColumnNames(	getColumnTypesMap()); //Same place as in engine, should be fine right?
+	// NEO: legacy engine scheduler removed; nothing to notify.
+	// The column-name encoder still needs refreshing whenever the data changes, though —
+	// that is frontend bookkeeping (column-name canonicalization), not engine communication,
+	// so it stays. Matches what insertColumns/removeColumns/checkDataSetForUpdates do.
+	ColumnEncoder::setCurrentColumnNames(getColumnTypesMap());
 }
 
 bool DataSetPackage::dataSetBaseNodeStillExists(DataSetBaseNode *node) const
@@ -1427,14 +1405,12 @@ void DataSetPackage::beginLoadingData(bool)
 
 void DataSetPackage::stopEngines()
 {
-	if(EngineSync::singleton()) //During testing this may be false
-		EngineSync::singleton()->stopEngines();
+	// NEO: legacy engine scheduler removed; nothing to stop
 }
 
 void DataSetPackage::restartEngines()
 {
-	if(EngineSync::singleton()) //During testing this may be false
-		EngineSync::singleton()->restartEngines();
+	// NEO: legacy engine scheduler removed; nothing to restart
 }
 
 

@@ -18,7 +18,9 @@ FocusScope
 	property bool opened: false //should be from some model
 	property int currentIndex: preferencesModel.developerMode ? -3 : -1  // -2, -3 denote install module and developer mode buttons
 
-	onVisibleChanged: engineSync.activateUtilEngine = visible
+	// NEO gut: this used to activate a "util engine" while the menu was open (engineSync) — the
+	// engine process is gone (analyses run on orchestrator-managed runners), so there is nothing
+	// to activate.
 
 	onOpenedChanged: {
 

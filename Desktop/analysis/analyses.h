@@ -43,10 +43,8 @@ class Analyses : public QAbstractListModel
 	Q_PROPERTY(double	currentFormHeight		READ currentFormHeight		WRITE setCurrentFormHeight		NOTIFY currentFormHeightChanged)
 	Q_PROPERTY(double	currentFormPrevH		READ currentFormPrevH		WRITE setCurrentFormPrevH		NOTIFY currentFormPrevHChanged)
 	Q_PROPERTY(bool		visible					READ visible				WRITE setVisible				NOTIFY visibleChanged)
-	Q_PROPERTY(bool		moving					READ moving					WRITE setMoving					NOTIFY movingChanged)
+	Q_PROPERTY(bool		moving					READ moving				WRITE setMoving				NOTIFY movingChanged		)
 
-
-	friend class EngineSync;
 
 	typedef QMap<int, Analysis *> ById;
 public:

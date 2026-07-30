@@ -28,6 +28,7 @@
 #include "modules/dynamicmodule.h"
 #include <QFileSystemWatcher>
 #include "modules/upgrader/upgradeDefinitions.h"
+#include "jaspclient/catalogmodule.h"
 
 /// 
 /// This class handles all dynamic modules and (un)loading them, as well as facilitating installation etc
@@ -49,9 +50,14 @@ public:
 
 	bool					unpackAndInstallModule(		const	std::string & moduleZipFilename);
 	void					uninstallModule(			const	std::string & moduleName);
+	/// Catalog-driven removal (HANDOVER-client-discovery.md): the core of `uninstallModule` minus
+	/// the bundled-module fallback and the R-side round-trip — the orchestrator owns that lifecycle.
+	void					removeModule(				const	std::string & moduleName);
 	std::string				loadModule(					const	std::string & moduleName);
 	void					unloadModule(				const	std::string & moduleName);
-	bool					initializeModuleFromDir(			std::string   moduleDir,	bool bundled = false, bool isCommon = false);
+	/// Load + initialize a module from its *package directory* — the dir containing
+	///Description.qml, qml/, icons/ (what the orchestrator's base_uri points at).
+	bool					initializeModuleFromDir(			std::string   modulePackageDir,	bool bundled = false, bool isCommon = false);
 	bool					initializeModule(					Modules::DynamicModule * module);
 	void					replaceModule(						Modules::DynamicModule * module);
 
@@ -107,6 +113,13 @@ public:
 	const Modules::ModulesMap &	modules()				const	{ return _modules; };
 
 public slots:
+	/// Reconcile the loaded modules with the orchestrator's catalog (HANDOVER-client-discovery.md):
+	/// load new entries from their `base_uri`, hot-swap changed ones, remove ones the catalog no
+	/// longer carries. Idempotent: an entry that matches the live module is a no-op. Called on the
+	/// connect-time catalog push and on every change push (wired in MainWindow), and once at
+	/// startup from RibbonModel::loadModules with the client's cached catalog.
+	void applyCatalog(const ModuleCatalog & catalog);
+
 	void installationPackagesSucceeded(	const QString		& moduleNames);
 	void installationPackagesFailed(	const QString		& moduleName, const QString & errorMessage);
 	void unInstallationPackagesSucceeded(	const QString		& moduleNames);

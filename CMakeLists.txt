@@ -190,40 +190,17 @@ endif()
 add_subdirectory(Common)
 add_subdirectory(CommonData)
 add_subdirectory(QMLComponents)
-add_subdirectory(SyntaxInterface)
+# NEO gut: SyntaxInterface excluded from the build. It is the headless jaspSyntax R-replay
+# interface and depends on the deleted rbridge/databridge; nothing in the desktop links it.
+# Re-enable once it has a non-R-embedded path. See refactor_design/GUT_TODO.md.
+# add_subdirectory(SyntaxInterface)
 
-if(NOT WIN32)
-  add_subdirectory(R-Interface)
-else()
-  # Building R-Interface with MinGW configuration, see R-Interface/CMakeLists.txt
-  # for more info. Note that the build path is set to be inside the JASP's build
-  # folder, e.g. jasp-desktop-build-dir/R-Interface
-  add_custom_target(
-    R-Interface
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/R-Interface
-    BYPRODUCTS ${CMAKE_BINARY_DIR}/R-Interface/libR-Interface.dll
-               ${CMAKE_BINARY_DIR}/R-Interface/libR-Interface.dll.a
-               ${CMAKE_BINARY_DIR}/R-Interface/libR-InterfaceNoRInside.dll
-               ${CMAKE_BINARY_DIR}/R-Interface/libR-InterfaceNoRInside.dll.a
-        COMMAND
-      ${CMAKE_COMMAND} -G "MinGW Makefiles" -S . -B
-      ${CMAKE_BINARY_DIR}/R-Interface "-DRTOOLS_PATH:PATH=${RTOOLS_PATH}"
-      "-DCMAKE_C_COMPILER:PATH=${RTOOLS_C_COMPILER}"
-      "-DCMAKE_CXX_COMPILER:PATH=${RTOOLS_CXX_COMPILER}"
-      "-DCMAKE_MAKE_PROGRAM:PATH=${RTOOLS_MAKE_PROGRAM}"
-      "-DJASP_BINARY_DIR:PATH=${CMAKE_BINARY_DIR}"
-      "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
-      "-DR_VERSION:STRING=${R_VERSION}"
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/R-Interface
-    USES_TERMINAL
-    COMMENT "------ Configuring and Building the libR-Interface")
-
-  add_dependencies(SyntaxInterface R-Interface)
-
-endif()
+# NEO gut: R-Interface (the RInside C++/R embedding) is gone. R now runs in a
+# standalone runner process reached over NNG. See refactor_design/GUT_TODO.md.
+# (The dead _LIB_R_INTERFACE_* cache vars above are left in place for now.)
 
 if(NOT USE_QT_STATIC_LIBS)
-  add_subdirectory(Engine)
+  # add_subdirectory(Engine) — removed: the in-process engine is replaced by the runner
   add_subdirectory(Desktop)
 endif()
 

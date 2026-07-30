@@ -7,10 +7,8 @@
 
 #include "appinfo.h"
 #include "gui/preferencesmodel.h"
-#include "installedmodules.h"
 #include "dynamicmodules.h"
 #include "modules/dynamicmodule.h"
-#include "engine/enginesync.h"
 #include "utilities/appdirs.h"
 #include "dirs.h"
 #include "utilities/dynamicruntimeinfo.h"
@@ -32,25 +30,8 @@ ModuleLibrary::ModuleLibrary(QObject *parent)
 		connect(dynMods, &DynamicModules::dynamicModuleChanged,    this, [this](Modules::DynamicModule *) { emitEnvironmentInfoChanged(); });
 		connect(dynMods, &DynamicModules::dynamicModuleReplaced,   this, [this](Modules::DynamicModule *, Modules::DynamicModule *) { emitEnvironmentInfoChanged(); });
     }
-    if (auto *engineSync = EngineSync::singleton())
-    {
-        connect(engineSync, &EngineSync::moduleInstallationSucceeded, this, [this]() {
-            emitEnvironmentInfoChanged(); 
-            finishInstalling(); 
-        });
-        connect(engineSync, &EngineSync::moduleInstallationFailed, this, [this](const QString &, const QString &) {
-            emitEnvironmentInfoChanged(); 
-            finishInstalling(); 
-        });
-        connect(engineSync, &EngineSync::moduleUninstallationSucceeded, this, [this]() {
-            emitEnvironmentInfoChanged(); 
-            finishInstalling(); 
-        });
-        connect(engineSync, &EngineSync::moduleUninstallationFailed, this, [this](const QString &, const QString &) {
-            emitEnvironmentInfoChanged(); 
-            finishInstalling(); 
-        });
-    }
+    // NEO gut: module install/uninstall signals came from the removed engine scheduler.
+    // Module installation will be re-routed via the orchestrator (see refactor_design/GUT_TODO.md).
 
     if (auto *prefs = PreferencesModel::prefs())
     {
@@ -95,8 +76,11 @@ void ModuleLibrary::uninstallJASPModule(const QString &moduleName)
 QVariantMap ModuleLibrary::installedModulesInfo() const
 {
     QVariantMap installedModules;
-    for (auto const& [key, val] : InstalledModules::getInstalledModuleVersions())
-        installedModules[tq(key)] = tq(val);
+    // NEO: the live modules (orchestrator catalog, applied by DynamicModules) — not a local
+    // manifest scan.
+    if (auto * dynMods = DynamicModules::dynMods())
+        for (const auto & [name, module] : dynMods->modules())
+            installedModules[tq(name)] = tq(module->version().asString(3));
     return installedModules;
 }
 
@@ -131,7 +115,10 @@ void ModuleLibrary::startInstalling()
 void ModuleLibrary::finishInstalling()
 {
     _isInstalling = false;
-    cleanupTempDir();
+    // NEO TODO: the old install flow cleaned up *.JASPModule bundles from the app's temp dir
+    // here (cleanupTempDir). Temp/workspace state is now the orchestrator's responsibility
+    // (its janitor reclaims workspaces); if a fresh-start cleanup keyed on session/work id is
+    // needed, reimplement it there, not here.
     if (!_updatableModuleNames.isEmpty())
     {
         _updatableModuleNames.clear();
@@ -147,19 +134,5 @@ void ModuleLibrary::setUpdatableModuleNames(const QStringList &names)
     {
         _updatableModuleNames = names;
         emit updatableModuleNamesChanged();
-    }
-}
-
-void ModuleLibrary::cleanupTempDir()
-{
-    QDir tempDir(tq(Dirs::tempDir()));
-    QStringList bundles = tempDir.entryList({"*.JASPModule"}, QDir::Files);
-
-    Log::log() << "ModuleLibrary::cleanupTempDir() removing " << bundles.size() << " .JASPModule files from " << tq(Dirs::tempDir()).toStdString() << std::endl;
-
-    for (const QString &file : bundles)
-    {
-        Log::log() << "Removing temp module: " << tempDir.absoluteFilePath(file).toStdString() << std::endl;
-        QFile::remove(tempDir.absoluteFilePath(file));
     }
 }

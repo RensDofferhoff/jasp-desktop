@@ -10,13 +10,14 @@ qt_add_resources(SyntaxInterface "Dummy" FILES Dummy.qml)
 
 #add_dependencies(CommonData QMLComponents)
 
+# NEO gut: R-Interface include/link removed. syntaxbridge.cpp may still reference
+# R-Interface symbols — see refactor_design/GUT_TODO.md (SyntaxInterface item).
 target_include_directories(
 	SyntaxInterface
 	PUBLIC
 		${PROJECT_SOURCE_DIR}/Common
 		${PROJECT_SOURCE_DIR}/CommonData
 		${PROJECT_SOURCE_DIR}/QMLComponents
-		${PROJECT_SOURCE_DIR}/R-Interface
 	)
 
 target_link_libraries(
@@ -24,8 +25,6 @@ target_link_libraries(
 	PUBLIC
 		Common
 		CommonData
-		$<$<PLATFORM_ID:Windows>:${_LIB_R_INTERFACE_NORINSIDE_STATIC_DLL_A}>
-		$<$<NOT:$<PLATFORM_ID:Windows>>:R-Interface>
 		QMLComponentsplugin
 		Qt::Core
 		Qt::Quick
@@ -45,7 +44,6 @@ target_compile_definitions(
 	SyntaxInterface
 	PRIVATE
 	SYNTAX_INTERFACE_LIBRARY
-	JASP_R_INTERFACE_LIBRARY
 	)
 
 if(MSVC)

@@ -36,9 +36,10 @@ class AnalysisForm;
 ///
 /// A single instantiated analysis, aka it was clicked by the user and now has a qml-form loaded and some (rudimentary) output in the results or is on its way there.
 /// This has its counterpart in AnysisForm which is the backend of the qml `Form {}` element.
-/// Analysis and AnalysisForm together handle most of the interaction between the user and (eventually) R
-/// If R should do something with an analysis the status will change to either `Empty` or one of `SaveImg, EditImg or RewriteImgs` and `EngineSync` will notice.
-/// Any commands for the Engine are then issued through EngineSync/EngineRepresentation
+/// Analysis and AnalysisForm together handle most of the interaction between the user and (eventually) R.
+/// Status is display-only now (Empty/Running/Complete/error/aborted); work is triggered by an explicit run()/submit, never by setting a status.
+/// NEO: commands for the runner are issued through the orchestrator client (see refactor_design/poc-handoff.md),
+/// replacing the old in-process engine scheduler.
 class Analysis : public AnalysisBase
 {
 	Q_OBJECT
@@ -49,7 +50,10 @@ class Analysis : public AnalysisBase
 
 public:
 
-	enum Status { Empty, Running, RunningImg, Complete, Aborting, Aborted, ValidationError, SaveImg, EditImg, RewriteImgs, FatalError, KeepStatus };
+	// NEO: display-only status. The old command-states (SaveImg/EditImg/RewriteImgs/RunningImg/
+	// Aborting) and the KeepStatus sentinel died with the engine poll — work is triggered by an
+	// explicit run()/submit now, and image ops are deferred.
+	enum Status { Empty, Running, Complete, Aborted, ValidationError, FatalError };
 
 	void				setStatus(Status status);
 	static std::string	statusToString(Status status);
@@ -110,6 +114,7 @@ public:
 			Status				status()			const				{ return _status;							}
 			QString				statusQ()			const				{ return tq(statusToString(_status));		}
 			int					revision()			const				{ return _revision;							}
+			std::string			workId()			const				{ return "a" + std::to_string(_id);			}	///< stable work-unit id (§19.1): the analysis instance id. Unique per session via Analyses' id assignment, upholding JaspClient::submit's caller-uniqueness contract.
 			bool				isRefreshBlocked()	const				{ return _refreshBlocked;					}
 	Q_INVOKABLE	QString			helpFile()			const	override	{ return _helpFile;							}
 	const	Json::Value		&	imgOptions()		const				{ return _imgOptions;						}
@@ -118,7 +123,6 @@ public:
 			AnalysisForm	*	form()				const				{ return _analysisForm;						}
 			bool				hasForm()			const				{ return _analysisForm;						}
 			bool				isDuplicate()		const	override	{ return _isDuplicate;						}
-			bool				shouldRun()								{ return !isWaitingForModule() && ( isSaveImg() || isEditImg() || isRewriteImgs() || isEmpty() ) && form() && !_isReport;	}
 			bool				isReport()			const				{ return _isReport;						}
 			void				setReport(bool report)					{ _isReport = report;							}
 			bool				beingTranslated()						{ return _beingTranslated;					};
@@ -133,24 +137,17 @@ public:
 			Json::Value			asJSON(bool withRSources = false)	const;
 			void				checkDefaultTitleFromJASPFile(	const Json::Value & analysisData);
 			void				loadResultsUserdataAndRSourcesFromJASPFile(const Json::Value & analysisData, Status status);
-			Json::Value			createAnalysisRequestJson();
+			Json::Value			createWorkJson();
 
 	static	Status				parseStatus(std::string name);
 
 	bool isEmpty()			const { return status() == Empty;		}
 	bool isAborted()		const { return status() == Aborted;		}
-	bool isAborting()		const { return status() == Aborting;	}
-	bool isSaveImg()		const { return status() == SaveImg;		}
-	bool isRewriteImgs()	const { return status() == RewriteImgs;	}
-	bool isEditImg()		const { return status() == EditImg;		}
-	bool isRunningImg()		const { return status() == RunningImg;	}
 	bool isFinished()		const { return status() == Complete || isErrorState(); }
 	bool isErrorState()		const { return status() == ValidationError  || status() == FatalError; }
 
 	std::string				qmlFormPath(bool addFileProtocol = true, bool ignoreReadyForUse = false)	const	override;
 	void Q_INVOKABLE		createForm(QQuickItem* parentItem = nullptr)										override;
-
-	performType				desiredPerformTypeFromAnalysisStatus()										const;
 
 	stringset				usedVariables();
 	stringset				createdVariables();

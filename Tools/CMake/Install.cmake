@@ -74,7 +74,7 @@ if(APPLE)
           DESTINATION ${JASP_INSTALL_RESOURCEDIR})
 
   install(
-    TARGETS JASP JASPEngine
+    TARGETS JASP
     RUNTIME DESTINATION ${JASP_INSTALL_BINDIR}
     BUNDLE DESTINATION .)
 
@@ -222,7 +222,7 @@ if(LINUX)
   set(JASP_INSTALL_MODULEDIR "${JASP_INSTALL_PREFIX}/Modules")
 
   install(
-    TARGETS JASP JASPEngine
+    TARGETS JASP
     RUNTIME DESTINATION ${JASP_INSTALL_BINDIR}
     BUNDLE DESTINATION .)
 
@@ -311,7 +311,7 @@ if(WIN32)
   # include(InstallRequiredSystemLibraries)
   # install(PROGRAMS ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} DESTINATION .)
 
-  install(TARGETS JASP JASPEngine ContainerFilePermissionChecker JunctionTool RUNTIME DESTINATION .)
+  install(TARGETS JASP ContainerFilePermissionChecker JunctionTool RUNTIME DESTINATION .)
 
   set(JASP_QML_FILES "${CMAKE_SOURCE_DIR}/Desktop")
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")

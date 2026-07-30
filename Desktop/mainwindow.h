@@ -35,7 +35,6 @@
 #include "data/filtermodel.h"
 #include "data/columnmodel.h"
 #include "data/labelfiltergenerator.h"
-#include "engine/enginesync.h"
 #include "gui/aboutmodel.h"
 #include "gui/encryptionsettingsmodel.h"
 #include "models/columntypesmodel.h"
@@ -71,6 +70,7 @@ using Modules::Upgrader;
 
 class Application;
 class AllHelp;
+class JaspClient;
 ///
 /// Not only the main window of the application but also the main class.
 /// Instantiates relevant models and loads QML (see loadQml)
@@ -325,9 +325,9 @@ private:
 
 	static MainWindow			*	_singleton;
 
-	EngineSync					*	_engineSync				= nullptr;
 	QQmlApplicationEngine		*	_qml					= nullptr;
 	Analyses					*	_analyses				= nullptr;
+	JaspClient				*	_jaspClient				= nullptr;
 	ResultsJsInterface			*	_resultsJsInterface		= nullptr;
 	MessageForwarder			*	_msgForwarder			= nullptr;
 	DataSetPackage				*	_package				= nullptr;

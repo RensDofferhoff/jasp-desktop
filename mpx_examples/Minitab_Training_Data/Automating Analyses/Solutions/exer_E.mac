@@ -1,0 +1,30 @@
+Gmacro
+lpcapa
+
+Do k1=1:4
+  NormTest ck1.
+  Name c5 "Ppk1"
+  Capa ck1 1;
+   Lspec 24;
+   Uspec 36;
+   Pooled;
+   AMR;
+   UnBiased;
+   OBiased;
+   Toler 6;
+   Within;
+   Overall; 
+   NoCI;
+   PPM;
+   CStat;
+   PPK 'Ppk1'.
+
+  stack c6 'Ppk1' c6
+
+Enddo
+
+cformat c6;
+  color 25;
+  lt 1.
+
+Endmacro

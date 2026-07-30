@@ -1,0 +1,10 @@
+GSummary 'Fill Weight';
+  By 'Shift'.
+Boxplot ( 'Fill Weight' ) * 'Shift';
+  Group 'Head';
+  IQRBox;
+  Outlier.
+Plot 'Fill Weight'*'Study Hour';
+  Symbol;
+  Connect;
+  Panel 'Head'.

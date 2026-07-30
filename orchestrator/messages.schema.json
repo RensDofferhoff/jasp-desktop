@@ -1,0 +1,653 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Envelope",
+  "description": "The envelope every message shares (§18.2), wrapping a type-discriminated [`Message`].",
+  "type": "object",
+  "oneOf": [
+    {
+      "description": "Frontend → Orchestrator: run a work unit.",
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "payload"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "analysis"
+              ]
+            },
+            "payload": {
+              "$ref": "#/definitions/AnalysisWork"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "payload"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "rcode"
+              ]
+            },
+            "payload": {
+              "$ref": "#/definitions/RcodeWork"
+            }
+          }
+        }
+      ],
+      "required": [
+        "dataset_ids",
+        "revision",
+        "type",
+        "work_id"
+      ],
+      "properties": {
+        "dataset_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "revision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "work"
+          ]
+        },
+        "work_id": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "Orchestrator → Frontend: a result (possibly one of a stream) for a work unit.",
+      "type": "object",
+      "required": [
+        "payload",
+        "revision",
+        "status",
+        "type",
+        "work_id"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/ResultPayload"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "status": {
+          "$ref": "#/definitions/Status"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "result"
+          ]
+        },
+        "work_id": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "work_id"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "abort"
+          ]
+        },
+        "work_id": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "Frontend → Orchestrator: discard a work unit (§19.1). The frontend is the authority on \"this `work_id` is consumed forever\" (its analysis was closed). The orchestrator aborts any in-flight work and reclaims the work's workspace. Idempotent: closing an unknown or already-closed work is a no-op.",
+      "type": "object",
+      "required": [
+        "type",
+        "work_id"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "work_close"
+          ]
+        },
+        "work_id": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "ping"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "pong"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "code",
+        "message",
+        "type"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "error"
+          ]
+        },
+        "work_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "path",
+        "type"
+      ],
+      "properties": {
+        "format_hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "dataset_open"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "dataset_id",
+        "rows",
+        "schema",
+        "type"
+      ],
+      "properties": {
+        "dataset_id": {
+          "type": "string"
+        },
+        "rows": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "schema": {
+          "description": "Column schema (name / display_name / type / levels). Kept flexible for the alpha."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "dataset_ready"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Runner → Orchestrator: capability advertisement (Section 9.3, Section 19.5).\n\nA runner advertises one [`Capability`] entry per work `kind` it can satisfy. This is the single umbrella for \"what can this runner do\" — analysis modules, data-plane operations, and raw-R all live in the same `capabilities` list, each tagged by `kind`.",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "capabilities": {
+          "description": "The capabilities this runner offers — one entry per work `kind` it can satisfy (§9.3).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Capability"
+          }
+        },
+        "environment": {
+          "description": "Hardware/runtime environment (`r_version`, `gpu`, `high_memory`) for resource-matched routing (§9.5). Not a capability — these *qualify* how a capability runs.",
+          "default": null
+        },
+        "priority": {
+          "description": "Higher = preferred when multiple runners can satisfy the same work.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "runner_id": {
+          "description": "Optional *hint* id (e.g. a dev-machine label for pinning). The orchestrator is the authority: it assigns the canonical `runner_id` and returns it in `register_ack`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "register"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Orchestrator → Runner: registration response (§19.5).",
+      "type": "object",
+      "required": [
+        "ok",
+        "type"
+      ],
+      "properties": {
+        "activity_min_interval_ms": {
+          "description": "Suggested rate-limit (ms) for the runner's opportunistic `activity` pings (§19.4, §25.4).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "channel_url": {
+          "description": "Dedicated PAIR data-channel URL (present when `ok`). The runner dials this after receiving the ack; all work/result/abort flows on this channel.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "reason": {
+          "description": "Reason for rejection (`ok=false` only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runner_id": {
+          "description": "The orchestrator-assigned canonical runner id (present when `ok`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "register_ack"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Frontend → Orchestrator: connection handshake on the control endpoint (§19.5).\n\nThe orchestrator is the authority on identity: it **assigns** the canonical `session_id` (`s-N`) and returns it in `welcome`. The frontend's optional `client_id` is a stable hint for reconnect idempotency (deferred).",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "client_id": {
+          "description": "Stable frontend id (reconnect hint; the orchestrator maps it to a session).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client_version": {
+          "description": "Frontend/app version (diagnostics).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "hello"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Orchestrator → Frontend: connection accepted (§19.5).\n\nThe assigned `session_id` is carried on the [`Envelope`](crate::Envelope)'s `session_id` (the tenancy scope every message carries), NOT as a field here: a `session_id` on both the envelope and this flattened body would collide on the wire (one JSON key), and serde would feed it to the envelope, leaving this body's copy `None`. Wire format is unchanged — clients read the top-level `session_id`.",
+      "type": "object",
+      "required": [
+        "ok",
+        "type"
+      ],
+      "properties": {
+        "channel_url": {
+          "description": "Dedicated PAIR data-channel URL (present when `ok`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "description": "Reason when `ok` is false.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "welcome"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Runner → Orchestrator: opportunistic liveness signal (§19.4, §25.4).\n\nA `result` is itself an activity signal; `activity` covers busy-but-quiet periods (e.g. a long computation with no intermediate output). Rate-limited by `activity_min_interval_ms`.",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "activity"
+          ]
+        },
+        "work_id": {
+          "description": "If present, signals progress on this specific work unit.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Runner → Orchestrator: graceful leave (§19.5). Alternative to just closing the socket.",
+      "type": "object",
+      "required": [
+        "runner_id",
+        "type"
+      ],
+      "properties": {
+        "runner_id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "deregister"
+          ]
+        }
+      }
+    }
+  ],
+  "required": [
+    "id",
+    "v"
+  ],
+  "properties": {
+    "id": {
+      "description": "Correlation id for this message.",
+      "type": "string"
+    },
+    "reply_to": {
+      "description": "The `id` this message answers (responses only).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session_id": {
+      "description": "Tenancy scope; a single value on desktop.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ts": {
+      "description": "Orchestrator-stamped epoch-ms.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "v": {
+      "description": "Protocol version. Currently 1.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "AnalysisWork": {
+      "type": "object",
+      "required": [
+        "analysis",
+        "module",
+        "module_version",
+        "options",
+        "settings"
+      ],
+      "properties": {
+        "analysis": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string"
+        },
+        "module_version": {
+          "type": "string"
+        },
+        "options": {
+          "description": "Opaque analysis options — the orchestrator never interprets them."
+        },
+        "settings": {
+          "$ref": "#/definitions/Settings"
+        }
+      }
+    },
+    "Capability": {
+      "description": "A capability a runner advertises — the routing-key projection of a work `kind` (§9.3).\n\nMirrors the work `kind` enum one-to-one: a work unit *requests* a computation; a capability *advertises* the ability to satisfy such requests. Each variant carries only the **routing key** for its kind (analysis name+version; data op+formats; rcode is unconstrained for now), never the full request payload — a runner that can run Anova can run it with *any* options, so it advertises `{name, version}`, not an `AnalysisWork`.",
+      "oneOf": [
+        {
+          "description": "Can run an analysis module — version-matched routing (§9.4).",
+          "type": "object",
+          "required": [
+            "kind",
+            "name",
+            "version"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "analysis"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "Can run raw R code. No routing key for now (arbitrary routing); future: `r_version` constraints. Empty object on the wire.",
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "rcode"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Can perform a data-plane operation. `op` discriminates the operation; `formats` is meaningful **only** for `data_open` (the source formats this runner can open) and is ignored for the format-agnostic ops.",
+          "type": "object",
+          "required": [
+            "kind",
+            "op"
+          ],
+          "properties": {
+            "formats": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "data"
+              ]
+            },
+            "op": {
+              "$ref": "#/definitions/DataOp"
+            }
+          }
+        }
+      ]
+    },
+    "DataOp": {
+      "description": "The data-plane operations — the `op` of a `data` capability (and of `data` work, §19.3).",
+      "type": "string",
+      "enum": [
+        "data_open",
+        "data_edit",
+        "data_close",
+        "data_update"
+      ]
+    },
+    "RcodeWork": {
+      "type": "object",
+      "required": [
+        "code",
+        "env"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "env": {
+          "description": "Opaque environment for the code."
+        }
+      }
+    },
+    "ResultPayload": {
+      "type": "object",
+      "required": [
+        "results"
+      ],
+      "properties": {
+        "results": {
+          "description": "The jaspResults tree — opaque; forwarded verbatim, never interpreted."
+        }
+      }
+    },
+    "Settings": {
+      "type": "object",
+      "required": [
+        "numDecimals",
+        "ppi"
+      ],
+      "properties": {
+        "numDecimals": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ppi": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "Status": {
+      "description": "Result lifecycle status (wire values are camelCase, matching the existing engine strings).",
+      "type": "string",
+      "enum": [
+        "running",
+        "complete",
+        "fatalError",
+        "validationError"
+      ]
+    }
+  }
+}

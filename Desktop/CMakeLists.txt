@@ -19,6 +19,9 @@
 #
 list(APPEND CMAKE_MESSAGE_CONTEXT Desktop)
 
+# NEO: NNG transport for the orchestrator client (Desktop/jaspclient).
+find_package(nng REQUIRED)
+
 if(APPLE)
   configure_file(${CMAKE_SOURCE_DIR}/Tools/macOS/Info.plist.in
                  ${CMAKE_BINARY_DIR}/Info.plist)
@@ -83,7 +86,7 @@ add_custom_command(
   BYPRODUCTS ${CMAKE_BINARY_DIR}/Resources
   COMMENT "------ Updating the Resources")
 
-add_dependencies(JASP JASPEngine JASPDesktopLib)
+add_dependencies(JASP JASPDesktopLib) # NEO gut: JASPEngine dependency removed (engine process replaced by the runner)
 
 if(WINDOWS)
   # this little program checks for file permissions
@@ -142,6 +145,7 @@ target_link_libraries(
   	QMLComponentsplugin
     CommonData
     Common
+    nng::nng
     $<$<PLATFORM_ID:Darwin>:compression>
     Qt::Core
     Qt::Gui

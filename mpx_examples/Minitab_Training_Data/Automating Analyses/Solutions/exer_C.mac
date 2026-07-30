@@ -1,0 +1,20 @@
+Gmacro
+lpcapa
+
+Do k1=1:4
+  Capa ck1 1;
+   Lspec 24;
+   Uspec 36;
+   Pooled;
+   AMR;
+   UnBiased;
+   OBiased;
+   Toler 6;
+   Within;
+   Overall; 
+   NoCI;
+   PPM;
+   CStat.
+Enddo
+
+Endmacro

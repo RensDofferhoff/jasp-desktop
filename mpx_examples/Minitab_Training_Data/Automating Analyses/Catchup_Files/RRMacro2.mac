@@ -1,0 +1,19 @@
+Macro
+
+RRMacro p o mdata.1-mdata.n
+
+MColumn p o mdata.1-mdata.n
+
+MConstant i
+
+Do i = 1:n
+
+  GageRR;
+    Parts p;
+    Opers o;
+    Response mdata.i;
+    Studyvar 6.
+
+EndDo
+
+EndMacro

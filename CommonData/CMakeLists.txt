@@ -35,15 +35,12 @@ add_library(CommonData STATIC ${SOURCE_FILES} ${HEADER_FILES} ${SQL_FILES})
 
 #add_dependencies(CommonData R-Interface)
 
+# NEO gut: R-Interface includes/links and boost::interprocess definitions removed.
+# CommonData no longer embeds R or talks shared-memory IPC.
 target_include_directories(
 	CommonData
 	PUBLIC # JASP
-	${PROJECT_SOURCE_DIR}/R-Interface
 	${PROJECT_SOURCE_DIR}/Common
-	# R
-	${R_INCLUDE_PATH}
-	${R_HOME_PATH}/include
-	${RCPP_PATH}/include
   ${Boost_INCLUDE_DIRS}
 	PRIVATE
 	SQLite::SQLite3
@@ -54,10 +51,6 @@ target_link_libraries(
     PUBLIC
     LibArchive::LibArchive
     SQLite::SQLite3
-	PRIVATE
-	$<$<PLATFORM_ID:Windows>:${_LIB_R_INTERFACE_STATIC_DLL_A}>
-	$<$<NOT:$<PLATFORM_ID:Windows>>:R-Interface>
-
 )
 if(MSVC)
   target_compile_options(CommonData PRIVATE /EHsc)
@@ -65,19 +58,13 @@ endif()
 target_compile_definitions(
   CommonData
   PUBLIC $<$<BOOL:${JASP_PRINT_ENGINE_MESSAGES}>:PRINT_ENGINE_MESSAGES>
-		 BUILDING_JASP_ENGINE R_HOME=${R_HOME_PATH}
 		$<$<BOOL:${JASP_TIMER_USED}>:PROFILE_JASP>
 		JSONCPP_NO_LOCALE_SUPPORT	)
-
-if(APPLE OR WINDOWS)
-  target_compile_definitions(CommonData PUBLIC BOOST_INTERPROCESS_SHARED_DIR_FUNC)
-endif()
 
 if(WINDOWS)
   target_compile_definitions(
     CommonData
-    PUBLIC BOOST_INTERPROCESS_BOOTSTAMP_IS_SESSION_MANAGER_BASED
-           BOOST_WINDOWS
+    PUBLIC BOOST_WINDOWS
            NOMINMAX
            WIN32_LEAN_AND_MEAN)
 endif()

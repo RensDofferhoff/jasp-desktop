@@ -1,0 +1,42 @@
+Macro
+RRMacro p o mdata.1-mdata.n;
+  Tol t.1-t.m.
+
+MColumn p o mdata.1-mdata.n
+
+MConstant i t.1-t.m
+
+If tol =1
+  
+  If m ~= n
+
+     Print " ** Error! # Variables and # tolerances not equal ** "
+     Exit
+
+  EndIf
+
+  Do i = 1:n
+
+     GageRR;
+       Parts p;
+       Opers o;
+       Response mdata.i;
+       Studyvar 6;
+       Tolerance t.i.
+  EndDo
+       
+Else
+
+  Do i = 1:n
+
+     GageRR;
+       Parts p;
+       Opers o;
+       Response mdata.i;
+       Studyvar 6.
+
+  EndDo
+
+EndIf
+
+EndMacro 

@@ -1,0 +1,49 @@
+gmacro
+AutoReport
+
+Worksheet "Stability.MTW"
+Let c1 = WORD(c1,1,".")
+let k2 = count(c1)
+name k2 'NumberFiles'
+
+do k1 = 1:k2
+
+  let k4 = c1[k1]
+  Worksheet k4
+
+  let k6 = Specs[3]
+  name k6 'SubgroupSize'
+  if SubgroupSize = 1
+    # Check Normality on the data
+    NormTest c1;
+     Spvalue c3.
+    Let c4 = trim(if(find("<",c3)=1,replace(c3,1,1," "),c3))
+    numeric c4 c4
+    name c4 'Pvalue'
+    if Pvalue > 0.05
+      # Run an Individuals-Moving Range chart
+      IMRChart c1
+    else
+     # Run an I-MR chart on the transformed data
+     name c5 'Transformed Data'
+     brief 0
+     BoxCox c1 1;
+      Store 'Transformed Data'.
+     brief 2
+     IMRChart 'Transformed Data'
+    endif
+  elseif SubgroupSize > 1 and SubgroupSize < 9
+    # Run an Xbar-R chart
+    XRChart c1 SubgroupSize
+  else
+    # Run an Xbar-S chart
+    XSChart c1 SubgroupSize
+  endif
+
+  # Necessary as constant k1 needs to be updated and it is stored in "File names"
+  Worksheet "Stability.MTW"  
+
+enddo
+
+XWORD
+endmacro

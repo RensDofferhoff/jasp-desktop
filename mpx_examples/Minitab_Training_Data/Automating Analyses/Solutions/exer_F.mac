@@ -1,0 +1,30 @@
+Macro
+PDiff var1 var2
+
+Mcolumn var1 var2 diff
+
+# Instruction 2 check for equal column lengths
+If count(var1) ~= count(var2)
+ Note Error - Column Lengths are not equal
+ Exit
+EndIf
+
+Let diff = var1-var2
+NormTest diff;
+  Title "Normality Test for Differences".
+
+# Instruction 3, based on column length individual value plot or boxplot
+If count(var1) < 15
+ Paired var1 var2;
+   Confidence 95.0;
+   Test 0.0;
+   Alternative 0;
+   GIndividual.
+Else
+ Paired var1 var2;
+   GBoxplot.
+EndIf
+
+Print "Check the normality plot of differences before interpreting the t-test"
+
+Endmacro

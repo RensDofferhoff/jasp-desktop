@@ -22,7 +22,7 @@
 #include "log.h"
 #include "qquick/datasetview.h"
 #include "mainwindow.h"
-#include "installedmodules.h"
+#include "jaspclient/jaspclient.h"
 
 using namespace Modules;
 
@@ -43,32 +43,17 @@ RibbonModel::RibbonModel() : QAbstractListModel(DynamicModules::dynMods())
 	connect(DataSetPackage::pkg(),	   &DataSetPackage::setDataMode,				this, &RibbonModel::setDataMode								);
 }
 
-void RibbonModel::loadModules(std::vector<InstalledModules::ModuleInfo> modulesToLoad)
+void RibbonModel::loadModules()
 {
 	addSpecialRibbonButtonsEarly();
-	
-	std::set<std::string> commonNames = {};
 
-	for(const auto& module : modulesToLoad) {
-		try {
-			if(module.common) commonNames.insert(module.name);
-			DynamicModules::dynMods()->initializeModuleFromDir(module.libpath, module.bundled, module.common);
-		}
-		catch (std::runtime_error & e)
-		{
-			QString titleWarn = tr("Loading bundled module %1 failed").arg(tq(module.name)),
-				bodyWarn  = tr("Loading of the bundled module %1 failed with the following error:\n\n%2").arg(tq(module.name)).arg(tq(e.what()));
-
-			Log::log() << titleWarn << "\n" << bodyWarn << std::endl;
-
-			MessageForwarder::showWarning(titleWarn, bodyWarn);
-		}
-	}
-	DynamicModules::dynMods()->insertCommonModuleNames(commonNames);
-	
-	for(const std::string & modName : DynamicModules::dynMods()->moduleNames())
-		if(!isModuleName(modName)) //Was it already added from commonModulesToLoad or extraModulesToLoad?
-			addRibbonButtonModelFromDynamicModule((*DynamicModules::dynMods())[modName]);
+	// NEO: modules come from the orchestrator's catalog, not a local scan. The client caches the
+	// connect-time push (it arrives right after the data channel dials — normally well before
+	// this runs; parsing needs the QML context, which is why modules load HERE and not on
+	// receipt). Live updates arrive via JaspClient::modulesUpdated -> DynamicModules::applyCatalog,
+	// wired in MainWindow.
+	if(auto * client = JaspClient::client())
+		DynamicModules::dynMods()->applyCatalog(client->catalog());
 
 	addSpecialRibbonButtonsLate();
 

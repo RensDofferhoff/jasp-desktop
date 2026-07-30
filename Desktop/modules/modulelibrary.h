@@ -61,7 +61,6 @@ private:
     QVariantMap installedModulesInfo() const;
     QStringList getUninstallableModules() const;
     void emitEnvironmentInfoChanged();
-    void cleanupTempDir();
 
 private:
     static ModuleLibrary *_singleton;

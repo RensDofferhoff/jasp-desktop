@@ -1,0 +1,92 @@
+Macro
+MCSim LSL USL;
+  DHole type1 p.1-p.k;
+  DShaft type2 q.1-q.r;
+  NumbSim n.
+
+#############################################################
+#
+#  This macro produces random numbers from the resulting 
+#  distribution for gap, given any two chosen distributions. 
+#
+#  The following three distributions can be chosen:
+#    Normal       Enter a 1 for type1 or type2.
+#    Uniform      Enter a 2 for type1 or type2.
+#    Triangular   Enter a 3 for type1 or type2.
+#
+#  To run the macro, you will have to specify the type of 
+#  distribution (1, 2, 3) and the corresponding parameters for hole
+#  and the shaft. Choose Edit > Command Line Editor, LSL and USL
+#  are the corresponding specs for the gap, Dhole allows you to
+#  specify the distribution for the hole, DShaft does the same
+#  for the shaft. NumbSim allows you to specify the number of 
+# simulations.  
+#
+#############################################################
+
+Mconstant LSL USL type1 type2 p.1-p.k q.1-q.r n i
+Mconstant problsl probusl PrNoFit
+Mcolumn hole shaft gap UnderLSL AboveUSL NoFit
+
+default n = 10000
+
+Name hole "Hole Size" shaft "Shaft Size" gap "Gap"
+
+if type1 = 1
+  Random n hole;
+    normal p.1 p.2.
+elseif type1 = 2 
+  Random n hole;
+    uniform p.1 p.2.
+elseif type1 = 3
+  Random n hole;
+    triangular p.1 p.2 p.3.
+else
+  Mtitle "Error"
+  Note Invalid input for the distribution choice of Hole. 
+  Note Please enter only one of the options display above.
+  Endmtitle.
+  Exit
+endif
+
+if type2 = 1
+  Random n shaft;
+    normal q.1 q.2.
+elseif type2 = 2 
+  Random n shaft;
+    uniform q.1 q.2.
+elseif type2 = 3
+  Random n shaft;
+    triangular q.1 q.2 q.3.
+else
+  
+  Mtitle "Error"
+  Note Invalid input for the distribution choice of Shaft.
+  Note Please enter only one of the options display above.
+  Endmtitle.
+  Exit
+endif
+
+let gap = hole - shaft
+let UnderLSL = if(gap < LSL,1,0) 
+let AboveUSL = if(gap > USL,1,0) 
+let NoFit = if(gap < 0,1,0) 
+
+let problsl = mean(UnderLSL)
+let probusl = mean(AboveUSL)
+let PrNoFit = mean(NoFit)
+
+name problsl "Gap is too Small" probusl "Gap is too Large" 
+name PrNoFit "Shaft Cannot Fit"
+brief 0
+Mtitle "Monte Carlo Simulation Probabilities";
+Notitle.
+brief 2
+Print PrNoFit problsl probusl 
+Endmtitle
+
+Sixpack gap 1;
+  Lspec LSL;
+  Uspec USL.
+
+Endmacro

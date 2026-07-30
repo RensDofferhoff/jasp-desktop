@@ -1,0 +1,53 @@
+Gmacro
+ppkboot
+
+Base 50
+Brief 0
+Count c1 k5
+Brief 2
+
+Do k1 = 1:1000
+
+   Sample k5 c1 c2;
+     Replace.
+
+   Name c3 "Ppk1"
+
+     NNCapa C2; 
+       NoChart;
+       LNormal;
+       Uspec 30;
+       Toler 6;
+       CStat;
+       PPM;
+       PPK  'Ppk1'.
+
+   Stack c4 'Ppk1' c4
+
+Enddo
+
+Histogram C4;
+  Title "Distribution of Bootstrapped Ppk";
+  Bar.
+
+Let k2 = PERCENTILE(C4,.025)
+Let k3 = PERCENTILE(C4,.975)
+
+Name c5 "Ppk2"
+NNCapa c1; 
+  LNormal;
+  Uspec 30;
+  Toler 6;
+  CStat;
+  PPM;
+  PPK  'Ppk2'.
+
+Copy 'Ppk2' k4
+
+Name k2 "Lower CI bound"
+Name k3 "Upper CI bound"
+Name k4 "Ppk Estimate  "
+
+Print "A 95% Bootstrap Confidence Interval is " k2 k4 k3
+
+Endmacro 

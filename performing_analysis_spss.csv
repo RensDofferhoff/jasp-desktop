@@ -1,0 +1,823 @@
+,folder,name,question,Item Type,Section,Type,Program,Language,Level,ID,SectionShort,date
+1,Assumptions/eur-assumptions-101-en,eur-assumptions-101-en,"*Testing effect* 
+Research has shown that when people learn words from a foreign language they better remember those words if they first study the words and then test themselves trying to recollect the words, compared to just studying the words twice. A researcher from the institute of psychology wants to know whether this so-called testing effect can be proven to exist in the classroom. She divides a group of 60 students into three groups [condition]. The students in group 1 study a list of 30 French words and their Dutch translation twice (1 = restudy). The students in group 2 study the list of 30 French words and their Dutch translation once and then test themselves (2 = testing). The students in group 3 just study the list of 30 French words and their Dutch translation once without testing themselves (3 = study_once). A week after the study phase, the students took a test where they had to give the Dutch translation of the 30 French words that they studied earlier. The total number of correct translations is represented by the variable score [score]. Additionally, the researcher included for each student his/her French grade [French].
+Open the data file.
+Conduct an analysis to determine whether there is a difference between the three conditions [condition] in terms of total number of correct translations [score]. Test whether there is a violation of the homogeneity of variances assumption for this analysis. What is the F-value for this assumption test? (3 decimals)
+**Download**: [SPSS file](eur-assumptions-101-en-data.sav), [CSV file](eur-assumptions-101-en-data.csv)
+",num,Assumptions/Homogeneity of variance/Levene's test,Performing analysis,SPSS,English,Statistical Literacy,622fe,Assumptions/Levene's test,2026-01-27
+3,Assumptions/eur-assumptions-102-en,eur-assumptions-102-en,"*Testing effect* 
+Research has shown that when people learn words from a foreign language they better remember those words if they first study the words and then test themselves trying to recollect the words, compared to just studying the words twice. A researcher from the institute of psychology wants to know whether this so-called testing effect can be proven to exist in the classroom. She divides a group of 60 students into three groups [condition]. The students in group 1 study a list of 30 French words and their Dutch translation twice (1 = restudy). The students in group 2 study the list of 30 French words and their Dutch translation once and then test themselves (2 = testing). The students in group 3 just study the list of 30 French words and their Dutch translation once without testing themselves (3 = study_once). A week after the study phase, the students took a test where they had to give the Dutch translation of the 30 French words that they studied earlier. The total number of correct translations is represented by the variable score [score]. Additionally, the researcher included for each student his/her French grade [French].
+Open the data file.
+Conduct an analysis to determine whether the regression lines for the relation between French grade [French] and test performance [score] differ for the three conditions [condition]. What is p-value corresponding to the F-test of the homogeneity of regression slopes assumption? (3 decimals)
+**Download**: [SPSS file](eur-assumptions-102-en-data.sav), [CSV file](eur-assumptions-102-en-data.csv)
+",num,"Assumptions/Homogeneity of variance/Levene's test, Inferential Statistics/NHST/p-value",Performing analysis,SPSS,English,Statistical Literacy,89e29,Assumptions/Levene's test,2026-01-27
+5,Assumptions/eur-assumptions-103-en,eur-assumptions-103-en,"*Long-term detention*
+Currently, in the Netherlands, there is debate about the usefulness of long-term detention with psychiatric treatment. A psychiatrist of a Dutch long-term detention centre collected data about aggression of detainees. The detainees were observed during group treatment sessions and the level of aggressive behavior was rated at four points in time: (1) 2 days after their admission to the centre [T1_aggression] ; (2) half a year after admission [T2_aggression]; (3) a year after admission [T3_aggression]; and (4) a year and a half after admission [T4_aggression]. The level of aggressive behavior was rated by means of a semi-structured interview, resulting in scores ranging from 0 (not aggressive) to 40 (extremely aggressive). Furthermore, the psychiatrist registered whether detainees suffered from psychosis or not [psychosis].
+Open the data file.
+Perform the relevant ANOVA to test for differences on the four aggression measurements and make sure to test the sphericity assumption. What is the value of Greenhouse-Geisser Epsilon for this model? (3 decimals)
+**Download**: [SPSS file](eur-assumptions-103-en-data.sav), [CSV file](eur-assumptions-103-en-data.csv)
+",num,"Assumptions/Sphericity/Epsilon, Inferential Statistics/Parametric Techniques/ANOVA/Oneway repeated measures ANOVA",Performing analysis,SPSS,English,Statistical Literacy,0140d,Assumptions/Epsilon,2026-01-12
+7,Assumptions/eur-assumptions-104-en,eur-assumptions-104-en,"* Testing effect*
+Research has shown that when people have to learn faces of strangers they can remember them better in the long run when they study the faces first and then test themselves with matching the faces to the corresponding name, than when they study the faces twice. A researcher at the Institute of Psychology wants to know whether this so-called testing effect reveals itself in the classroom. She divides a group of 60 VWO students into three groups [condition]. The students in group 1 study a list of 30 faces and their names twice in a row (1 = restudy), the students in group 2 study the same faces and their names once and then test themselves (2 = testing). This involves them putting their hand on the list of people's names and figuring out for themselves the name of the person in the picture. Students in grade 3 study the faces and names only 1 time (3 = study_once). One week after studying, all students are given a test where they are shown the 30 faces and have to give the corresponding name. The total number of correctly identified people is shown in the variable score [score]. The researcher further collected a social skill score [social] for each student.
+Open the data file.
+Do an analysis to determine if there is a difference between the three conditions [condition] on the number of correctly identified people [score]. Test whether the assumption of homogeneous variance in the three conditions is violated. What is the F value associated with this assumption test? (3 decimal places)
+* Download**: [SPSS file](eur-assumptions-104-en-data.sav), [CSV file](eur-assumptions-104-en-data.csv)
+",num,Assumptions/Homogeneity of variance/Levene's test,Performing analysis,SPSS,English,Statistical Literacy,3b6d7,Assumptions/Levene's test,2026-01-27
+9,Assumptions/eur-assumptions-105-en,eur-assumptions-105-en,"* Testing effect*
+Research has shown that when people have to learn faces of strangers they can remember them better in the long run when they study the faces first and then test themselves with matching the faces to the corresponding name, than when they study the faces twice. A researcher at the Institute of Psychology wants to know if this so-called testing effect reveals itself in the classroom. She divides a group of 60 4VWO students into three groups [condition]. The students in group 1 study a list of 30 faces and their names twice in a row (1 = restudy), the students in group 2 study the same faces and their names once and then test themselves (2 = testing). This involves them putting their hand on the list of people's names and figuring out for themselves the name of the person in the picture. Students in grade 3 study the faces and names only 1 time (3 = study_once). One week after studying, all students are given a test where they are shown the 30 faces and have to give the corresponding name. The total number of correctly identified people is shown in the variable score [score]. The researcher further collected a social skill score [social] for each student.
+Open the data file.
+Perform an analysis to determine whether the regression lines representing the relationship between social skill score [social] and performance on the test [score] differ for the three conditions [condition]. What is the p-value associated with the F test that tests the homogeneity of regression assumption? (3 decimal places)
+* Download**: [SPSS file](eur-assumptions-105-en-data.sav), [CSV file](eur-assumptions-105-en-data.csv)
+",num,"Assumptions/Homogeneity of variance/Levene's test, Inferential Statistics/NHST/p-value",Performing analysis,SPSS,English,Statistical Literacy,6489f,Assumptions/Levene's test,2026-01-27
+11,Assumptions/eur-assumptions-106-en,eur-assumptions-106-en,"*Social skills and Problem Based Learning (PBL)*
+A researcher from Erasmus University Rotterdam is investigating the possible advantages of PBL on students’ social competencies and has gathered social competency scores about students on four occasions. These scores come from observations by the researcher 2 days after their first PBL group (T1_social), six months after their first PBL tutor group (T2­_social), a year after their first PBL tutor group (T3_social) and a year and a half after their first PBL tutor group (T4_social). At these four occasions, social competence was measured using a semi-structured interview with scores varying from 0 (not social) to 40 (very social). Additionally, the researcher determines whether a student is shy or not [SHY]. 
+Open the data file.
+Test whether the mean level of social compentency differs between the four points in time. What is the value of Greenhouse-Geisser Epsilon for this model? (3 decimals)
+**Download**: [SPSS file](eur-assumptions-106-en-data.sav), [CSV file](eur-assumptions-106-en-data.csv)
+",num,Assumptions/Sphericity/Epsilon,Performing analysis,SPSS,English,Statistical Literacy,304ab,Assumptions/Epsilon,2026-01-12
+268,Descriptive-statistics/eur-descriptive-116-en,eur-descriptive-116-en,"*Work for psychologists and educators.*
+A scientist was commissioned to investigate whether psychology and education graduates succeed in finding level jobs. The researcher designed his own questionnaire consisting of 12 Likert items with 5 response options ranging from completely disagree (1) to completely agree (5). An example of an item is: I had to put a lot of effort to find a job opening for a level job. The responses of 608 educators (1) and psychologists (2), distinguished in the variable [psy_ped], to the 12 items are shown in the data file. NOTES. The more the respondent agrees with the statements, the more difficult he/she finds it to find a level job.
+Open the data file.
+Which of the 12 items has the least variation in respondents' answers (no decimals)?
+* Download**: [SPSS file](eur-descriptive-116-nl-data.sav), [CSV file](eur-descriptive-116-nl-data.csv)
+",num,Descriptive statistics/Summary Statistics/Measures of Spread/Standard Deviation,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,04b15,Descriptive statistics/Standard Deviation,2026-01-12
+270,Descriptive-statistics/eur-descriptive-117-en,eur-descriptive-117-en,"*Work for psychologists and educators.*
+A scientist was commissioned to investigate whether psychology and education graduates succeed in finding level jobs. The researcher designed his own questionnaire consisting of 12 Likert items with 5 response options ranging from completely disagree (1) to completely agree (5). An example of an item is: I had to put a lot of effort to find a job opening for a level job. The responses of 608 educators (1) and psychologists (2), distinguished in the variable [psy_ped], to the 12 items are shown in the data file. NOTES. The more the respondent agrees with the statements, the more difficult he/she finds it to find a level job.
+Open the data file.
+What is the highest correlation between an item and the corrected item total score? (3 decimal places)
+* Download**: [SPSS file](eur-descriptive-117-nl-data.sav), [CSV file](eur-descriptive-117-nl-data.csv)
+",num,Descriptive statistics/Summary Statistics/Bivariate statistics/Correlation,Performing analysis,SPSS,English,Statistical Literacy,8fed6,Descriptive statistics/Correlation,2026-01-12
+272,Descriptive-statistics/eur-descriptive-118-en,eur-descriptive-118-en,"*Work for psychologists and educators.*
+A scientist was commissioned to investigate whether psychology and education graduates succeed in finding level jobs. The researcher designed his own questionnaire consisting of 12 Likert items with 5 response options ranging from completely disagree (1) to completely agree (5). An example of an item is: I had to put a lot of effort to find a job opening for a level job. The responses of 608 educators (1) and psychologists (2), distinguished in the variable [psy_ped], to the 12 items are shown in the data file. NOTES. The more the respondent agrees with the statements, the more difficult he/she finds it to find a level job.
+Open the data file.
+Calculate the total score as the sum of all responses to all items. Take into account the misses when calculating the total score and exclude individuals who gave less than 8 answers. Round total scores to whole numbers. What is the mean of the total score? (3 decimal places)
+* Download**: [SPSS file](eur-descriptive-118-nl-data.sav), [CSV file](eur-descriptive-118-nl-data.csv)
+",num,Descriptive statistics/Summary Statistics/Measures of Location/Mean,Performing analysis,SPSS,English,Statistical Literacy,e92a7,Descriptive statistics/Mean,2026-01-12
+274,Descriptive-statistics/eur-descriptive-119-en,eur-descriptive-119-en,"*Knowledge about the professional field.*
+A knowledge test about the professional field of psychologists and pedagogues consists of 20 items and was administered to 202 students in the master's program in psychology and pedagogy. The total number of correctly answered questions is shown in the variable [total score].
+Open the data file.
+Calculate the percentile scores. What percent of all students have a total score of 8 or lower (1 decimal place).
+* Download**: [SPSS file](eur-descriptive-119-nl-data.sav), [CSV file](eur-descriptive-119-nl-data.csv)
+",num,Descriptive statistics/Score interpretation/Percentile,Performing analysis,SPSS,English,Statistical Literacy,9a60c,Descriptive statistics/Percentile,2026-01-12
+276,Descriptive-statistics/eur-descriptive-120-en,eur-descriptive-120-en,"* Nowledge about the professional field.*
+A knowledge test about the professional field of psychologists and pedagogues consists of 20 items and was administered to 202 students from the psychology and pedagogy master's program. The total number of correctly answered questions is shown in the variable [total score].
+Open the data file.
+How many students have a total score greater than two standard deviations above the mean in the group (no decimals)?
+* Download**: [SPSS file](eur-descriptive-120-nl-data.sav), [CSV file](eur-descriptive-120-nl-data.csv)
+",num,Descriptive statistics/Summary Statistics/Measures of Spread/Standard Deviation,Performing analysis,SPSS,English,Statistical Literacy,e7f39,Descriptive statistics/Standard Deviation,2026-01-12
+278,Descriptive-statistics/eur-descriptive-121-en,eur-descriptive-121-en,"*Knowledge about the professional field.*
+A knowledge test about the professional field of psychologists and pedagogues consists of 20 items and was administered to 202 students in the master's degree program in psychology and pedagogy. The total number of correctly answered questions is shown in the variable [total score].
+Open the data file.
+What is the total score associated with a percentile score of 75%? (no decimal places)
+* Download**: [SPSS file](eur-descriptive-121-nl-data.sav), [CSV file](eur-descriptive-121-nl-data.csv)
+",num,Descriptive statistics/Score interpretation/Percentile,Performing analysis,SPSS,English,Statistical Literacy,9c0fd,Descriptive statistics/Percentile,2026-01-12
+280,Descriptive-statistics/eur-descriptive-122-en,eur-descriptive-122-en,"*Knowledge about the professional field.*
+A knowledge test about the professional field of psychologists and pedagogues consists of 20 items and was administered to 202 students in the master's program in psychology and pedagogy. The total number of correctly answered questions is shown in the variable [total score]. In addition, the scores (0 = not correct, 1 = correct) on item 8 from the above knowledge test are shown in the variable [item8].
+Open the data file.
+The researcher would like to divide the student's total scores into the following 2 percentile groups: 0-85% = 1; and >85% = 2. Create a new variable in which each student is assigned to the correct percentile group based on his or her percentile score for the variable [total score]. What is the proportion correct on item 8 [item8] for students belonging to percentile group 2? (2 decimal places)
+* Download**: [SPSS file](eur-descriptive-122-nl-data.sav), [CSV file](eur-descriptive-122-nl-data.csv)
+",num,Descriptive statistics/Summary Statistics/Proportion,Performing analysis,SPSS,English,Statistical Literacy,b5a57,Descriptive statistics/Proportion,2026-01-12
+282,Descriptive-statistics/eur-descriptive-123-en,eur-descriptive-123-en,"*Knowledge about the professional field.*
+A knowledge test about the professional field of psychologists and pedagogues consists of 20 items and was administered to 202 students in the master's program in psychology and pedagogy. The total number of correctly answered questions is shown in the variable [total score]. In addition, the scores (0 = not correct, 1 = correct) on item 8 from the above knowledge test are shown in the variable [item8].
+Open the data file.
+Based on the scores, identify a group consisting of those with a score of 12 or lower on the variable [total score]. What is the proportion correct of this group on item 8 (3 decimal places)?
+* Download**: [SPSS file](eur-descriptive-123-nl-data.sav), [CSV file](eur-descriptive-123-nl-data.csv)
+",num,Descriptive statistics/Summary Statistics/Proportion,Performing analysis,SPSS,English,Statistical Literacy,e41d0,Descriptive statistics/Proportion,2026-01-12
+296,Descriptive-statistics/eur-descriptive-130-en,eur-descriptive-130-en,"Open the SPSS file.
+Of the women (Gender = 2), what is the percentage with a score of 2 (disagree) on statement 1 (statement 1)? Round your answer to 1 decimal place.
+**Download**: [SPSS file](eur-descriptive-130-en-data.sav), [CSV file](eur-descriptive-130-en-data.csv)
+",num,Descriptive statistics/Summary Statistics/Proportion,Performing analysis,SPSS,English,Statistical Literacy,eac30,Descriptive statistics/Proportion,2026-01-12
+300,Descriptive-statistics/eur-descriptive-132-en,eur-descriptive-132-en,"A researcher is interested in the consequences of the financial crisis for 16- and 17-year olds. She wants to predict their leisure expenses in November 2012 [expenses_nov] from a number of predictors. She collected data from 202 teenagers: 1) leisure expenses in November 2012 [expenses_nov]; 2) leisure expenses in July 2012 [expenses_jul]; 3) income from their side occupation in November 2012 [salary_nov]; 4) time spent on studying [studytime]; and 5) their educational level [education] (1 = vmbo, 2 = havo, 3 = vwo)*.
+translation for the Dutch education levels: (1 = Lower General Secondary Education, 2 = Higher General Secondary Education, 3 = Pre-university Education)
+Open the data file.
+Compute the correlations between the predictors: [expenses_jul], [salary_nov], [studytime] and the outcome variable expenses in november 2012 [expenses_nov]. Choose in this analysis a listwise exclusion of missing values. Which predictor has the highest correlation with the outcome variable? Report this correlation. (3 decimals)
+**Download**: [SPSS file](eur-descriptive-132-en-data.sav), [CSV file](eur-descriptive-132-en-data.csv)
+",num,Descriptive statistics/Summary Statistics/Bivariate statistics/Correlation,Performing analysis,SPSS,English,Statistical Literacy,52ad0,Descriptive statistics/Correlation,2026-01-12
+428,Descriptive-statistics/eur-descriptive-401-en,eur-descriptive-401-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed a questionnaire with 12 items using Likert scales ranging from 1 (completely disagree) to 5 (completely agree). An example of an item is: When I go out, I often consume more than 5 alcoholic beverages. The answers of 608 adolescent girls (1) and boys (2) to the 12 items are in the dataset. Note: higher scores on the questionnaire reflect more alcohol abuse.
+To which of the 12 items do the adolescents give the least varied responses? (no decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-descriptive-401-en-data.sav), [CSV file](eur-descriptive-401-en-data.csv)
+",num,Descriptive statistics/Summary Statistics/Measures of Spread/Standard Deviation,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,aaa64,Descriptive statistics/Standard Deviation,2026-01-12
+436,Descriptive-statistics/eur-descriptive-405-en,eur-descriptive-405-en,"A knowledge test on alcohol contains 20 items and is administered to 202 high school students. The variable [total score] gives the total correct scores. Gender (0 = woman; 1 = man) and alcohol use (0 = very often; 1 = often; 2 = sometimes; 3 = never) are also included in the dataset. 
+What is the total score corresponding to a percentile score of 75%? (no decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-descriptive-405-en-data.sav), [CSV file](eur-descriptive-405-en-data.csv)
+",num,Descriptive statistics/Score interpretation/Percentile,"Performing analysis, Interpreting output",SPSS,English,Statistical Literacy,ba907,Descriptive statistics/Percentile,2026-01-12
+446,Descriptive-statistics/eur-descriptive-410-en,eur-descriptive-410-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1. completely agree; 2. somewhat agree; 3. somewhat disagree; 4. completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. Also included in the dataset are IQ scores, scale scores and the amount of alcohol use (1 = very often; 2 = often; 3 = sometimes; 4 = never).
+To which of the 34 items do the adolescents give the most varied responses? (no decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-descriptive-410-en-data.sav), [CSV file](eur-descriptive-410-en-data.csv)
+",num,"Descriptive statistics/Summary Statistics/Measures of Spread/Variance, Descriptive statistics/Summary Statistics/Measures of Spread/Standard Deviation","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,7bdcf,Descriptive statistics/Variance,2026-01-12
+452,Descriptive-statistics/eur-descriptive-413-en,eur-descriptive-413-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1. completely agree; 2. somewhat agree; 3. somewhat disagree; 4. completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. Also included in the dataset are IQ scores, scale scores and the amount of alcohol use (1 = very often; 2 = often; 3 = sometimes; 4 = never).
+What is the scale score corresponding to a percentile score of 30%? (no decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-descriptive-413-en-data.sav), [CSV file](eur-descriptive-413-en-data.csv)
+",num,Descriptive statistics/Score interpretation/Percentile,"Interpreting output, Performing analysis, Calculation",SPSS,English,Statistical Literacy,37b82,Descriptive statistics/Percentile,2026-01-12
+480,Descriptive-statistics/uu-Descriptive-statistics-601-en,uu-Descriptive-statistics-601-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-601-en-data.sav), [CSV file](uu-Descriptive-statistics-601-en-data.csv)
+Use the data file to answer the questions.
+
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on grammar is known is....
+* The standard deviation of the score on spelling is....
+* The minimum score obtained on technical reading is....
+* The mode of vocabulary is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,c4be6,Descriptive statistics/Descriptive statistics,2026-01-12
+482,Descriptive-statistics/uu-Descriptive-statistics-602-en,uu-Descriptive-statistics-602-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-602-en-data.sav), [CSV file](uu-Descriptive-statistics-602-en-data.csv)
+Open the data file.
+
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on reading comprehension is known is....
+* The average score on vocabulary is....
+* The minimum score obtained on grammar is....
+* The mode of spelling is...",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,c43ef,Descriptive statistics/Descriptive statistics,2026-01-12
+484,Descriptive-statistics/uu-Descriptive-statistics-603-en,uu-Descriptive-statistics-603-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-603-en-data.sav), [CSV file](uu-Descriptive-statistics-603-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose gender is known is....
+* The average score on technical reading is...
+* The maximum score obtained on grammar is....
+* The mode of comprehension reading is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,c9e89,Descriptive statistics/Descriptive statistics,2026-01-12
+486,Descriptive-statistics/uu-Descriptive-statistics-604-en,uu-Descriptive-statistics-604-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-604-en-data.sav), [CSV file](uu-Descriptive-statistics-604-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on multiplication is known is....
+* The average score on addition is...
+* The minimum score obtained on after-measurement mental arithmetics is...
+* The mode of fractions is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,1bc45,Descriptive statistics/Descriptive statistics,2026-01-12
+488,Descriptive-statistics/uu-Descriptive-statistics-605-nl,uu-Descriptive-statistics-605-nl,"
+**Download**: [SPSS file](uu-Descriptive-statistics-605-nl-data.sav), [CSV file](uu-Descriptive-statistics-605-nl-data.csv)
+Open het databestand.
+Beantwoord de volgende vragen. 
+**Beantwoord iedere vraag met alle decimalen die in de output vermeld staan.**
+Answerlist
+----------
+* Het aantal respondenten waarvan de score op optellen bekend is, is…
+* De gemiddelde score op breuken is…
+* De maximaal behaalde score op vermenigvuldigen is…
+* De modus van voormeting hoofdrekenen is…
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",Dutch,Statistical Literacy,7a05e,Descriptive statistics/Descriptive statistics,2026-01-12
+489,Descriptive-statistics/uu-Descriptive-statistics-606-nl,uu-Descriptive-statistics-606-nl,"
+**Download**: [SPSS file](uu-Descriptive-statistics-606-nl-data.sav), [CSV file](uu-Descriptive-statistics-606-nl-data.csv)
+Open het databestand.
+Beantwoord de volgende vragen. 
+**Beantwoord iedere vraag met alle decimalen die in de output vermeld staan.**
+Answerlist
+----------
+* Het aantal respondenten waarvan de score op herkennen van kleuren bekend is, is…
+* De gemiddelde score op herkennen van woorden is…
+* De minimaal behaalde score op herkennen van dieren is…
+* De modus van herkennen van vormen is…
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",Dutch,Statistical Literacy,0e0e3,Descriptive statistics/Descriptive statistics,2026-01-12
+490,Descriptive-statistics/uu-Descriptive-statistics-607-nl,uu-Descriptive-statistics-607-nl,"
+**Download**: [SPSS file](uu-Descriptive-statistics-607-nl-data.sav), [CSV file](uu-Descriptive-statistics-607-nl-data.csv)
+Open het databestand.
+Beantwoord de volgende vragen. 
+**Beantwoord iedere vraag met alle decimalen die in de output vermeld staan.**
+Answerlist
+----------
+* Het aantal respondenten waarvan de score op herkennen van vormen bekend is, is…
+* De standaardafwijking van herkennen van dieren is…
+* De maximaal behaalde score op herkennen van kleuren is…
+* De modus van herkennen van woorden is…
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",Dutch,Statistical Literacy,7db3b,Descriptive statistics/Descriptive statistics,2026-01-12
+491,Descriptive-statistics/uu-Descriptive-statistics-608-en,uu-Descriptive-statistics-608-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-608-en-data.sav), [CSV file](uu-Descriptive-statistics-608-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on recognizing letters is known is....
+* The standard deviation of recognizing shapes is....
+* The minimum score obtained on recognizing animals is...
+* The mode of recognizing animals is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,f0ae7,Descriptive statistics/Descriptive statistics,2026-01-12
+493,Descriptive-statistics/uu-Descriptive-statistics-609-en,uu-Descriptive-statistics-609-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-609-en-data.sav), [CSV file](uu-Descriptive-statistics-609-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on support from partner is known is....
+* The average score on number of years of employment is....
+* The minimum score obtained on number of years of education is....
+* The mode of support from child is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,e0717,Descriptive statistics/Descriptive statistics,2026-01-12
+495,Descriptive-statistics/uu-Descriptive-statistics-610-en,uu-Descriptive-statistics-610-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-610-en-data.sav), [CSV file](uu-Descriptive-statistics-610-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on recognizing letters is known is....
+* The standard deviation of recognizing shapes is....
+* The minimum score obtained on recognizing animals is...
+* The mode of recognizing animals is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,e5058,Descriptive statistics/Descriptive statistics,2026-01-12
+497,Descriptive-statistics/uu-Descriptive-statistics-611-en,uu-Descriptive-statistics-611-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-611-en-data.sav), [CSV file](uu-Descriptive-statistics-611-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on support from partner is known is....
+* The average score on number of years of employment is....
+* The minimum score obtained on number of years of education is....
+* The mode of number of years of employment is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,0496c,Descriptive statistics/Descriptive statistics,2026-01-12
+499,Descriptive-statistics/uu-Descriptive-statistics-612-en,uu-Descriptive-statistics-612-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-612-en-data.sav), [CSV file](uu-Descriptive-statistics-612-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose vocabulary score is known is....
+* The standard deviation of reading comprehension is....
+* The minimum score obtained on spelling is....
+* The mode of grammar is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,b57e9,Descriptive statistics/Descriptive statistics,2026-01-12
+501,Descriptive-statistics/uu-Descriptive-statistics-613-en,uu-Descriptive-statistics-613-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-613-en-data.sav), [CSV file](uu-Descriptive-statistics-613-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on support from child is known is....
+* The average score on support from partner is....
+* The maximum score obtained on support from boss is....
+* The mode of number of years of employment is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,36b4b,Descriptive statistics/Descriptive statistics,2026-01-12
+503,Descriptive-statistics/uu-Descriptive-statistics-614-en,uu-Descriptive-statistics-614-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-614-en-data.sav), [CSV file](uu-Descriptive-statistics-614-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on reading comprehension is known is....
+* The average score on vocabulary is....
+* The minimum score obtained on grammar is....
+* The mode of spelling is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,c6cb8,Descriptive statistics/Descriptive statistics,2026-01-12
+505,Descriptive-statistics/uu-Descriptive-statistics-615-en,uu-Descriptive-statistics-615-en,"
+**Download**: [SPSS file](uu-Descriptive-statistics-615-en-data.sav), [CSV file](uu-Descriptive-statistics-615-en-data.csv)
+Open the data set.
+Answer the following questions.
+**Answer all questions with all decimals given in the output.**
+Answerlist
+----------
+* The minimum score achieved for grammar is equal to…
+* The median for spelling is…
+* The number of respondents who answered “not agree” to question V1 is equal to…
+
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,a427a,Descriptive statistics/Descriptive statistics,2026-01-12
+507,Descriptive-statistics/uu-Descriptive-statistics-616-en,uu-Descriptive-statistics-616-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-616-en-data.sav), [CSV file](uu-Descriptive-statistics-616-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on well-being at measurement time 3 is known is....
+* The average score on stress tolerance is....
+* The maximum score obtained on job satisfaction is...
+* The number of respondents in experimental group A is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,112c4,Descriptive statistics/Descriptive statistics,2026-01-12
+509,Descriptive-statistics/uu-Descriptive-statistics-617-nl,uu-Descriptive-statistics-617-nl,"
+**Download**: [SPSS file](uu-Descriptive-statistics-617-nl-data.sav), [CSV file](uu-Descriptive-statistics-617-nl-data.csv)
+Open het databestand.
+Beantwoord de volgende vragen.
+**Beantwoord iedere vraag met alle decimalen die in de output vermeld staan.**
+Answerlist
+----------
+* Het aantal respondenten waarvan de score op aandacht op meetmoment 3 bekend is, is… 
+* De gemiddelde score op updating is…
+* De minimaal behaalde score op aandacht op meetmoment 1 is…
+* De range van shifting is…
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",Dutch,Statistical Literacy,fdf61,Descriptive statistics/Descriptive statistics,2026-01-12
+510,Descriptive-statistics/uu-Descriptive-statistics-618-en,uu-Descriptive-statistics-618-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-618-en-data.sav), [CSV file](uu-Descriptive-statistics-618-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on language proficiency at measurement time 3 is known is....
+* The average score on spelling is...
+* The maximum score obtained on grammar is....
+* The number of respondents in experimental group B is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,20e18,Descriptive statistics/Descriptive statistics,2026-01-12
+512,Descriptive-statistics/uu-Descriptive-statistics-619-en,uu-Descriptive-statistics-619-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-619-en-data.sav), [CSV file](uu-Descriptive-statistics-619-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on well-being at measurement time 2 is known is....
+* The average score on job satisfaction is...
+* The minimum score obtained on stress tolerance is....
+* Most respondents are in experimental group...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,9f450,Descriptive statistics/Descriptive statistics,2026-01-12
+514,Descriptive-statistics/uu-Descriptive-statistics-620-en,uu-Descriptive-statistics-620-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-620-en-data.sav), [CSV file](uu-Descriptive-statistics-620-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on attention at measurement time 1 is known is....
+* The average score on shifting is...
+* The minimum score obtained on attention at measurement time 3 is...
+* The number of respondents in experimental group 2 is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,9bd06,Descriptive statistics/Descriptive statistics,2026-01-12
+516,Descriptive-statistics/uu-Descriptive-statistics-621-en,uu-Descriptive-statistics-621-en,"
+* Download**: [SPSS file](uu-Descriptive-statistics-621-en-data.sav), [CSV file](uu-Descriptive-statistics-621-en-data.csv)
+Open the data file.
+Answer the following questions.
+* Answer each question with all decimals listed in the output.**
+Answerlist
+----------
+* The number of respondents whose score on language proficiency at measurement time 1 is known is....
+* The average score on grammar is...
+* The maximum score obtained on spelling is....
+* The number of respondents in experimental group A is...
+",cloze,Descriptive statistics,Performing analysis,"SPSS, JASP",English,Statistical Literacy,09a97,Descriptive statistics/Descriptive statistics,2026-01-12
+2124,Factor-analysis/eur-factor-108-en,eur-factor-108-en,"* Ork for psychologists and educators.*
+A scientist is investigating factors that may explain why career opportunities for psychologists and educators are sometimes low. From theoretical insights about career opportunities, the researcher has the idea that several dimensions can be distinguished that have something to do with career opportunities. She has devised 34 statements on which respondents can indicate whether they agree with a statement on a 4-point scale (1. completely agree; 2. somewhat agree; 3. not so much agree; 4. not at all agree). An example of a statement is, ""I completed a relevant internship during my education."" The questionnaire was administered to 312 graduates. Participants' responses to the 34 statements are shown in the data file.
+Open the data file.
+Perform an unrotated exploratory factor analysis with principal axis factoring in which you include all the statements from the questionnaire. What percentage of the total variance does the third factor explain (1 decimal place)?
+* Download**: [SPSS file](eur-factor-108-nl-data.sav), [CSV file](eur-factor-108-nl-data.csv)
+",num,"Factor analysis/Exploratory factor analysis, Factor analysis/Explained variance",Performing analysis,SPSS,English,Statistical Literacy,66fce,Factor analysis/Exploratory factor analysis,2026-01-12
+2126,Factor-analysis/eur-factor-109-en,eur-factor-109-en,"* Ork for psychologists and educators.*
+A scientist is investigating factors that may explain why career opportunities for psychologists and educators are sometimes low. From theoretical insights about career opportunities, the researcher has the idea that several dimensions can be distinguished that have something to do with career opportunities. She has devised 34 statements on which respondents can indicate whether they agree with a statement on a 4-point scale (1. completely agree; 2. somewhat agree; 3. not so much agree; 4. not at all agree). An example of a statement is, ""I completed a relevant internship during my education."" The questionnaire was administered to 312 graduates. Participants' responses to the 34 statements are shown in the data file.
+Open the data file.
+Conduct an unrotated exploratory factor analysis with principal axis factoring in which you include all statements from the questionnaire and extract 3 factors. What percent of the total variance do the first three factors together explain when 3 factors are extracted?  (1 decimal place)
+* Download**: [SPSS file](eur-factor-109-nl-data.sav), [CSV file](eur-factor-109-nl-data.csv)
+",num,Factor analysis/Explained variance,Performing analysis,SPSS,English,Statistical Literacy,3f72d,Factor analysis/Explained variance,2026-01-12
+2128,Factor-analysis/eur-factor-110-en,eur-factor-110-en,"* Ork for psychologists and educators.*
+A scientist is investigating factors that may explain why career opportunities for psychologists and educators are sometimes low. From theoretical insights about career opportunities, the researcher has the idea that several dimensions can be distinguished that have something to do with career opportunities. She has devised 34 statements on which respondents can indicate whether they agree with a statement on a 4-point scale (1. completely agree; 2. somewhat agree; 3. not so much agree; 4. not at all agree). An example of a statement is, ""I completed a relevant internship during my education."" The questionnaire was administered to 312 graduates. Participants' responses to the 34 statements are shown in the data file.
+Open the data file.
+Perform a factor analysis with principal axis factoring, extracting 2 factors and performing a varimax rotation. For this analysis, how high is the correlation between item 7 and factor 1? (3 decimal places)
+* Download**: [SPSS file](eur-factor-110-nl-data.sav), [CSV file](eur-factor-110-nl-data.csv)
+",num,Factor analysis/Structure matrix,Performing analysis,SPSS,English,Statistical Literacy,c4c05,Factor analysis/Structure matrix,2026-01-12
+2130,Factor-analysis/eur-factor-111-en,eur-factor-111-en,"* Ork for psychologists and educators.*
+A scientist is investigating factors that may explain why career opportunities for psychologists and educators are sometimes low. From theoretical insights about career opportunities, the researcher has the idea that several dimensions can be distinguished that have something to do with career opportunities. She has devised 34 statements on which respondents can indicate whether they agree with a statement on a 4-point scale (1. completely agree; 2. somewhat agree; 3. not so much agree; 4. not at all agree). An example of a statement is, ""I completed a relevant internship during my education."" The questionnaire was administered to 312 graduates. Participants' responses to the 34 statements are shown in the data file.
+Open the data file.
+Perform a factor analysis with principal axis factoring, extracting 4 factors and performing a varimax rotation. By which factor is item 1 best explained? (note factor number)
+
+* Download**: [SPSS file](eur-factor-111-nl-data.sav), [CSV file](eur-factor-111-nl-data.csv)
+",num,Factor analysis/Pattern matrix,Performing analysis,SPSS,English,Statistical Literacy,b6e5f,Factor analysis/Pattern matrix,2026-01-12
+2132,Factor-analysis/eur-factor-112-en,eur-factor-112-en,"* Ork for psychologists and educators.*
+A scientist is investigating factors that may explain why career opportunities for psychologists and educators are sometimes low. From theoretical insights about career opportunities, the researcher has the idea that several dimensions can be distinguished that have something to do with career opportunities. She has devised 34 statements on which respondents can indicate whether they agree with a statement on a 4-point scale (1. completely agree; 2. somewhat agree; 3. not so much agree; 4. not at all agree). An example of a statement is, ""I completed a relevant internship during my education."" The questionnaire was administered to 312 graduates. Participants' responses to the 34 statements are shown in the data file.
+Open the data file.
+Perform a factor analysis with principal axis factoring, extracting 2 factors and performing a promax rotation. How high is the correlation between factor 1 and 2? (3 decimal places)
+* Download**: [SPSS file](eur-factor-112-nl-data.sav), [CSV file](eur-factor-112-nl-data.csv)
+",num,Factor analysis/Factor correlation matrix,Performing analysis,SPSS,English,Statistical Literacy,0aabb,Factor analysis/Factor correlation matrix,2026-01-12
+2134,Factor-analysis/eur-factor-401-en,eur-factor-401-en,"A researcher investigates the factors that may explain alcohol abuse among the elderly. Based on his theory, the researcher suspects that different dimensions can be distinguished concerning alcohol abuse. She designed 34 statements the elderly can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The questionnaire was administered to 312 elderly (>70 years). The responses of the participants to the 34 statements are given in the dataset.
+Conduct an unrotated explorative factor analysis with principal axis factoring on all the items of the questionnaire. What is the percentage of the variance that is explained by the third factor? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-401-en-data.sav), [CSV file](eur-factor-401-en-data.csv)
+",num,"Factor analysis/Explained variance, Factor analysis/Eigenvalues, Factor analysis/Exploratory factor analysis","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,bb169,Factor analysis/Explained variance,2026-01-12
+2136,Factor-analysis/eur-factor-402-en,eur-factor-402-en,"A researcher investigates the factors that may explain alcohol abuse among the elderly. Based on the theory, the researcher suspects that different dimensions can be distinguished concerning alcohol abuse. She designed 34 statements the elderly can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The questionnaire was administered to 312 elderly (>70 years). The responses of the participants to the 34 statements are given in the dataset.
+When 3 factors are extracted, what is the percentage of the variance of the extracted sums of squared loadings that is explained by the 3 factors combined? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-402-en-data.sav), [CSV file](eur-factor-402-en-data.csv)
+",num,"Factor analysis/Explained variance, Factor analysis/Exploratory factor analysis","Performing analysis, Interpreting output",SPSS,English,Statistical Literacy,54de3,Factor analysis/Explained variance,2026-01-12
+2138,Factor-analysis/eur-factor-403-en,eur-factor-403-en,"A researcher investigates the factors that may explain alcohol abuse among the elderly. Based on the theory, the researcher suspects that different dimensions can be distinguished concerning alcohol abuse. She designed 34 statements the elderly can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The questionnaire was administered to 312 elderly (>70 years). The responses of the participants to the 34 statements are given in the dataset.
+After conducting a factor analysis with principal axis factoring with 2 factors and a varimax rotation, what is the correlation between factor 1 and item 7? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-403-en-data.sav), [CSV file](eur-factor-403-en-data.csv)
+",num,Factor analysis/Structure matrix,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,ff437,Factor analysis/Structure matrix,2026-01-12
+2140,Factor-analysis/eur-factor-404-en,eur-factor-404-en,"A researcher investigates the factors that may explain alcohol abuse among the elderly. Based on the theory, the researcher suspects that different dimensions can be distinguished concerning alcohol abuse. She designed 34 statements the elderly can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The questionnaire was administered to 312 elderly (>70 years). The responses of the participants to the 34 statements are given in the dataset.
+After conducting a factor analysis with principal axis factoring with 3 factors and a promax rotation, what is the loading (in the pattern matrix) of item 9 on factor 2? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-404-en-data.sav), [CSV file](eur-factor-404-en-data.csv)
+",num,"Factor analysis/Pattern matrix, Factor analysis/Factor loadings, Factor analysis/Exploratory factor analysis","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,90995,Factor analysis/Pattern matrix,2026-01-12
+2142,Factor-analysis/eur-factor-405-en,eur-factor-405-en,"A researcher investigates the factors that may explain alcohol abuse among the elderly. Based on the theory, the researcher suspects that different dimensions can be distinguished concerning alcohol abuse. She designed 34 statements the elderly can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The questionnaire was administered to 312 elderly (>70 years). The responses of the participants to the 34 statements are given in the dataset.
+After conducting a factor analysis with principal axis factoring with 2 factors and a promax rotation, what is the correlation between factor 1 and factor 2? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-405-en-data.sav), [CSV file](eur-factor-405-en-data.csv)
+",num,"Factor analysis/Factor correlation matrix, Factor analysis/Exploratory factor analysis","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,1c0ba,Factor analysis/Factor correlation matrix,2026-01-12
+2144,Factor-analysis/eur-factor-406-en,eur-factor-406-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. 
+Conduct an unrotated explorative factor analysis with principal axis factoring on all the items of the questionnaire. What is the percentage of the variance that is explained by the second factor? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-406-en-data.sav), [CSV file](eur-factor-406-en-data.csv)
+",num,"Factor analysis/Explained variance, Factor analysis/Exploratory factor analysis, Factor analysis/Eigenvalues","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,71bca,Factor analysis/Explained variance,2026-01-12
+2146,Factor-analysis/eur-factor-407-en,eur-factor-407-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. 
+When 4 factors are extracted by principal axis factoring, what is the percentage of the variance (extracted sums of squared loadings) that is explained by the 4 factors combined? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-407-en-data.sav), [CSV file](eur-factor-407-en-data.csv)
+",num,"Factor analysis/Explained variance, Factor analysis/Exploratory factor analysis","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,f2c81,Factor analysis/Explained variance,2026-01-12
+2148,Factor-analysis/eur-factor-408-en,eur-factor-408-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. 
+Conduct a factor analysis with principal axis factoring with 2 factors and an orthogonal varimax rotation, what is the correlation between factor 2 and item 3 on the rotated factor matrix? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-408-en-data.sav), [CSV file](eur-factor-408-en-data.csv)
+",num,"Factor analysis/Exploratory factor analysis, Factor analysis/Rotations, Factor analysis/Factor loadings","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,23443,Factor analysis/Exploratory factor analysis,2026-01-12
+2150,Factor-analysis/eur-factor-409-en,eur-factor-409-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. 
+Conduct a factor analysis with principal axis factoring with 3 factors and a non-orthogonal promax rotation. What is the value of the coefficient that shows the unique contribution of factor 2 on item 9? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-409-en-data.sav), [CSV file](eur-factor-409-en-data.csv)
+",num,"Factor analysis/Pattern matrix, Factor analysis/Exploratory factor analysis, Factor analysis/Rotations","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,d2f2b,Factor analysis/Pattern matrix,2026-01-12
+2152,Factor-analysis/eur-factor-410-en,eur-factor-410-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. 
+Conduct a factor analysis with principal axis factoring with 2 factors and a non-orthogonal promax rotation. What is the correlation between factor 1 and factor 2? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-factor-410-en-data.sav), [CSV file](eur-factor-410-en-data.csv)
+",num,"Factor analysis/Factor correlation matrix, Factor analysis/Exploratory factor analysis, Factor analysis/Rotations","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,70c81,Factor analysis/Factor correlation matrix,2026-01-12
+2257,Inferential_Statistics/eur-inferential_statistics-120-en,eur-inferential_statistics-120-en,"* Nowledge about the professional field.*
+A knowledge test about the professional field of psychologists and pedagogues consists of 20 items and was administered to 202 students in the master's program in psychology and pedagogy. The total number of correctly answered questions is shown in the variable [total score]. The variable [education] indicates whether a person is studying pedagogy (0) or psychology (1).
+Open the data file.
+A researcher wants to see if he can predict total score with IQ score and wonders if the relationship is different for psychologists and pedagogues [education]. Perform a regression analysis to investigate this question. What is the unstandardized regression weight of the interaction effect education x IQscore? (3 decimal places)
+
+* Download**: [SPSS file](eur-inferential_statistics-120-en-data.sav), [CSV file](eur-inferential_statistics-120-en-data.csv)
+",num,Inferential Statistics/Regression/Multiple linear regression,Performing analysis,SPSS,English,Statistical Literacy,40d3c,Inferential Statistics/Multiple linear regression,2026-01-12
+2259,Inferential_Statistics/eur-inferential_statistics-121-en,eur-inferential_statistics-121-en,"* Nowledge about the professional field.*
+A knowledge test about the professional field of psychologists and pedagogues consists of 20 items and was administered to 202 students in the master's degree program in psychology and pedagogy. The total number of correctly answered questions is shown in the variable [total score]. The variable [education] indicates whether a person is studying pedagogy (0) or psychology (1). The variable [master direction] indicates which subject direction someone is studying, namely clinical child and adolescent (0), remedial pedagogy (1), brain and cognition (2) or work and organizational psychology (3).
+Open the data file.
+A researcher thinks there are differences in total scores between students who took clinical child and adolescent; orthopedagogy; brain and cognition and labor and organizational psychology. (variable [master's direction]). Conduct an analysis to examine whether students from different master's disciplines differ in mean total score [total score]. What is the effect size (partial eta squared) of this effect (3 decimal places)?
+* Download**: [SPSS file](eur-inferential_statistics-121-en-data.sav), [CSV file](eur-inferential_statistics-121-en-data.csv)
+",num,Inferential Statistics/Effect size/Eta squared,Performing analysis,SPSS,English,Statistical Literacy,b97ef,Inferential Statistics/Eta squared,2026-01-12
+2261,Inferential_Statistics/eur-inferential_statistics-122-en,eur-inferential_statistics-122-en,"A researcher is interested in the consequences of the 2008 financial crisis for 16- and 17-year olds. She wants to predict their leisure expenses in November 2012 [expenses_nov] from a number of predictors. She collected data from 202 teenagers: 1) leisure expenses in November 2012 [expenses_nov]; 2) leisure expenses in July 2012 [expenses_jul]; 3) income from their side occupation in November 2012 [salary_nov]; 4) time spent on studying [studytime]; and 5) their educational level [education] (1 = vmbo, 2 = havo, 3 = vwo)*.
+**translation for the Dutch education levels: (1 = Lower General Secondary Education, 2 = Higher General Secondary Education, 3 = Pre-university Education)*
+
+Open the data file.
+Predict leisure expenses in November 2012 [expenses_nov] from leisure expenses in July 2012 [expenses_jul], income from their side occupation in November 2012 [salary_nov], and time spent on studying [studytime]. What is proportion explained variance of this model (in the sample)? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-122-en-data.sav), [CSV file](eur-inferential_statistics-122-en-data.csv)
+",num,Inferential Statistics/Regression/R squared,Performing analysis,SPSS,English,Statistical Literacy,95c73,Inferential Statistics/R squared,2026-01-12
+2263,Inferential_Statistics/eur-inferential_statistics-123-en,eur-inferential_statistics-123-en,"A researcher is interested in the consequences of the financial crisis for 16- and 17-year olds. She wants to predict their leisure expenses in November 2012 [expenses_nov] from a number of predictors. She collected data from 202 teenagers: 1) leisure expenses in November 2012 [expenses_nov]; 2) leisure expenses in July 2012 [expenses_jul]; 3) income from their side occupation in November 2012 [salary_nov]; 4) time spent on studying [studytime]; and 5) their educational level [education] (1 = vmbo, 2 = havo, 3 = vwo)*.
+**translation for the Dutch education levels: (1 = Lower General Secondary Education, 2 = Higher General Secondary Education, 3 = Pre-university Education)*
+Open the data file. Check for outlier assumptions on November's expenses.
+What is for this model the standardized residual for the person that spent 264.2 Euro on leisure in November 2012 [expenses_nov]? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-123-en-data.sav), [CSV file](eur-inferential_statistics-123-en-data.csv)
+",num,Inferential Statistics/Regression/Residuals,Performing analysis,SPSS,English,Statistical Literacy,6b57b,Inferential Statistics/Residuals,2026-01-12
+2265,Inferential_Statistics/eur-inferential_statistics-124-en,eur-inferential_statistics-124-en,"A researcher is interested in the consequences of the financial crisis for 16- and 17-year olds. She wants to predict their leisure expenses in November 2012 [expenses_nov] from a number of predictors. She collected data from 202 teenagers: 1) leisure expenses in November 2012 [expenses_nov]; 2) leisure expenses in July 2012 [expenses_jul]; 3) income from their side occupation in November 2012 [salary_nov]; 4) time spent on studying [studytime]; and 5) their educational level [education] (1 = vmbo, 2 = havo, 3 = vwo)*.
+**translation for the Dutch education levels: (1 = Lower General Secondary Education, 2 = Higher General Secondary Education, 3 = Pre-university Education)*
+Open the data file.
+What is in this model the standardized regression coefficient for leisure expenses in July 2012 [expenses_jul]? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-124-en-data.sav), [CSV file](eur-inferential_statistics-124-en-data.csv)
+",num,"Inferential Statistics/Regression/Standardized coefficient, Inferential Statistics/Regression/Simple linear regression",Performing analysis,SPSS,English,Statistical Literacy,fba54,Inferential Statistics/Standardized coefficient,2026-01-12
+2267,Inferential_Statistics/eur-inferential_statistics-125-en,eur-inferential_statistics-125-en,"A researcher is interested in the consequences of the financial crisis for 16- and 17-year olds. She wants to predict their leisure expenses in November 2012 [expenses_nov] from a number of predictors. She collected data from 202 teenagers: 1) leisure expenses in November 2012 [expenses_nov]; 2) leisure expenses in July 2012 [expenses_jul]; 3) income from their side occupation in November 2012 [salary_nov]; 4) time spent on studying [studytime]; and 5) their educational level [education] (1 = vmbo, 2 = havo, 3 = vwo)*.
+**translation for the Dutch education levels: (1 = Lower General Secondary Education, 2 = Higher General Secondary Education, 3 = Pre-university Education)*
+Open the data file.
+What is in this model the predicted leisure expense in November 2012 for the teenager with respondent number [pp] 63? (no decimals)
+**Download**: [SPSS file](eur-inferential_statistics-125-en-data.sav), [CSV file](eur-inferential_statistics-125-en-data.csv)
+",num,"Inferential Statistics/Regression/Prediction, Inferential Statistics/Regression/Simple linear regression, Inferential Statistics/Regression/Equation",Performing analysis,SPSS,English,Statistical Literacy,6faa7,Inferential Statistics/Prediction,2026-01-12
+2269,Inferential_Statistics/eur-inferential_statistics-126-en,eur-inferential_statistics-126-en,"A researcher is interested in the consequences of the financial crisis for 16- and 17-year olds. She wants to predict their leisure expenses in November 2012 [expenses_nov] from a number of predictors. She collected data from 202 teenagers: 1) leisure expenses in November 2012 [expenses_nov]; 2) leisure expenses in July 2012 [expenses_jul]; 3) income from their side occupation in November 2012 [salary_nov]; 4) time spent on studying [studytime]; and 5) their educational level [education] (1 = vmbo, 2 = havo, 3 = vwo)*.
+**translation for the Dutch education levels: (1 = Lower General Secondary Education, 2 = Higher General Secondary Education, 3 = Pre-university Education)*
+Open the data file.
+How much did the proportion of explained variance in leisure expenses in November 2012 [expenses_nov] increase after the variable educational level [education] was added as a predictor to the model? 
+**Download**: [SPSS file](eur-inferential_statistics-126-en-data.sav), [CSV file](eur-inferential_statistics-126-en-data.csv)
+",num,"Inferential Statistics/Regression/R squared, Inferential Statistics/Regression/Prediction",Performing analysis,SPSS,English,Statistical Literacy,9d6b2,Inferential Statistics/R squared,2026-01-12
+2271,Inferential_Statistics/eur-inferential_statistics-127-en,eur-inferential_statistics-127-en,"Research has shown that when people learn words from a foreign language they better remember those words if they first study the words and then test themselves trying to recollect the words, compared to just studying the words twice. A researcher from the institute of psychology wants to know whether this so-called testing effect can be proven to exist in the classroom. She divides a group of 60 students into three groups [condition]. The students in group 1 study a list of 30 French words and their Dutch translation twice (1 = restudy). The students in group 2 study the list of 30 French words and their Dutch translation once and then test themselves (2 = testing). The students in group 3 just study the list of 30 French words and their Dutch translation once without testing themselves (3 = study_once). A week after the study phase, the students took a test where they had to give the Dutch translation of the 30 French words that they studied earlier. The total number of correct translations is represented by the variable score [score]. Additionally, the researcher included for each student his/her French grade [French].
+Open the data file.
+What is the average amount of error variance (Mean Square Error) in this model? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-127-en-data.sav), [CSV file](eur-inferential_statistics-127-en-data.csv)
+",num,"Inferential Statistics/Regression/Regression F-test, Inferential Statistics/Regression/Sum of squares",Performing analysis,SPSS,English,Statistical Literacy,59b5b,Inferential Statistics/Regression F-test,2026-01-12
+2273,Inferential_Statistics/eur-inferential_statistics-128-en,eur-inferential_statistics-128-en,"Research has shown that when people learn words from a foreign language they better remember those words if they first study the words and then test themselves trying to recollect the words, compared to just studying the words twice. A researcher from the institute of psychology wants to know whether this so-called testing effect can be proven to exist in the classroom. She divides a group of 60 students into three groups [condition]. The students in group 1 study a list of 30 French words and their Dutch translation twice (1 = restudy). The students in group 2 study the list of 30 French words and their Dutch translation once and then test themselves (2 = testing). The students in group 3 just study the list of 30 French words and their Dutch translation once without testing themselves (3 = study_once). A week after the study phase, the students took a test where they had to give the Dutch translation of the 30 French words that they studied earlier. The total number of correct translations is represented by the variable score [score]. Additionally, the researcher included for each student his/her French grade [French].
+Open the data file.
+Conduct Post-Hoc tests to determine whether the performance [score] of students in the testing condition (testing) differs from students in the re-studying condition (restudy). What is the standard error of this difference? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-128-en-data.sav), [CSV file](eur-inferential_statistics-128-en-data.csv)
+",num,"Inferential Statistics/Regression/Standard error of the estimate, Inferential Statistics/Parametric Techniques/ANOVA/Oneway ANOVA",Performing analysis,SPSS,English,Statistical Literacy,ecf0b,Inferential Statistics/Standard error of the estimate,2026-01-12
+2275,Inferential_Statistics/eur-inferential_statistics-129-en,eur-inferential_statistics-129-en,"Research has shown that when people learn words from a foreign language they better remember those words if they first study the words and then test themselves trying to recollect the words, compared to just studying the words twice. A researcher from the institute of psychology wants to know whether this so-called testing effect can be proven to exist in the classroom. She divides a group of 60 students into three groups [condition]. The students in group 1 study a list of 30 French words and their Dutch translation twice (1 = restudy). The students in group 2 study the list of 30 French words and their Dutch translation once and then test themselves (2 = testing). The students in group 3 just study the list of 30 French words and their Dutch translation once without testing themselves (3 = study_once). A week after the study phase, the students took a test where they had to give the Dutch translation of the 30 French words that they studied earlier. The total number of correct translations is represented by the variable score [score]. Additionally, the researcher included for each student his/her French grade [French].
+Open the data file.
+The researcher wants to know whether there is an effect of [condition] on performance [score] while controlling for French grades [French]. Before she can conduct the appropriate analysis, she wants to test whether the three groups differ with respect to their average French grade [French]. What is the F-value for this latter test? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-129-en-data.sav), [CSV file](eur-inferential_statistics-129-en-data.csv)
+",num,Inferential Statistics/Regression/Regression F-test,Performing analysis,SPSS,English,Statistical Literacy,d80cf,Inferential Statistics/Regression F-test,2026-01-12
+2277,Inferential_Statistics/eur-inferential_statistics-130-en,eur-inferential_statistics-130-en,"Research has shown that when people learn words from a foreign language they better remember those words if they first study the words and then test themselves trying to recollect the words, compared to just studying the words twice. A researcher from the institute of psychology wants to know whether this so-called testing effect can be proven to exist in the classroom. She divides a group of 60 students into three groups [condition]. The students in group 1 study a list of 30 French words and their Dutch translation twice (1 = restudy). The students in group 2 study the list of 30 French words and their Dutch translation once and then test themselves (2 = testing). The students in group 3 just study the list of 30 French words and their Dutch translation once without testing themselves (3 = study_once). A week after the study phase, the students took a test where they had to give the Dutch translation of the 30 French words that they studied earlier. The total number of correct translations is represented by the variable score [score]. Additionally, the researcher included for each student his/her French grade [French].
+Open the data file.
+What is in the model with outcome variable [score], independent variable [condition], and covariate [French], the unstandardized regression coefficient of French grade [French]? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-130-en-data.sav), [CSV file](eur-inferential_statistics-130-en-data.csv)
+",num,Inferential Statistics/Regression/Regression F-test,Performing analysis,SPSS,English,Statistical Literacy,0ef24,Inferential Statistics/Regression F-test,2026-01-12
+2279,Inferential_Statistics/eur-inferential_statistics-131-en,eur-inferential_statistics-131-en,"Currently, in the Netherlands, there is debate about the usefulness of long-term detention with psychiatric treatment. A psychiatrist of a Dutch long-term detention centre collected data about aggression of detainees. The detainees were observed during group treatment sessions and the level of aggressive behavior was rated at four points in time: (1) 2 days after their admission to the centre [T1_aggression] ; (2) half a year after admission [T2_aggression]; (3) a year after admission [T3_aggression]; and (4) a year and a half after admission [T4_aggression]. The level of aggressive behavior was rated by means of a semi-structured interview, resulting in scores ranging from 0 (not aggressive) to 40 (extremely aggressive). Furthermore, the psychiatrist registered whether detainees suffered from psychosis or not [psychosis].
+Open the data file.
+Conduct an analysis for all subjects to determine whether the level of aggressive behavior differs between the four measurements [T1_aggression, T2_aggression, T3_aggression, T4_aggression]. What is the F-value for this effect according to univariate approach? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-131-en-data.sav), [CSV file](eur-inferential_statistics-131-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/ANOVA/Oneway repeated measures ANOVA,Performing analysis,SPSS,English,Statistical Literacy,5546f,Inferential Statistics/Oneway repeated measures ANOVA,2026-01-12
+2281,Inferential_Statistics/eur-inferential_statistics-132-en,eur-inferential_statistics-132-en,"Currently, in the Netherlands, there is debate about the usefulness of long-term detention with psychiatric treatment. A psychiatrist of a Dutch long-term detention centre collected data about aggression of detainees. The detainees were observed during group treatment sessions and the level of aggressive behavior was rated at four points in time: (1) 2 days after their admission to the centre [T1_aggression] ; (2) half a year after admission [T2_aggression]; (3) a year after admission [T3_aggression]; and (4) a year and a half after admission [T4_aggression]. The level of aggressive behavior was rated by means of a semi-structured interview, resulting in scores ranging from 0 (not aggressive) to 40 (extremely aggressive). Furthermore, the psychiatrist registered whether detainees suffered from psychosis or not [psychosis].
+Open the data file.
+The researcher thinks that being psychotic [psychose] may influence the level of aggression over time. Conduct the appropriate analysis to test this hypothesis. What is the F-value for this effect according to univariate approach? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-132-en-data.sav), [CSV file](eur-inferential_statistics-132-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/ANOVA/Mixed design ANOVA,Performing analysis,SPSS,English,Statistical Literacy,efaab,Inferential Statistics/Mixed design ANOVA,2026-01-12
+2283,Inferential_Statistics/eur-inferential_statistics-133-en,eur-inferential_statistics-133-en,"A researcher is interested in the influence of the drop in price for gasoline (bezine) on students who own a car. He wants to predict how many kilometers they will drive in in Januari 2015 [KM_JAN] by using a few predictors. For 202 students, the researcher has gathered the following data: 1) actual driven kilometers in Jan 2015 [KM_JAN], 2) actual driven kilometers in October 2014 [KM_OCT], 3) income for January 2015 [INCOME_JAN], 4) total kilometers traveled using public transport for February 2015 [PUB_TRANS], and 5) type of car [car] (1 = hybrid, 2 = sedan, 3 = suv).
+Open the data file. 
+Compute the correlations between the predictors: [KM_OCT],  [INCOME_JAN], [PUB_TRANS], and the outcome variable [KM_JAN]. Choose in this analysis a listwise exclusion of missing values. Which predictor has the highest correlation with the outcome variable? Report this correlation. (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-133-en-data.sav), [CSV file](eur-inferential_statistics-133-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Correlations/Pearson,Performing analysis,SPSS,English,Statistical Literacy,ec37e,Inferential Statistics/Pearson,2026-01-12
+2285,Inferential_Statistics/eur-inferential_statistics-134-en,eur-inferential_statistics-134-en,"A researcher is interested in the influence of the drop in price for gasoline (bezine) on students who own a car. He wants to predict how many kilometers they will drive in in Januari 2015 [KM_JAN] by using a few predictors. For 202 students, the researcher has gathered the following data: 1) actual driven kilometers in Jan 2015 [KM_JAN], 2) actual driven kilometers in October 2014 [KM_OCT], 3) income for January 2015 [INCOME_JAN], 4) total kilometers traveled using public transport for February 2015 [PUB_TRANS], and 5) type of car [car] (1 = hybrid, 2 = sedan, 3 = suv).
+Open the data file.
+Predict the driven kilometers in January 2015 [KM_JAN] from the driven kilometers in October 2014 [KM_OCT], income for January 2015 [INCOME_JAN] and total kilometers traveled using public transport for February 2015 [PUB_TRANS]. What is the explained variance for this model (in the sample)? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-134-en-data.sav), [CSV file](eur-inferential_statistics-134-en-data.csv)
+",num,Inferential Statistics/Regression/R squared,Performing analysis,SPSS,English,Statistical Literacy,1f115,Inferential Statistics/R squared,2026-01-12
+2287,Inferential_Statistics/eur-inferential_statistics-135-en,eur-inferential_statistics-135-en,"A researcher is interested in the influence of the drop in price for gasoline (bezine) on students who own a car. He wants to predict how many kilometers they will drive in in Januari 2015 [KM_JAN] by using a few predictors. For 202 students, the researcher has gathered the following data: 1) actual driven kilometers in Jan 2015 [KM_JAN], 2) actual driven kilometers in October 2014 [KM_OCT], 3) income for January 2015 [INCOME_JAN], 4) total kilometers traveled using public transport for February 2015 [PUB_TRANS], and 5) type of car [car] (1 = hybrid, 2 = sedan, 3 = suv).
+Open the data file.
+What is the standardized residual for the person who drove 264.2 kilometers in January 2015 [KM_JAN]? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-135-en-data.sav), [CSV file](eur-inferential_statistics-135-en-data.csv)
+",num,Inferential Statistics/Regression/Standardized coefficient,Performing analysis,SPSS,English,Statistical Literacy,cea61,Inferential Statistics/Standardized coefficient,2026-01-12
+2289,Inferential_Statistics/eur-inferential_statistics-136-en,eur-inferential_statistics-136-en,"A researcher is interested in the influence of the drop in price for gasoline (bezine) on students who own a car. He wants to predict how many kilometers they will drive in in Januari 2015 [KM_JAN] by using a few predictors. For 202 students, the researcher has gathered the following data: 1) actual driven kilometers in Jan 2015 [KM_JAN], 2) actual driven kilometers in October 2014 [KM_OCT], 3) income for January 2015 [INCOME_JAN], 4) total kilometers traveled using public transport for February 2015 [PUB_TRANS], and 5) type of car [car] (1 = hybrid, 2 = sedan, 3 = suv).
+Open the data file.
+Report the standardized regression coefficient for driven kilometers in October 2014 [KM_OCT]? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-136-en-data.sav), [CSV file](eur-inferential_statistics-136-en-data.csv)
+",num,Inferential Statistics/Regression/Standardized coefficient,Performing analysis,SPSS,English,Statistical Literacy,c45da,Inferential Statistics/Standardized coefficient,2026-01-12
+2291,Inferential_Statistics/eur-inferential_statistics-137-en,eur-inferential_statistics-137-en,"A researcher is interested in the influence of the drop in price for gasoline (bezine) on students who own a car. He wants to predict how many kilometers they will drive in in Januari 2015 [KM_JAN] by using a few predictors. For 202 students, the researcher has gathered the following data: 1) actual driven kilometers in Jan 2015 [KM_JAN], 2) actual driven kilometers in October 2014 [KM_OCT], 3) income for January 2015 [INCOME_JAN], 4) total kilometers traveled using public transport for February 2015 [PUB_TRANS], and 5) type of car [car] (1 = hybrid, 2 = sedan, 3 = suv).
+Open the data file.
+Expand the model using the variable for type of car [car]. Create dummy variables and make ""hybrid"" your reference group. How much did the proportion of explained variance in driven kilometers in January 2015 increase after the variable car [car] was added as a predictor to the model?
+**Download**: [SPSS file](eur-inferential_statistics-137-en-data.sav), [CSV file](eur-inferential_statistics-137-en-data.csv)
+",num,Inferential Statistics/Regression/Multiple linear regression/R squared change,Performing analysis,SPSS,English,Statistical Literacy,9b3a9,Inferential Statistics/R squared change,2026-01-12
+2293,Inferential_Statistics/eur-inferential_statistics-140-en,eur-inferential_statistics-140-en,"A researcher from Erasmus University Rotterdam is investigating the possible advantages of PBL on students’ social competencies and has gathered social competency scores about students on four occasions. These scores come from observations by the researcher 2 days after their first PBL group (T1_social), six months after their first PBL tutor group (T2­_social), a year after their first PBL tutor group (T3_social) and a year and a half after their first PBL tutor group (T4_social). At these four occasions, social competence was measured using a semi-structured interview with scores varying from 0 (not social) to 40 (very social). Additionally, the researcher determines whether a student is shy or not [SHY]. 
+Open the data file.
+Conduct an analysis for all subjects to determine whether the level of social competency differs between the four measurements ? [T1_social, T2_social, T3_social, T4_social]. What is the F-value for this effect according to univariate approach? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-140-en-data.sav), [CSV file](eur-inferential_statistics-140-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/ANOVA/Oneway repeated measures ANOVA,Performing analysis,SPSS,English,Statistical Literacy,552bc,Inferential Statistics/Oneway repeated measures ANOVA,2026-01-12
+2295,Inferential_Statistics/eur-inferential_statistics-141-en,eur-inferential_statistics-141-en,"A researcher from Erasmus University Rotterdam is investigating the possible advantages of PBL on students’ social competencies and has gathered social competency scores about students on four occasions. These scores come from observations by the researcher 2 days after their first PBL group (T1_social), six months after their first PBL tutor group (T2­_social), a year after their first PBL tutor group (T3_social) and a year and a half after their first PBL tutor group (T4_social). At these four occasions, social competence was measured using a semi-structured interview with scores varying from 0 (not social) to 40 (very social). Additionally, the researcher determines whether a student is shy or not [SHY]. 
+Open the data file.
+The researcher thinks that being shy or not [SHY] may influence the change in social competency over time. Conduct the appropriate analysis to test this hypothesis. What is the F-value for this effect according to univariate approach? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-141-en-data.sav), [CSV file](eur-inferential_statistics-141-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/ANOVA/Mixed design ANOVA,Performing analysis,SPSS,English,Statistical Literacy,072ae,Inferential Statistics/Mixed design ANOVA,2026-01-12
+2339,Inferential_Statistics/eur-inferential_statistics-222-en,eur-inferential_statistics-222-en,"Men and women often comment on each other's driving in the car. We look at the gender of who is behind the wheel [Driver, where male = 0, female = 1], what make of car someone drives [Car, where Ford = 1, Audi = 2, Toyota = 3, and Volkswagen = 4], the miles driven [Driven_kilometers] and the miles as a co-driver [Co-driver_kilometers]. We also look at who received a collision and who did not [Collision, where no collision = 0, did collision = 1].
+Test whether the average number of Driving kilometers is significantly different from the average number of kilometers as a Co-driver. Write the p-value found in the answer box (with 3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-222-en-data.sav), [CSV file](eur-inferential_statistics-222-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/t-test/Independent samples means,Performing analysis,SPSS,English,Statistical Literacy,25428,Inferential Statistics/Independent samples means,2026-01-12
+2341,Inferential_Statistics/eur-inferential_statistics-223-en,eur-inferential_statistics-223-en,"Men and women often comment on each other's driving in the car. We look at the gender of who is behind the wheel [Driver, where male = 0, female = 1], what make of car someone drives [Car, where Ford = 1, Audi = 2, Toyota = 3, and Volkswagen = 4], the miles driven [Driven_kilometers] and the miles as a co-driver [Co-driver_kilometers]. We also look at who received a collision and who did not [Collision, where no collision = 0, did collision = 1].
+What is the probability of getting a collision [Collision=1] among women [Driver]? Write the probability (not a percentage) in the answer box (with 2 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-223-en-data.sav), [CSV file](eur-inferential_statistics-223-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Cross tables,"Calculation, Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,c124c,Inferential Statistics/Cross tables,2026-01-12
+2349,Inferential_Statistics/eur-inferential_statistics-227-en,eur-inferential_statistics-227-en,"Men and women often comment on each other's driving in the car. We look at the gender of who is behind the wheel [Driver, where male = 0, female = 1], what make of car someone drives [Car, where Ford = 1, Audi = 2, Toyota = 3, and Volkswagen = 4], the miles driven [Driven_kilometers] and the miles as a co-driver [Co-driver_kilometers]. We also look at who received a collision and who did not [Collision, where no collision = 0, did collision = 1]....
+The researcher tests whether there is a relationship between the gender of the driver and the make of the car. Write the p-value of this test in the answer box (using 3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-227-en-data.sav), [CSV file](eur-inferential_statistics-227-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Cross tables/Chi-Squared for Independence,Performing analysis,SPSS,English,Statistical Literacy,b2a46,Inferential Statistics/Chi-Squared for Independence,2026-01-12
+2351,Inferential_Statistics/eur-inferential_statistics-228-en,eur-inferential_statistics-228-en,"Men and women often comment on each other's driving in the car. We look at the gender of who is behind the wheel [Driver, where male = 0, female = 1], what make of car someone drives [Car, where Ford = 1, Audi = 2, Toyota = 3, and Volkswagen = 4], the miles driven [Driven_kilometers] and the miles as a co-driver [Co-driver_kilometers]. We also look at who received a collision and who did not [Collision, where no collision = 0, did collision = 1].
+Someone states that 45% of all drivers will be male. Is this person right or should we reject his statement? Write the p-value found for this test in the answer box (using 3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-228-en-data.sav), [CSV file](eur-inferential_statistics-228-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Cross tables/Chi-Squared for Independence,Performing analysis,SPSS,English,Statistical Literacy,e741b,Inferential Statistics/Chi-Squared for Independence,2026-01-12
+2353,Inferential_Statistics/eur-inferential_statistics-229-en,eur-inferential_statistics-229-en,"A question that has puzzled researchers for years is...do you really sleep worse after watching a horror movie? To answer this question once and for all, a researcher at EUR drew a sample from all visitors to a Horror-film festival (Slasher-fest) in Rotterdam.  The participants had to indicate the length of the movie they had watched at the festival, and how many hours they had slept the night after the festival. The researcher also administered a questionnaire to the participants measuring their ""degree of anxiety,"" and recorded whether a person was male [Gender = 0] or female [Gender = 1].
+If you want to know the correlation between the number of hours of sleep [HourSleep] and the number of minutes of film [MinutenFilm], look at the Pearson correlation. Give the value of this correlation. (3 decimal places)
+* Download**: [SPSS file](eur-inferential_statistics-229-en-data.sav), [CSV file](eur-inferential_statistics-229-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Correlations/Pearson,Performing analysis,SPSS,English,Statistical Literacy,94a2d,Inferential Statistics/Pearson,2026-01-12
+2355,Inferential_Statistics/eur-inferential_statistics-230-en,eur-inferential_statistics-230-en,"A question that has puzzled researchers for years is...do you really sleep worse after watching a horror movie? To answer this question once and for all, a researcher at EUR drew a sample from all visitors to a Horror-film festival (Slasher-fest) in Rotterdam.  The participants had to indicate the length of the movie they had watched at the festival, and how many hours they had slept the night after the festival. The researcher also administered a questionnaire to the participants measuring their ""degree of anxiety,"" and recorded whether a person was male [Gender = 0] or female [Gender = 1].
+What is the Pearson correlation between the number of hours of sleep [HourSleep] and the number of minutes of movie [MinutenFilm] among men [Gender]? (3 decimal places)
+* Download**: [SPSS file](eur-inferential_statistics-230-en-data.sav), [CSV file](eur-inferential_statistics-230-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Correlations/Pearson,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,3a3d5,Inferential Statistics/Pearson,2026-01-12
+2357,Inferential_Statistics/eur-inferential_statistics-231-en,eur-inferential_statistics-231-en,"A question that has puzzled researchers for years is.....do you really sleep worse after watching a horror movie? To answer this question once and for all, a researcher at EUR drew a sample from all visitors to a Horror-film festival (Slasher-fest) in Rotterdam.  The participants had to indicate the length of the movie they had watched at the festival, and how many hours they had slept the night after the festival. The researcher also administered a questionnaire to the participants measuring their ""degree of anxiety,"" and recorded whether a person was male [Gender = 0] or female [Gender = 1].
+Investigate the extent to which you can predict the number of hours of sleep [HourSleep] a person has had based on the number of minutes of movie [MinutenFilm] that person has watched. What is the value of the test statistic for the entire model, where you predict the number of hours of sleep [HourSleep] by the number of minutes of movie [MinutenFilm]? (3 decimal places)
+* Download**: [SPSS file](eur-inferential_statistics-231-en-data.sav), [CSV file](eur-inferential_statistics-231-en-data.csv)
+",num,Inferential Statistics/Regression/Simple linear regression,Performing analysis,SPSS,English,Statistical Literacy,f7a66,Inferential Statistics/Simple linear regression,2026-01-12
+2359,Inferential_Statistics/eur-inferential_statistics-232-en,eur-inferential_statistics-232-en,"A question that has puzzled researchers for years is.....do you really sleep worse after watching a horror movie? To answer this question once and for all, a researcher at EUR drew a sample from all visitors to a Horror-film festival (Slasher-fest) in Rotterdam.  The participants had to indicate the length of the movie they had watched at the festival, and how many hours they had slept the night after the festival. The researcher also administered a questionnaire to the participants measuring their ""degree of anxiety,"" and recorded whether a person was male [Gender = 0] or female [Gender = 1].
+If you want to know which of the two independent variables (predictors) measured on a different scale [MinuteFilm and Gender] better predicts the number of hours of sleep [HourSleep], TRUE should you look? Give the value of the relevant coefficient of the worst predictor. (3 decimal places)
+* Download**: [SPSS file](eur-inferential_statistics-232-en-data.sav), [CSV file](eur-inferential_statistics-232-en-data.csv)
+",num,Inferential Statistics/Regression/Simple linear regression,Performing analysis,SPSS,English,Statistical Literacy,cc8fe,Inferential Statistics/Simple linear regression,2026-01-12
+2361,Inferential_Statistics/eur-inferential_statistics-233-en,eur-inferential_statistics-233-en,"A question that has puzzled researchers for years is...do you really sleep worse after watching a horror movie? To answer this question once and for all, a researcher at EUR drew a sample from all visitors to a Horror-film festival (Slasher-fest) in Rotterdam.  The participants had to indicate the length of the movie they had watched at the festival, and how many hours they had slept the night after the festival. The researcher also administered a questionnaire to the participants measuring their ""degree of anxiety,"" and recorded whether a person was male [Gender = 0] or female [Gender = 1].
+Add the variable Anxiety Score to the model that initially included only MinutenFilm as a predictor. What is the difference in proportion explained variance compared to the model with only MinutenFilm? (3 decimal places)
+* Download**: [SPSS file](eur-inferential_statistics-233-en-data.sav), [CSV file](eur-inferential_statistics-233-en-data.csv)
+",num,"Inferential Statistics/Regression/Simple linear regression, Inferential Statistics/Regression/R squared, Inferential Statistics/Regression/Multiple linear regression/R squared change",Performing analysis,SPSS,English,Statistical Literacy,15a60,Inferential Statistics/Simple linear regression,2026-01-12
+2363,Inferential_Statistics/eur-inferential_statistics-234-en,eur-inferential_statistics-234-en,"A researcher doubts whether he would not be better off becoming an athlete after all, and if he chooses to do so, what sport would be best for him. To determine this for himself, he drew a sample from all professional athletes in the U.S. and determined what their average annual income was (in 10,000 dollars). In addition, he determined what sport [Football = 1, Basketball = 2, Baseball = 3] someone did, and whether it was a male [Gender = 0] or female [Gender = 1] athlete.
+Test whether there is a difference between the three different sports [Sports] in average income [Income]. Give the F value. (3 decimal places)
+* Download**: [SPSS file](eur-inferential_statistics-234-en-data.sav), [CSV file](eur-inferential_statistics-234-en-data.csv)
+",num,"Inferential Statistics/Parametric Techniques/ANOVA/Oneway ANOVA, Inferential Statistics/NHST/Test statistic/F-statistic",Performing analysis,SPSS,English,Statistical Literacy,59d19,Inferential Statistics/Oneway ANOVA,2026-01-12
+2365,Inferential_Statistics/eur-inferential_statistics-235-en,eur-inferential_statistics-235-en,"A researcher doubts whether he would not be better off becoming an athlete after all, and if he chooses to do so, what sport would be best for him. To determine this for himself, he drew a sample from all professional athletes in the U.S. and determined what their average annual income was (in 10,000 dollars). In addition, he determined what sport [Football = 1, Basketball = 2, Baseball = 3] someone did, and whether it was a male [Gender = 0] or female [Gender = 1] athlete.
+In a model with the factor Sports and the dependent variable Income, what is the value of the mean residual variance (MS_within) in the sample? (3 decimal places)
+* Download**: [SPSS file](eur-inferential_statistics-235-en-data.sav), [CSV file](eur-inferential_statistics-235-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/ANOVA/Oneway ANOVA,Performing analysis,SPSS,English,Statistical Literacy,89471,Inferential Statistics/Oneway ANOVA,2026-01-12
+2367,Inferential_Statistics/eur-inferential_statistics-236-en,eur-inferential_statistics-236-en,"A researcher doubts whether he would not be better off becoming an athlete after all, and if he chooses to do so, what sport would be best for him. To determine this for himself, he drew a sample from all professional athletes in the U.S. and determined what their average annual income was (in 10,000 dollars). In addition, he determined what sport [Football = 1, Basketball = 2, Baseball = 3] someone did, and whether it was a male [Gender = 0] or female [Gender = 1] athlete.
+Using the LSD correction, test pairwise differences in income [Income] between the three types of athletes [Sports]. What is the p-value associated with the statistic testing the difference between Basketball Players [Sport=2] and Baseball Players [Sport=3]? (3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-236-en-data.sav), [CSV file](eur-inferential_statistics-236-en-data.csv)
+",num,"Inferential Statistics/Parametric Techniques/ANOVA/Post-hoc test, Inferential Statistics/Parametric Techniques/ANOVA/Oneway ANOVA",Performing analysis,SPSS,English,Statistical Literacy,3b4f2,Inferential Statistics/Post-hoc test,2026-01-12
+2369,Inferential_Statistics/eur-inferential_statistics-237-en,eur-inferential_statistics-237-en,"A researcher doubts whether he would not be better off becoming an athlete after all, and if he chooses to do so, what sport would be best for him. To determine this for himself, he drew a sample from all professional athletes in the U.S. and determined what their average annual income was (in 10,000 dollars). In addition, he determined what sport [Football = 1, Basketball = 2, Baseball = 3] someone did, and whether it was a male [Gender = 0] or female [Gender = 1] athlete.
+Perform an appropriate test where you include sports and gender as independent variables and income as the dependent variable. What is the Sum of Squares for the factor with the least significant main effect (3 decimal places)?
+* Download**: [SPSS file](eur-inferential_statistics-237-en-data.sav), [CSV file](eur-inferential_statistics-237-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/ANOVA/Twoway ANOVA,Performing analysis,SPSS,English,Statistical Literacy,23f5d,Inferential Statistics/Twoway ANOVA,2026-01-12
+2371,Inferential_Statistics/eur-inferential_statistics-238-en,eur-inferential_statistics-238-en,"A researcher doubts whether he would not be better off becoming an athlete after all, and if he chooses to do so, what sport would be best for him. To determine this for himself, he drew a sample from all professional athletes in the U.S. and determined what their average annual income was (in 10,000 dollars). In addition, he determined what sport [Football = 1, Basketball = 2, Baseball = 3] someone did, and whether it was a male [Gender = 0] or female [Gender = 1] athlete.
+The researcher wants to know if [Income] differs between the types of athletes [Sports] taking into account their gender [Sex]. Perform a 2-way ANOVA. What is men's Estimated Marginal Mean (3 decimal places)?
+* Download**: [SPSS file](eur-inferential_statistics-238-en-data.sav), [CSV file](eur-inferential_statistics-238-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/ANOVA/Twoway ANOVA,Performing analysis,SPSS,English,Statistical Literacy,2def1,Inferential Statistics/Twoway ANOVA,2026-01-12
+2373,Inferential_Statistics/eur-inferential_statistics-239-en,eur-inferential_statistics-239-en,"A researcher doubts whether he would not be better off becoming an athlete after all, and if he chooses to do so, what sport would be best for him. To determine this for himself, he drew a sample from all professional athletes in the U.S. and determined what their average annual income was (in 10,000 dollars). In addition, he determined what sport [Football = 1, Basketball = 2, Baseball = 3] someone did, and whether it was a male [Gender = 0] or female [Gender = 1] athlete.
+What is the effect size [partial eta squared] of the interaction effect of type of sport [Sport] and gender [Gender]? (3 decimal places)
+* Download**: [SPSS file](eur-inferential_statistics-239-en-data.sav), [CSV file](eur-inferential_statistics-239-en-data.csv)
+",num,"Inferential Statistics/Parametric Techniques/ANOVA/Twoway ANOVA, Inferential Statistics/Effect size/Eta squared",Performing analysis,SPSS,English,Statistical Literacy,43054,Inferential Statistics/Twoway ANOVA,2026-01-12
+2375,Inferential_Statistics/eur-inferential_statistics-240-en,eur-inferential_statistics-240-en,"Feyenoord and Ajax fans often criticize each other's teams. We will be looking at what team a person is a fan of [Fan, where Feyenoord = 0 and Ajax = 1], in what city a person lives [City, where Rotterdam = 1, Amsterdam = 2, Dordrecht = 3 and Haarlem = 4], the number of games played by the favourite team that they watched over the years (so the amount of games played by Feyenoord watched by a Feyenoord fan) [played_favourite] and to the amount of games played by the other team that someone watched over the years [played_other]. We also registered whose team became division champion in the last 4 years [Champion, where No championship = 0 and Championship = 1].
+Compute a new variable on which people from Amsterdam and Haarlem are one group, and people from Rotterdam and Dordrecht are the other. Determine if the average number of “games by the other team that someone watched” of the ""Amsterdam+Haarlem"" group, is significantly different from that of the “Rotterdam+Dordrecht”group. Report the obtained p-value (using 3 decimals).
+**Download**: [SPSS file](inferential_statistics-240-en-data.sav), [CSV file](inferential_statistics-240-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/t-test/Independent samples means,Performing analysis,SPSS,English,Statistical Literacy,ee3f9,Inferential Statistics/Independent samples means,2026-01-12
+2377,Inferential_Statistics/eur-inferential_statistics-241-en,eur-inferential_statistics-241-en,"Feyenoord and Ajax fans often criticize each other's teams. We will be looking at what team a person is a fan of [Fan, where Feyenoord = 0 and Ajax = 1], in what city a person lives [City, where Rotterdam = 1, Amsterdam = 2, Dordrecht = 3 and Haarlem = 4], the number of games played by the favourite team that they watched over the years (so the amount of games played by Feyenoord watched by a Feyenoord fan) [played_favourite] and to the amount of games played by the other team that someone watched over the years [played_other]. We also registered whose team became division champion in the last 4 years [Champion, where No championship = 0 and Championship = 1].
+Test if the average number of games watched when the favourite team played differs significantly from the number of games watched when the other team played. Report the obtained p-value. (using 3 decimals).
+**Download**: [SPSS file](inferential_statistics-241-en-data.sav), [CSV file](inferential_statistics-241-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/t-test/Independent samples means,Performing analysis,SPSS,English,Statistical Literacy,fa1d1,Inferential Statistics/Independent samples means,2026-01-12
+2379,Inferential_Statistics/eur-inferential_statistics-242-en,eur-inferential_statistics-242-en,"Feyenoord and Ajax fans often criticize each other's teams. We will be looking at what team a person is a fan of [Fan, where Feyenoord = 0 and Ajax = 1], in what city a person lives [City, where Rotterdam = 1, Amsterdam = 2, Dordrecht = 3 and Haarlem = 4], the number of games played by the favourite team that they watched over the years (so the amount of games played by Feyenoord watched by a Feyenoord fan) [played_favourite] and to the amount of games played by the other team that someone watched over the years [played_other]. We also registered whose team became division champion in the last 4 years [Champion, where No championship = 0 and Championship = 1].
+What is chance of winning the championship [Champion=1] for an Ajax fan [Fan]? Report the probability, not the percentage. (using 2 decimals).
+**Download**: [SPSS file](inferential_statistics-242-en-data.sav), [CSV file](inferential_statistics-242-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Cross tables,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,598b9,Inferential Statistics/Cross tables,2026-01-12
+2381,Inferential_Statistics/eur-inferential_statistics-243-en,eur-inferential_statistics-243-en,"Feyenoord and Ajax fans often criticize each other's teams. We will be looking at what team a person is a fan of [Fan, where Feyenoord = 0 and Ajax = 1], in what city a person lives [City, where Rotterdam = 1, Amsterdam = 2, Dordrecht = 3 and Haarlem = 4], the number of games played by the favourite team that they watched over the years (so the amount of games played by Feyenoord watched by a Feyenoord fan) [played_favourite] and to the amount of games played by the other team that someone watched over the years [played_other]. We also registered whose team became division champion in the last 4 years [Champion, where No championship = 0 and Championship = 1].
+If the championship has been won [Champion=1], what is chance that this was the case for a Feyenoord fan [Fan]? Report the probability, not the percentage. (using 2 decimals).
+**Download**: [SPSS file](inferential_statistics-243-en-data.sav), [CSV file](inferential_statistics-243-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Cross tables,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,bd359,Inferential Statistics/Cross tables,2026-01-12
+2383,Inferential_Statistics/eur-inferential_statistics-244-en,eur-inferential_statistics-244-en,"Feyenoord and Ajax fans often criticize each other's teams. We will be looking at what team a person is a fan of [Fan, where Feyenoord = 0 and Ajax = 1], in what city a person lives [City, where Rotterdam = 1, Amsterdam = 2, Dordrecht = 3 and Haarlem = 4], the number of games played by the favourite team that they watched over the years (so the amount of games played by Feyenoord watched by a Feyenoord fan) [played_favourite] and to the amount of games played by the other team that someone watched over the years [played_other]. We also registered whose team became division champion in the last 4 years [Champion, where No championship = 0 and Championship = 1].
+What is the Relative Risk (RR) of winning the championship [Champion=1] for Feyenoord fans compared to Ajax fans [Fan]? Report the Relative Risk (using 3 decimals).
+**Download**: [SPSS file](inferential_statistics-244-en-data.sav), [CSV file](inferential_statistics-244-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Cross tables,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,1a160,Inferential Statistics/Cross tables,2026-01-12
+2385,Inferential_Statistics/eur-inferential_statistics-245-en,eur-inferential_statistics-245-en,"Feyenoord and Ajax fans often criticize each other's teams. We will be looking at what team a person is a fan of [Fan, where Feyenoord = 0 and Ajax = 1], in what city a person lives [City, where Rotterdam = 1, Amsterdam = 2, Dordrecht = 3 and Haarlem = 4], the number of games played by the favourite team that they watched over the years (so the amount of games played by Feyenoord watched by a Feyenoord fan) [played_favourite] and to the amount of games played by the other team that someone watched over the years [played_other]. We also registered whose team became division champion in the last 4 years [Champion, where No championship = 0 and Championship = 1].
+It is investigated whether the probability of winning the championship [Champion=1] is the same for all cities [City]. If the null hypothesis were true, what would be the expected number of fans from Rotterdam [City=1] that saw their team win a championship [Champion=1]? Report the expected number (using 1 decimal).
+**Download**: [SPSS file](inferential_statistics-245-en-data.sav), [CSV file](inferential_statistics-245-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Cross tables,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,87d3f,Inferential Statistics/Cross tables,2026-01-12
+2387,Inferential_Statistics/eur-inferential_statistics-246-en,eur-inferential_statistics-246-en,"Feyenoord and Ajax fans often criticize each other's teams. We will be looking at what team a person is a fan of [Fan, where Feyenoord = 0 and Ajax = 1], in what city a person lives [City, where Rotterdam = 1, Amsterdam = 2, Dordrecht = 3 and Haarlem = 4], the number of games played by the favourite team that they watched over the years (so the amount of games played by Feyenoord watched by a Feyenoord fan) [played_favourite] and to the amount of games played by the other team that someone watched over the years [played_other]. We also registered whose team became division champion in the last 4 years [Champion, where No championship = 0 and Championship = 1].
+The researcher tests whether there is a relation between the team someone is a fan of [Fan] and the city where someone lives. Report the p-value (using 3 decimals).
+**Download**: [SPSS file](inferential_statistics-246-en-data.sav), [CSV file](inferential_statistics-246-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Cross tables,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,e3fac,Inferential Statistics/Cross tables,2026-01-12
+2389,Inferential_Statistics/eur-inferential_statistics-247-en,eur-inferential_statistics-247-en,"Feyenoord and Ajax fans often criticize each other's teams. We will be looking at what team a person is a fan of [Fan, where Feyenoord = 0 and Ajax = 1], in what city a person lives [City, where Rotterdam = 1, Amsterdam = 2, Dordrecht = 3 and Haarlem = 4], the number of games played by the favourite team that they watched over the years (so the amount of games played by Feyenoord watched by a Feyenoord fan) [played_favourite] and to the amount of games played by the other team that someone watched over the years [played_other]. We also registered whose team became division champion in the last 4 years [Champion, where No championship = 0 and Championship = 1].
+Someone claims that 45% of all fans are Feyenoord fans. Is this person right or should we reject their claim? Report the obtained p-value (using 3 decimals).
+**Download**: [SPSS file](inferential_statistics-247-en-data.sav), [CSV file](inferential_statistics-247-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Cross tables,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,1e24f,Inferential Statistics/Cross tables,2026-01-12
+2391,Inferential_Statistics/eur-inferential_statistics-248-en,eur-inferential_statistics-248-en,"As you get older, going out becomes more of an exhaustion… the mind is willing, but the body is weak. To be able to advice the aging party-goers, a researcher drew a sample out of all the people visiting a certain nightclub in Rotterdam. The participants in the study were asked to report the amount of minutes they napped before going out and to report the amount of hours they spend partying that night. In addition, they had to fill in a questionnaire that quantified their natural need for sleep, and they needed to indicate whether their friends considered them to be a party-animal or a stay-at-home [Group, where stay-at-home = 0 and party animal = 1]. 
+If you want to know the correlation between the amount of hours spent partying [HoursPartying] and the amount of minutes spent napping [MinutesNap], you need to use the Pearson correlation. Give the value of this correlation. (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-248-en-data.sav), [CSV file](eur-inferential_statistics-248-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Correlations/Pearson,Performing analysis,SPSS,English,Statistical Literacy,4e6f0,Inferential Statistics/Pearson,2026-01-12
+2393,Inferential_Statistics/eur-inferential_statistics-249-en,eur-inferential_statistics-249-en,"As you get older, going out becomes more of an exhaustion… the mind is willing, but the body is weak. To be able to advise the aging party-goers, a researcher drew a sample out of all the people visiting a certain nightclub in Rotterdam. The participants in the study were asked to report the amount of minutes they napped before going out and to report the amount of hours they spend partying that night. In addition, they had to fill in a questionnaire that quantified their natural need for sleep, and they needed to indicate whether their friends considered them to be a party-animal or a stay-at-home type of person [Group, where stay-at-home = 0 and party animal = 1]. 
+What is the Pearson correlation between the amount of hours spent partying [HoursPartying] and the amount of minutes spent napping [MinutesNap] for stay-at-homes [Group=0]? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-249-en-data.sav), [CSV file](eur-inferential_statistics-249-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/Correlations/Pearson,Performing analysis,SPSS,English,Statistical Literacy,0b170,Inferential Statistics/Pearson,2026-01-12
+2395,Inferential_Statistics/eur-inferential_statistics-250-en,eur-inferential_statistics-250-en,"As you get older, going out becomes more of an exhaustion… the mind is willing, but the body is weak. To be able to advise the aging party-goers, a researcher drew a sample out of all the people visiting a certain nightclub in Rotterdam. The participants in the study were asked to report the amount of minutes they napped before going out and to report the amount of hours they spend partying that night. In addition, they had to fill in a questionnaire that quantified their natural need for sleep, and they needed to indicate whether their friends considered them to be a party-animal or a stay-at-home type of person [Group, where stay-at-home = 0 and party animal = 1]. 
+Determine to what extent you can predict the amount of hours someone spent partying [HoursPartying] from the amount of minutes that they napped [MinutesNap]. What is the value of the test statistic for the entire model in which you predict hours spent partying [HoursPartying] using amount of minutes spent napping [MinutesNap]? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-250-en-data.sav), [CSV file](eur-inferential_statistics-250-en-data.csv)
+",num,"Inferential Statistics/Regression/Simple linear regression, Inferential Statistics/NHST/Test statistic/t-statistic",Performing analysis,SPSS,English,Statistical Literacy,8bc22,Inferential Statistics/Simple linear regression,2026-01-12
+2397,Inferential_Statistics/eur-inferential_statistics-251-en,eur-inferential_statistics-251-en,"As you get older, going out becomes more of an exhaustion… the mind is willing, but the body is weak. To be able to advise the aging party-goers, a researcher drew a sample out of all the people visiting a certain nightclub in Rotterdam. The participants in the study were asked to report the amount of minutes they napped before going out and to report the amount of hours they spend partying that night. In addition, they had to fill in a questionnaire that quantified their natural need for sleep, and they needed to indicate whether their friends considered them to be a party-animal or a stay-at-home type of person [Group, where stay-at-home = 0 and party animal = 1]. 
+If you want to know which independent variable (predictor) out of a set of two independent variables, measured on different scales [MinutesNap and Group], gives the best prediction of the amount of hours someone spent partying [HoursPartying], where do you need to look? Give the value of the relevant coefficient for the worst predictor. (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-251-en-data.sav), [CSV file](eur-inferential_statistics-251-en-data.csv)
+",num,"Inferential Statistics/Regression/Simple linear regression, Inferential Statistics/Regression/Standardized coefficient",Performing analysis,SPSS,English,Statistical Literacy,4973c,Inferential Statistics/Simple linear regression,2026-01-12
+2399,Inferential_Statistics/eur-inferential_statistics-252-en,eur-inferential_statistics-252-en,"As you get older, going out becomes more of an exhaustion… the mind is willing, but the body is weak. To be able to advise the aging party-goers, a researcher drew a sample out of all the people visiting a certain nightclub in Rotterdam. The participants in the study were asked to report the amount of minutes they napped before going out and to report the amount of hours they spend partying that night. In addition, they had to fill in a questionnaire that quantified their natural need for sleep, and they needed to indicate whether their friends considered them to be a party-animal or a stay-at-home type of person [Group, where stay-at-home = 0 and party animal = 1]. 
+Add a variable NeedSleep to a model that only has MinutesNap as a predictor variable to predict the amount of hours someone spent partying [HoursPartying]. What is the difference in explained variance between a model with just MinutesNap and a model with both MinutesNap and NeedSleep? (3 decimals)
+**Download**: [SPSS file](eur-inferential_statistics-252-en-data.sav), [CSV file](eur-inferential_statistics-252-en-data.csv)
+",num,"Inferential Statistics/Regression/R squared, Inferential Statistics/Regression/Multiple linear regression/R squared change",Performing analysis,SPSS,English,Statistical Literacy,e7601,Inferential Statistics/R squared,2026-01-12
+2408,Inferential_Statistics/eur-inferential_statistics-256-nl,eur-inferential_statistics-256-nl,"Je hoort heel vaak dat mensen uit grote gezinnen socialer zijn dan mensen die bijvoorbeeld enig kind waren. Een onderzoeker die zelf enig kind was vindt dit onzin. Nu besluit hij in zijn eentje een onderzoek te doen dat aantoont dat de stelling niet waar is. Hij trekt daarvoor een steekproef uit de Nederlandse bevolking en neemt bij de deelnemers een vragenlijst af om hun mate van socialiteit te bepalen. Daarnaast stelt hij vast of een deelnemer man [Geslacht = 0] of vrouw [Geslacht = 1] is, en of de deelnemer enig kind is [Gezin = 1], 1 of 2 broers/zussen heeft [Gezin = 2], of meer dan 2 broers/zussen heeft [Gezin = 3].
+Voeg de variabele gezin toe. Voeg nu geslacht toe als tweede factor. Wat is de Sum of Squares voor de factor met het minst significante hoofdeffect? (3 decimalen)
+**Download**: [SPSS file](eur-inferential_statistics-256-nl-data.sav), [CSV file](eur-inferential_statistics-256-nl-data.csv)
+",num,Inferential Statistics/Parametric Techniques/ANOVA/Twoway ANOVA,"Interpreting output, Performing analysis",SPSS,Dutch,Statistical Literacy,1ff77,Inferential Statistics/Twoway ANOVA,2026-01-12
+2412,Inferential_Statistics/eur-inferential_statistics-258-nl,eur-inferential_statistics-258-nl,"Je hoort heel vaak dat mensen uit grote gezinnen socialer zijn dan mensen die bijvoorbeeld enig kind waren. Een onderzoeker die zelf enig kind was vindt dit onzin. Nu besluit hij in zijn eentje een onderzoek te doen dat aantoont dat de stelling niet waar is. Hij trekt daarvoor een steekproef uit de Nederlandse bevolking en neemt bij de deelnemers een vragenlijst af om hun mate van socialiteit te bepalen. Daarnaast stelt hij vast of een deelnemer man [Geslacht = 0] of vrouw [Geslacht = 1] is, en of de deelnemer enig kind is [Gezin = 1], 1 of 2 broers/zussen heeft [Gezin = 2], of meer dan 2 broers/zussen heeft [Gezin = 3].
+Wat is de effect size [partial eta squared] van het interactie-effect van type gezin [Gezin] en geslacht [Geslacht]? (3 decimalen)
+**Download**: [SPSS file](eur-inferential_statistics-258-nl-data.sav), [CSV file](eur-inferential_statistics-258-nl-data.csv)
+",num,"Inferential Statistics/Parametric Techniques/ANOVA/Twoway ANOVA, Inferential Statistics/Effect size/Eta squared",Performing analysis,SPSS,Dutch,Statistical Literacy,fdc60,Inferential Statistics/Twoway ANOVA,2026-01-12
+2413,Inferential_Statistics/eur-inferential_statistics-259-en,eur-inferential_statistics-259-en,"A teacher wonders whether the mean grade for methods theory (variable: methods theory) for students living away from home [Residential = 0] differs from the mean for students living at home [Residential = 1]. Perform the analysis and provide the t-value (to 3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-259-en-data.sav), [CSV file](eur-inferential_statistics-259-en-data.csv)
+",num,"Inferential Statistics/NHST/Test statistic/t-statistic, Inferential Statistics/Parametric Techniques/t-test/Independent samples means",Performing analysis,SPSS,English,Statistical Literacy,f6e3f,Inferential Statistics/t-statistic,2026-01-12
+2415,Inferential_Statistics/eur-inferential_statistics-260-en,eur-inferential_statistics-260-en,"Test whether the mean grade on exam 4 (variable subject4) is significantly different from the mean grade on exam 5 (variable subject5). Write the t-value found in the answer box (with 3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-260-en-data.sav), [CSV file](eur-inferential_statistics-260-en-data.csv)
+",num,"Inferential Statistics/NHST/Test statistic/t-statistic, Inferential Statistics/Parametric Techniques/t-test/Paired samples",Performing analysis,SPSS,English,Statistical Literacy,3d287,Inferential Statistics/t-statistic,2026-01-12
+2417,Inferential_Statistics/eur-inferential_statistics-261-en,eur-inferential_statistics-261-en,"Test whether the mean grade on exam 6 (variable vak6) for students living away from home [Woon = 0] is significantly different from the mean for students living at home [Woon = 1]. Write the p-value found in the answer box (with 3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-260-en-data.sav), [CSV file](eur-inferential_statistics-261-en-data.csv)
+",num,"Inferential Statistics/NHST/p-value, Inferential Statistics/Parametric Techniques/t-test/Independent samples means",Performing analysis,SPSS,English,Statistical Literacy,f2110,Inferential Statistics/p-value,2026-01-12
+2419,Inferential_Statistics/eur-inferential_statistics-262-en,eur-inferential_statistics-262-en,"A teacher wonders whether the mean grade for macroeconomics (variable: macro_economics) for students living away from home [Residential = 0] differs from the mean for students living at home [Residential = 1]. Perform the analysis and provide the p-value of the Levene's Test (with 3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-262-nl-data.sav), [CSV file](eur-inferential_statistics-262-nl-data.csv)
+",num,"Inferential Statistics/NHST/p-value, Inferential Statistics/Parametric Techniques/t-test/Independent samples means, Assumptions/Homogeneity of variance/Levene's test",Performing analysis,SPSS,English,Statistical Literacy,36741,Inferential Statistics/p-value,2026-01-12
+2421,Inferential_Statistics/eur-inferential_statistics-263-en,eur-inferential_statistics-263-en,"A teacher wonders whether the mean grade for logic (variable logic) for students living away from home [Residential = 0] differs from the mean for students living at home [Residential = 1]. Perform the analysis and provide the p-value of the Levene's Test (with 3 decimal places).  
+* Download**: [SPSS file](eur-inferential_statistics-263-nl-data.sav), [CSV file](eur-inferential_statistics-263-nl-data.csv)
+",num,"Assumptions/Homogeneity of variance/Levene's test, Inferential Statistics/Parametric Techniques/t-test/Independent samples means",Performing analysis,SPSS,English,Statistical Literacy,d61ef,Assumptions/Levene's test,2026-01-12
+2423,Inferential_Statistics/eur-inferential_statistics-264-en,eur-inferential_statistics-264-en,"Test whether the mean grade on exam 4 (variable subject4) is significantly different from the mean grade on exam 3 (variable subject3). Write the t-value found in the answer box (with 3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-264-en-data.sav), [CSV file](eur-inferential_statistics-264-en-data.csv)
+",num,"Inferential Statistics/NHST/Test statistic/t-statistic, Inferential Statistics/Parametric Techniques/t-test/Paired samples",Performing analysis,SPSS,English,Statistical Literacy,647fe,Inferential Statistics/t-statistic,2026-01-12
+2425,Inferential_Statistics/eur-inferential_statistics-265-en,eur-inferential_statistics-265-en,"Test whether the mean grade on exam 1 (variable subject1) for students living at home [Live = 1] differs significantly from the mean of students no longer living at home [Live = 0]. Write the p-value found in the answer box (with 3 decimal places).
+* Download**: [SPSS file](eur-inferential_statistics-265-en-data.sav), [CSV file](eur-inferential_statistics-265-en-data.csv)
+",num,Inferential Statistics/Parametric Techniques/t-test/Independent samples means,Performing analysis,SPSS,English,Statistical Literacy,23380,Inferential Statistics/Independent samples means,2026-01-12
+2429,Inferential_Statistics/eur-inferential_statistics-267-en,eur-inferential_statistics-267-en,"Test whether the mean grade on course exam 1.6 (variable course1_6) for students living with their parents [livingparent = 1] deviates significantly from the mean grade of students who live away from their parents [livingparent = 0]. Write the observed p-value in the answer box (with 3 decimal places). Caution: Report the p-value SPSS gives. You do not have to divide by 2.
+**Download**: [SPSS file](eur-inferential_statistics-267-en-data.sav), [CSV file](eur-inferential_statistics-267-en-data.csv)
+",num,"Inferential Statistics/NHST/p-value, Inferential Statistics/Parametric Techniques/t-test/Independent samples means",Performing analysis,SPSS,English,Statistical Literacy,52616,Inferential Statistics/p-value,2026-01-12
+2431,Inferential_Statistics/eur-inferential_statistics-401-en,eur-inferential_statistics-401-en,"A knowledge test on alcohol contains 20 items and is administered to 202 high school students. The variable [total score] gives the total correct scores. Gender (0 = woman; 1 = man) and alcohol use (0 = very often; 1 = often; 2 = sometimes; 3 = never) are also included in the dataset. 
+A researcher wants to investigate whether he can predict the total score with an IQ score and wonders whether this relation is different for boys and girls. Conduct a regression analysis to investigate this question. What is the unstandardized regression coefficient of the interaction effect gender x IQ score? Note: Make sure that gender is coded as 0 for the girls and 1 for the boys. (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-inferential_statistics-401-en-data.sav), [CSV file](eur-inferential_statistics-401-en-data.csv)
+",num,"Inferential Statistics/Regression/Slope, Inferential Statistics/Regression/Simple linear regression","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,5ea1c,Inferential Statistics/Slope,2026-01-12
+2433,Inferential_Statistics/eur-inferential_statistics-402-en,eur-inferential_statistics-402-en,"A knowledge test on alcohol contains 20 items and is administered to 202 high school students. The variable [total score] gives the total correct scores. Gender (0 = woman; 1 = man) and alcohol use (0 = very often; 1 = often; 2 = sometimes; 3 = never) are also included in the dataset. 
+A researcher thinks that there is a difference in total score between students who drink a) very often, b) often,  c) sometimes, and d) never (variable [alcohol_use]). Conduct an Anova to investigate the difference in alcohol use among these groups of students. What is the effect size (partial eta squared) of this effect? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-inferential_statistics-402-en-data.sav), [CSV file](eur-inferential_statistics-402-en-data.csv)
+",num,"Inferential Statistics/Effect size/Eta squared, Inferential Statistics/Parametric Techniques/ANOVA/Oneway ANOVA","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,6f41e,Inferential Statistics/Eta squared,2026-01-12
+2435,Inferential_Statistics/eur-inferential_statistics-403-en,eur-inferential_statistics-403-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. Also included in the dataset are IQ scores, scale scores and the amount of alcohol use (1 = very often; 2 = often; 3 = sometimes; 4 = never).
+The researcher wants to investigate whether he can predict the scale score with IQ (variable [IQ])and wonders whether this relation is different for boys and girls. Conduct a regression analysis to investigate this question. What is the standard error of the regression coefficient of the interaction effect gender x IQ? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-inferential_statistics-403-en-data.sav), [CSV file](eur-inferential_statistics-403-en-data.csv)
+",num,"Inferential Statistics/Regression/Slope, Inferential Statistics/Regression/Simple linear regression","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,aed63,Inferential Statistics/Slope,2026-01-12
+2437,Inferential_Statistics/eur-inferential_statistics-404-en,eur-inferential_statistics-404-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. Also included in the dataset are IQ scores, scale scores and the amount of alcohol use (1 = very often; 2 = often; 3 = sometimes; 4 = never).
+The researcher thinks that there is a difference in scale score between adolescents who drink a) very often, b) often,  c) sometimes, and d) never (variable [alcohol_use]). Conduct an Anova to investigate the difference in alcohol use among these four groups. What is the effect size (partial eta squared) of this effect? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-inferential_statistics-404-en-data.sav), [CSV file](eur-inferential_statistics-404-en-data.csv)
+",num,"Inferential Statistics/Effect size/Eta squared, Inferential Statistics/Parametric Techniques/ANOVA/Oneway ANOVA","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,dc0b7,Inferential Statistics/Eta squared,2026-01-12
+6100,Inferential_Statistics/vufgb-multilevel_analysis-019-nl,vufgb-multilevel_analysis-019-nl,"
+In een Linear Mixed Model wordt de volgende variantieschatting gevonden voor de regressiecoëfficiënt van tijd: 25.25 (se=12.12). Voer de juiste Wald toets uit (zoals deze ook in de SPSS output voor Mixed Models wordt gegeven) om te toetsen of er significante variatie is in het effect van Tijd. 
+  
+Answerlist
+----------
+* $Chi^{2} = 4.34$. De gevonden $Chi^{2}$-waarde is groter dan 3.84, dus de bijbehorende *p*-waarde kleiner dan .05. Dit betekent dat er wel significante variatie is in effect van tijd.
+* $Chi^{2} = 4.34$. De gevonden $Chi^{2}$-waarde is groter dan 3.84, dus de bijbehorende *p*-waarde groter dan .05. Dit betekent dat er geen significante variatie is in effect van tijd.
+* $z = 2.08$. De gevonden z-waarde is groter dan 1.96, dus de bijbehorende *p*-waarde groter dan .05. Dit betekent dat er geen significante variatie is in effect van tijd.
+* $z = 2.08$. De gevonden z-waarde is groter dan 1.96, dus de bijbehorende *p*-waarde kleiner dan .05. Dit betekent dat er wel significante variatie is in effect van tijd.
+",schoice,Inferential Statistics/Multilevel Analysis,Performing analysis,SPSS,Dutch,Statistical Thinking,5d69f,Inferential Statistics/Multilevel Analysis,2026-01-12
+6113,Inferential_Statistics/vufgb-multilevelanalysis-005-en,vufgb-multilevelanalysis-005-en,"
+A linear mixed model analysis in SPSS gives the following results for the random effects. Perform the Wald test to test whether the random slope is significant.
+![](vufgb-multilevelanalysis-005-nl-table01.jpg)
+  
+Answerlist
+----------
+* Wald $Z = 1.33$, $p < .05$ so significant.
+* Wald $Z = 2.50$, $p < .05$ so significant.
+* Wald $Z = 1.33$, $p > .05$ so not significant.
+* Wald $Z = 2.50$, $p > .05$ so not significant.
+",schoice,"Inferential Statistics/Multilevel Analysis, Inferential Statistics/Regression/Slope",Performing analysis,SPSS,English,Statistical Thinking,7e153,Inferential Statistics/Multilevel Analysis,2026-01-12
+6220,Inferential_Statistics/vufgb-multiplelinearregression-036-en,vufgb-multiplelinearregression-036-en,"
+In a sample of 50 children from youth services, we examine whether there is an association between the number of traumatic events experienced and internalizing behavior problems. Age is controlled for in the multiple regression analysis.
+Using the data in the SPSS table below, test whether the above relationship is significant.
+![](vufgb-multiplelinearregression-036-nl-table01.jpg)
+  
+Answerlist
+----------
+* $t = 3.97,\;df = 47,\;p < .001$
+* $t = 3.97,\;df = 48,\;p < .001$
+* $t = 0.95,\;df = 47,\;p > .05$
+* $t = 0.95,\;df = 48,\;p > .05$
+",schoice,Inferential Statistics/Regression/Multiple linear regression,"Performing analysis, Interpreting output",SPSS,English,Statistical Thinking,c466b,Inferential Statistics/Multiple linear regression,2026-01-12
+6794,Inferential_Statistics/vufgb-tstatistic-004-en,vufgb-tstatistic-004-en,"
+The SPSS table below shows the results of a multiple regression analysis with no interaction. Perform a *t* test to determine if there is an association between Anxiety Disposition and Anxiety at Presentation, statistically controlled for Age (*N* = 412).
+![](vufgb-tstatistic-004-en-table01.jpg)
+  
+Answerlist
+----------
+* *t*=16.51 > 1.96, so there is a correlation.
+* 1.96 < *t*=16.51, so there is no correlation.
+* *t*=16.26 > 1.96, so there is a correlation.
+* 1.96 < *t*=16.26, so there is no relationship.
+",schoice,Inferential Statistics/NHST/Test statistic/t-statistic,Performing analysis,SPSS,English,Statistical Thinking,319f4,Inferential Statistics/t-statistic,2026-01-12
+8983,Reliability/eur-reliability-121-en,eur-reliability-121-en,"* Ork for psychologists and educators.*
+A scientist has been tasked with investigating whether psychology and education graduates succeed in finding level jobs. To this end, the researcher designed his own questionnaire consisting of 12 Likert items with 5 response options ranging from completely disagree (1) to completely agree (5). An example of an item is: I had to put a lot of effort to find a job vacancy for a level job. The responses of 608 educators and psychologists to the 12 items are shown in the data file, with the variable [psy_ped] distinguishing educators (1) and psychologists (2). NOTES. The total score across the 12 items indicates how difficult a person finds it to find a level job. The higher the total score the harder he/she finds it to find a level job.
+Open the data file.
+Do a reliability analysis for the questionnaire designed consisting of 12 Likert items. What is the variance of the scale (scale) if all items are included? (2 decimal places)
+**Download**: [SPSS file](eur-reliability-121-en-data.sav), [CSV file](eur-reliability-121-en-data.csv)
+",num,"Reliability/Analysis/Cronbach's alpha, Descriptive statistics/Summary Statistics/Measures of Spread/Standard Deviation",Performing analysis,SPSS,English,Statistical Literacy,3a518,Reliability/Cronbach's alpha,2026-01-12
+8985,Reliability/eur-reliability-122-en,eur-reliability-122-en,"*Work for psychologists and educators.*
+A scientist has been tasked with investigating whether psychology and education graduates succeed in finding level jobs. To this end, the researcher designed his own questionnaire consisting of 12 Likert items with 5 response options ranging from completely disagree (1) to completely agree (5). An example of an item is: I had to put a lot of effort to find a job vacancy for a level job. The responses of 608 educators and psychologists to the 12 items are shown in the data file, with the variable [psy_ped] distinguishing educators (1) and psychologists (2). NOTES. The total score across the 12 items indicates how difficult a person finds it to find a level job. The higher the total score the harder he/she finds it to find a level job.
+Open the data file.
+What is the Spearman-Brown split-half reliability of the questionnaire? (3 decimal places)
+**Download**: [SPSS file](eur-reliability-122-en-data.sav), [CSV file](eur-reliability-122-en-data.csv)
+",num,Reliability/Analysis/Split half,Performing analysis,SPSS,English,Statistical Literacy,9ad7e,Reliability/Split half,2026-01-12
+8987,Reliability/eur-reliability-123-en,eur-reliability-123-en,"*Work for psychologists and educators.*
+A scientist has been tasked with investigating whether psychology and education graduates succeed in finding level jobs. To this end, the researcher designed his own questionnaire consisting of 12 Likert items with 5 response options ranging from completely disagree (1) to completely agree (5). An example of an item is: I had to put a lot of effort to find a job vacancy for a level job. The responses of 608 educators and psychologists to the 12 items are shown in the data file, with the variable [psy_ped] distinguishing educators (1) and psychologists (2). NOTES. The total score across the 12 items indicates how difficult a person finds it to find a level job. The higher the total score the harder he/she finds it to find a level job.
+Open the data file.
+Previous research has shown that psychologists have more difficulty finding a job than educators. For this reason, a researcher wants to calculate the reliability of the questionnaire for psychologists and educators separately (variable [psy_ped] ). What is the reliability (Cronbach's Alpha) of the questionnaire for pedagogues? (3 decimal places)
+
+**Download**: [SPSS file](eur-reliability-123-en-data.sav), [CSV file](eur-reliability-123-en-data.csv)
+",num,"Reliability/Analysis/Cronbach's alpha, Descriptive statistics/Summary Statistics/Measures of Spread/Standard Deviation",Performing analysis,SPSS,English,Statistical Literacy,f42bb,Reliability/Cronbach's alpha,2026-01-12
+9019,Reliability/eur-reliability-401-en,eur-reliability-401-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed a questionnaire with 12 items using Likert scales ranging from 1 (completely disagree) to 5 (completely agree). An example of an item is: When I go out, I often consume more than 5 alcoholic beverages. The answers of 608 adolescent girls (1) and boys (2) to the 12 items are in the dataset. Note: higher scores on the questionnaire reflect more alcohol abuse.
+Conduct a reliability analysis. What is the scale variance when all the items are included? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-reliability-401-en-data.sav), [CSV file](eur-reliability-401-en-data.csv)
+",num,"Reliability/Descriptives, Reliability/Analysis/Cronbach's alpha","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,5e55c,Reliability/Descriptives,2026-01-12
+9021,Reliability/eur-reliability-402-en,eur-reliability-402-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed a questionnaire with 12 items using Likert scales ranging from 1 (completely disagree) to 5 (completely agree). An example of an item is: When I go out, I often consume more than 5 alcoholic beverages. The answers of 608 adolescent girls (1) and boys (2) to the 12 items are in the dataset. Note: higher scores on the questionnaire reflect more alcohol abuse.
+What is the Spearman-Brown split-half reliability? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-reliability-402-en-data.sav), [CSV file](eur-reliability-402-en-data.csv)
+",num,Reliability/Analysis/Split half,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,a1d20,Reliability/Split half,2026-01-12
+9023,Reliability/eur-reliability-403-en,eur-reliability-403-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed a questionnaire with 12 items using Likert scales ranging from 1 (completely disagree) to 5 (completely agree). An example of an item is: When I go out, I often consume more than 5 alcoholic beverages. The answers of 608 adolescent girls (1) and boys (2) to the 12 items are in the dataset. Note: higher scores on the questionnaire reflect more alcohol abuse.
+Previous research has shown that boys engage in more alcohol abuse than girls. Because of this finding, a researcher wants to calculate the reliability of the questionnaire for boys and girls separately (variable [gender]). What is the reliability (Cronbach’s alpha) of the scale for the girls? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-reliability-403-en-data.sav), [CSV file](eur-reliability-403-en-data.csv)
+",num,Reliability/Analysis/Cronbach's alpha,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,9bc7d,Reliability/Cronbach's alpha,2026-01-12
+9025,Reliability/eur-reliability-404-en,eur-reliability-404-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed a questionnaire with 12 items using Likert scales ranging from 1 (completely disagree) to 5 (completely agree). An example of an item is: When I go out, I often consume more than 5 alcoholic beverages. The answers of 608 adolescent girls (1) and boys (2) to the 12 items are in the dataset. Note: higher scores on the questionnaire reflect more alcohol abuse.
+What is the highest correlation between an item and the corrected item total? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-reliability-404-en-data.sav), [CSV file](eur-reliability-404-en-data.csv)
+",num,"Reliability/Descriptives, Reliability/Analysis/Cronbach's alpha","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,a0e77,Reliability/Descriptives,2026-01-12
+9027,Reliability/eur-reliability-405-en,eur-reliability-405-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset.
+Conduct a reliability analysis. What is the scale variance when all the items are included? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-reliability-405-en-data.sav), [CSV file](eur-reliability-405-en-data.csv)
+",num,"Reliability/Descriptives, Reliability/Analysis/Cronbach's alpha","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,4ec2c,Reliability/Descriptives,2026-01-12
+9029,Reliability/eur-reliability-406-en,eur-reliability-406-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset. 
+Which item has the lowest correlation with the total score excluding the item itself? (no decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-reliability-406-en-data.sav), [CSV file](eur-reliability-406-en-data.csv)
+",num,"Reliability/Analysis/Cronbach's alpha, Reliability/Descriptives","Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,6a780,Reliability/Cronbach's alpha,2026-01-12
+9031,Reliability/eur-reliability-407-en,eur-reliability-407-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset.
+What is the Spearman-Brown split-half reliability? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-reliability-407-en-data.sav), [CSV file](eur-reliability-407-en-data.csv)
+",num,Reliability/Analysis/Split half,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,8d5fb,Reliability/Split half,2026-01-12
+9033,Reliability/eur-reliability-408-en,eur-reliability-408-en,"A researcher working at the psychology institute investigates alcohol abuse among adolescents. The researcher designed 34 statements the adolescents can agree or disagree with on a four-point scale (1 = completely agree; 2 = somewhat agree; 3 = somewhat disagree; 4 = completely disagree). An example of a statement is: When I feel lonely, I enjoy drinking an alcoholic beverage. The answers of 312 girls (0) and boys (1) to the 34 statements are in the dataset.
+Previous research has shown that boys engage in more alcohol abuse than girls. Because of this finding, a researcher wants to calculate the reliability of the questionnaire for boys and girls separately (variable [gender]). What is the reliability (Cronbach’s alpha) of the scale for the girls? (3 decimals)
+Open the dataset below to answer this question:
+**Download** [SPSS file](eur-reliability-408-en-data.sav), [CSV file](eur-reliability-408-en-data.csv)
+",num,Reliability/Analysis/Cronbach's alpha,"Interpreting output, Performing analysis",SPSS,English,Statistical Literacy,38c36,Reliability/Cronbach's alpha,2026-01-12

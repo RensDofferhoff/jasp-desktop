@@ -26,11 +26,11 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QDir>
+#include <fstream>
 #include "utilities/appdirs.h"
 #include "utilities/settings.h"
 #include "utilities/extractarchive.h"
 #include "utilities/messageforwarder.h"
-#include "engine/enginesync.h"
 #include "modules/description/description.h"
 #include "mainwindow.h"
 
@@ -39,6 +39,46 @@
 #include "otoolstuff.h"
 #include <filesystem>
 #endif
+
+namespace
+{
+
+/// Ribbon order + common/extra grouping from modules-settings.json — presentation metadata the
+/// orchestrator's catalog deliberately does not carry (HANDOVER-client-discovery.md). first =
+/// ordered names (common first, then extra), second = the common set; either/both empty if the
+/// file is missing or malformed — applyCatalog falls back to catalog order, all non-common.
+std::pair<std::vector<std::string>, std::set<std::string>> moduleOrderingFromSettings()
+{
+	std::vector<std::string>	orderedNames;
+	std::set<std::string>		commonNames;
+
+	//get the module orders and groupings from the modules settings file
+	//This will probably be replaced with org specific settings from toml file in future
+	std::ifstream in(AppDirs::bundledModulesDir().toStdString() + "modules-settings.json");
+	Json::Value root;
+	if(!Json::Reader().parse(in, root, false))
+	{
+		Log::log() << "Could not parse modules-settings.json; ribbon order falls back to catalog order." << std::endl;
+		return { orderedNames, commonNames };
+	}
+
+	Json::Value commonNamesJson = root.get("common", Json::arrayValue),
+				extraNamesJson	= root.get("extra", Json::arrayValue);
+	if(!commonNamesJson.isArray())	commonNamesJson = Json::arrayValue;
+	if(!extraNamesJson.isArray())	extraNamesJson = Json::arrayValue;
+
+	for(const auto & name : commonNamesJson)
+	{
+		orderedNames.push_back(name.asString());
+		commonNames.insert(name.asString());
+	}
+	for(const auto & name : extraNamesJson)
+		orderedNames.push_back(name.asString());
+
+	return { orderedNames, commonNames };
+}
+
+}
 
 DynamicModules * DynamicModules::_singleton = nullptr;
 
@@ -61,15 +101,15 @@ DynamicModules::~DynamicModules()
 }
 
 
-bool DynamicModules::initializeModuleFromDir(std::string moduleDir, bool bundled, bool isCommon)
+bool DynamicModules::initializeModuleFromDir(std::string modulePackageDir, bool bundled, bool isCommon)
 {
-	if(moduleDir.size() == 0)
-		throw Modules::ModuleException("???", "Empty path was supplied to DynamicsModules::loadModule..");
+	if(modulePackageDir.size() == 0)
+		throw Modules::ModuleException("???", "Empty path was supplied to DynamicModules::initializeModuleFromDir.");
 
-	if(moduleDir[moduleDir.size() - 1] != '/')
-		moduleDir += '/';
-
-	Modules::DynamicModule	*newMod		= new Modules::DynamicModule(QString::fromStdString(moduleDir), this, bundled, isCommon);
+	//modulePackageDir is the module's *package* directory: Description.qml, qml/, icons/ live
+	//directly inside it (this is what the orchestrator's base_uri points at). The constructor
+	//normalizes any trailing slash.
+	Modules::DynamicModule	*newMod		= new Modules::DynamicModule(QString::fromStdString(modulePackageDir), this, bundled, isCommon);
 
 
 	if(isCommon)
@@ -165,7 +205,7 @@ std::string DynamicModules::loadModule(const std::string & moduleName)
 {
 	try
 	{
-		if(_modules.count(moduleName) == 0 && !initializeModuleFromDir(moduleDirectory(moduleName)))
+		if(_modules.count(moduleName) == 0 && !initializeModuleFromDir(moduleDirectory(moduleName) + "/" + moduleName))
 			throw std::runtime_error("Couldn't load (and initialize) module " + moduleName);
 
 
@@ -263,7 +303,7 @@ void DynamicModules::uninstallModule(const std::string & moduleName)
 			replacedWithBundled = bundledModuleInFilesystem(moduleName);
 
 	if(replacedWithBundled)
-		initializeModuleFromDir(bundledModuleLibraryPath(moduleName), true, _commonModuleNames.count(moduleName) > 0);
+		initializeModuleFromDir(bundledModuleLibraryPath(moduleName) + "/" + moduleName, true, _commonModuleNames.count(moduleName) > 0);
 	else if(_modules.count(moduleName) > 0)
 	{
 		unloadModule(moduleName);
@@ -285,6 +325,115 @@ void DynamicModules::uninstallModule(const std::string & moduleName)
 
 	if(!replacedWithBundled)	emit dynamicModuleUninstalled(QString::fromStdString(moduleName));
 
+}
+
+void DynamicModules::removeModule(const std::string & moduleName)
+{
+	// Catalog-driven removal: the core of uninstallModule minus the bundled-module fallback swap
+	// and the R-side uninstall round-trip — the orchestrator owns the runner/module lifecycle
+	// (HANDOVER-client-discovery.md).
+	if(_modules.count(moduleName) == 0)
+		return;
+
+	Log::log() << "Module '" << moduleName << "' left the catalog; removing." << std::endl;
+
+	unloadModule(moduleName);						// dynamicModuleUnloadBegin + reloadQmlImportPaths
+	_modules[moduleName]->setInstalled(false);
+
+	for(int i = int(_moduleNames.size()) - 1; i >= 0; i--)
+		if(_moduleNames[size_t(i)] == moduleName)
+			_moduleNames.erase(_moduleNames.begin() + i);
+
+	delete _modules[moduleName];
+	_modules.erase(moduleName);
+
+	emit dynamicModuleUninstalled(QString::fromStdString(moduleName));
+}
+
+void DynamicModules::applyCatalog(const ModuleCatalog & catalog)
+{
+	Log::log() << "Applying module catalog (" << catalog.size() << " module(s))." << std::endl;
+
+	// Presentation metadata the catalog deliberately does not carry: ribbon order + common/extra
+	// grouping (modules-settings.json). Entries absent from it append below, alphabetically.
+	const auto [orderedNames, commonNames] = moduleOrderingFromSettings();
+	insertCommonModuleNames(commonNames);
+
+	std::map<std::string, const CatalogModule *> byName;
+	for(const CatalogModule & entry : catalog)
+		byName[entry.name] = &entry;				// the orchestrator already dedups (name, version)
+
+	// Settings-file order first, then catalog leftovers (std::map iteration = alphabetical).
+	std::vector<const CatalogModule *> ordered;
+	for(const std::string & name : orderedNames)
+		if(auto it = byName.find(name); it != byName.end())
+		{
+			ordered.push_back(it->second);
+			byName.erase(it);
+		}
+	for(const auto & [name, entry] : byName)
+		ordered.push_back(entry);
+
+	std::set<std::string> catalogNames;
+
+	for(const CatalogModule * entry : ordered)
+	{
+		catalogNames.insert(entry->name);
+
+		const std::string packageDir = fileUriToLocalPath(entry->baseUri);		// trailing slash kept
+		if(packageDir.empty())
+		{
+			Log::log() << "Module " << entry->name << " has base_uri '" << entry->baseUri << "' which is not a local file path (non-file:// scheme, or a remote host); skipped." << std::endl;
+			continue;
+		}
+
+		// The package directory itself (base_uri minus file://): Description.qml, qml/, icons/
+		// live directly inside it, and initializeModuleFromDir loads straight from it —
+		// moduleInstFolder() reproduces base_uri exactly, so every asset path works unchanged.
+		const std::string moduleDir = QDir(tq(packageDir)).absolutePath().toStdString();
+
+		// Module identity derives from the package dir's name (an R invariant: package dirs are
+		// named after the package); if that disagrees with the catalog name we cannot key the
+		// two together — skip+log.
+		if(QDir(tq(moduleDir)).dirName().toStdString() != entry->name)
+		{
+			Log::log() << "Module " << entry->name << " lives in dir '" << QDir(tq(moduleDir)).dirName().toStdString() << "'; skipped (name mismatch)." << std::endl;
+			continue;
+		}
+
+		if(_modules.count(entry->name) > 0)
+		{
+			Modules::DynamicModule * live = _modules[entry->name];
+
+			bool sameVersion = false;
+			try		{ sameVersion = live->version().asString() == Version(entry->version).asString(); }	// normalized compare
+			catch(...)	{ sameVersion = false; }																// unparseable → rebuild (safe default)
+
+			const bool sameAssets = QDir(tq(packageDir)).absolutePath() == QDir(tq(live->moduleInstFolder())).absolutePath();
+
+			if(sameVersion && sameAssets)
+				continue;											// unchanged — nothing to do
+
+			Log::log() << "Module " << entry->name << (sameVersion ? " moved assets" : (" version " + live->version().asString() + " -> " + entry->version)) << "; rebuilding." << std::endl;
+			// Fall through: initializeModule detects the same-name occupant and hot-swaps
+			// (store/restore analyses JSON, dynamicModuleReplaced + dynamicModuleChanged).
+		}
+
+		try
+		{
+			initializeModuleFromDir(moduleDir, false, commonNames.count(entry->name) > 0);
+		}
+		catch(std::runtime_error & e)	// initializeModule itself warns + cleans up parse failures
+		{
+			Log::log() << "Module " << entry->name << " failed to load from '" << moduleDir << "': " << e.what() << std::endl;
+		}
+	}
+
+	// Remove live modules the catalog no longer carries (snapshot first: removal mutates).
+	const std::vector<std::string> liveNames = _moduleNames;
+	for(const std::string & name : liveNames)
+		if(catalogNames.count(name) == 0)
+			removeModule(name);
 }
 
 Modules::DynamicModule* DynamicModules::requestModuleForSomethingAndRemoveIt(std::set<std::string> & theSet)
@@ -418,7 +567,8 @@ void DynamicModules::installationPackagesSucceeded(const QString & moduleNames)
 	QStringList modulesLibs =  listStr.split(';', Qt::SkipEmptyParts);
 
 	for(QString& moduleLib : modulesLibs) {
-		auto dynMod = initializeModuleFromDir(moduleLib.toStdString(), false, true);
+		//The installer returns the module's *library* dir; the package dir inside shares its name.
+		auto dynMod = initializeModuleFromDir((moduleLib + "/" + QFileInfo(moduleLib).fileName()).toStdString(), false, true);
 	}
 	_moduleBundlesNeedingInstall.clear();
     // MessageForwarder::showWarning(tr("Install complete"), tr("Completed installation of Bundles: ") + listStr);
@@ -479,7 +629,7 @@ void DynamicModules::uninstallJASPDeveloperModule()
 void DynamicModules::refreshDeveloperModule(bool R, bool Qml)
 {
 	if(_modules.count(developmentModuleName())) {
-		EngineSync::singleton()->killModuleEngine(_modules[developmentModuleName()]);
+		// NEO gut: module-engine kill removed (engines gone); developer-module refresh continues below.
 		if(R && Qml)
 			installJASPDeveloperModule();
 		else if(R)

@@ -21,6 +21,7 @@
 #include "appinfo.h"
 #include "analysis.h"
 #include "analyses.h"
+#include "jaspclient/jaspclient.h"
 #include "tempfiles.h"
 #include "analysisform.h"
 #include "columnencoder.h"
@@ -222,7 +223,11 @@ void Analysis::setTitle(const std::string& title)
 
 void Analysis::abort()
 {
-	setStatus(Aborting);
+	// NEO: explicitly cancel the in-flight work unit (if any) instead of setting a
+	// command-status for a scheduler to poll.
+	if (JaspClient::client())
+		JaspClient::client()->abort(workId());
+	setStatus(Aborted);
 }
 
 void Analysis::remove()
@@ -263,8 +268,62 @@ void Analysis::exportResults()
 void Analysis::run()
 {
 	if (_isReport) return;
-	Log::log() << "Analysis::run() for " << title() << "(" << id() << ")" << std::endl;
-	setStatus(Empty);
+
+	// NEO: explicit submission replaces the old "set Empty, let the scheduler poll shouldRun()"
+	// trigger. run() is the single funnel — refresh() and option changes all end up here.
+	if (!JaspClient::client())
+	{
+		Log::log() << "Analysis::run() for " << title() << "(" << id() << ") but there is no JaspClient." << std::endl;
+		setStatus(Empty);
+		return;
+	}
+
+	setStatus(Running);
+
+	// work_id == this analysis's STABLE id (§19.1); revision rides as a field, bumped per re-submit.
+	// Re-submitting the same work_id evicts the in-flight slot in the client and supersedes any stale
+	// result (§23) — so there is no abort bookkeeping to do here.
+	Json::Value work = createWorkJson();
+
+	const size_t myId = id();
+	JaspClient::client()->submit(work, [myId](const Json::Value & results, const std::string & status, const Json::Value & progress)
+	{
+		Analysis * a = Analyses::analyses()->get(myId);
+		if (!a) return;								// analysis was removed in the meantime
+		a->setResults(results, analysisResultStatusFromString(status), progress);
+	});
+
+	Log::log() << "Analysis::run() submitted work " << workId() << " (revision " << revision() << ") for " << title() << std::endl;
+}
+
+Json::Value Analysis::createWorkJson()
+{
+	// NEO wire format (neo-jasp.md §19.1): level-zero orchestrator fields + a kind-specific
+	// payload. The frontend owns the revision (bumped on option change); the orchestrator
+	// resolves dataset_ids -> paths for the runner.
+	Json::Value work(Json::objectValue);
+	work["v"]			= 1;
+	work["type"]		= "work";
+	work["id"]			= "work-" + std::to_string(id()) + "-" + std::to_string(revision());
+	work["work_id"]		= workId();	// stable analysis instance id (§19.1); revision travels separately
+	work["kind"]		= "analysis";
+	work["revision"]	= revision();
+	work["dataset_ids"]	= Json::Value(Json::arrayValue);
+	work["dataset_ids"].append("ds-001");	// NEO alpha: single hardcoded dataset
+
+	Json::Value payload(Json::objectValue);
+	payload["module"]			= module();
+	payload["module_version"]	= moduleVersion().asString();
+	payload["analysis"]			= name();
+	payload["options"]			= boundValues();
+
+	Json::Value settings(Json::objectValue);
+	settings["ppi"]			= 96;
+	settings["numDecimals"]	= 3;
+	payload["settings"]		= settings;
+
+	work["payload"] = payload;
+	return work;
 }
 
 void Analysis::refresh()
@@ -280,8 +339,10 @@ void Analysis::refresh()
 
 void Analysis::saveImage(const Json::Value &options)
 {
-	setStatus(Analysis::SaveImg);
 	_imgOptions = options;
+	// NEO alpha: image save/edit/rewrite are not wired to the orchestrator yet (deferred);
+	// they used to set a command-status for the engine poll, which no longer exists.
+	Log::log() << "Analysis::saveImage() not implemented in NEO alpha (id " << id() << ")" << std::endl;
 }
 
 void Analysis::imageSaved(const Json::Value & results)
@@ -295,8 +356,9 @@ void Analysis::imageSaved(const Json::Value & results)
 
 void Analysis::editImage(const Json::Value &options)
 {
-	setStatus(Analysis::EditImg);
 	_imgOptions = options;
+	// NEO alpha: deferred (see saveImage).
+	Log::log() << "Analysis::editImage() not implemented in NEO alpha (id " << id() << ")" << std::endl;
 }
 
 void Analysis::imageEdited(const Json::Value & results)
@@ -353,7 +415,8 @@ bool Analysis::updatePlotSize(const std::string & plotName, int width, int heigh
 
 void Analysis::rewriteImages()
 {
-	setStatus(Analysis::RewriteImgs);
+	// NEO alpha: deferred (see saveImage).
+	Log::log() << "Analysis::rewriteImages() not implemented in NEO alpha (id " << id() << ")" << std::endl;
 }
 
 void Analysis::imagesRewritten(const Json::Value & results)
@@ -370,13 +433,9 @@ Analysis::Status Analysis::parseStatus(std::string name)
 	else if (name == "initializing")	return Analysis::Empty;		//For backwards compatibility
 	else if (name == "waiting")			return Analysis::Running;	//For backwards compatibility
 	else if (name == "running")			return Analysis::Running;
-	else if (name == "runningImg")		return Analysis::RunningImg;
 	else if (name == "complete")		return Analysis::Complete;
-	else if (name == "RewriteImgs")		return Analysis::RewriteImgs;
 	else if (name == "validationError")	return Analysis::ValidationError;
 	else if (name == "aborted")			return Analysis::Aborted;
-	else if (name == "SaveImg")			return Analysis::SaveImg;
-	else if (name == "EditImg")			return Analysis::EditImg;
 	else								return Analysis::FatalError;
 }
 
@@ -411,6 +470,11 @@ void Analysis::createForm(QQuickItem* parentItem)
 			_analysisForm->setIsAnnotated();
 
 		emit analysisInitialized();
+
+		// NEO: nothing polls anymore, so fire the initial run explicitly once the form is ready.
+		// A fresh analysis (Empty) otherwise sits idle until an option happens to change.
+		if (isEmpty() && form() && !_isReport && !isWaitingForModule())
+			run();
 	}
 
 	_lastQmlFormPath = qmlFormPath(false, true); //dont leave this uninitialized
@@ -420,7 +484,7 @@ Analysis::Status Analysis::analysisResultsStatusToAnalysisStatus(analysisResultS
 {
 	switch(result)
 	{
-	case analysisResultStatus::changed:			return Analysis::KeepStatus; //changed is returned by the engine when it was killed by us, the desktop, so we return KeepStatus which tells the analysis that it shouldn't change status. A bit unwieldy but requires least changes.
+	case analysisResultStatus::changed:			return Analysis::Complete; //NEO: no KeepStatus sentinel anymore; a stale 'changed' just settles to Complete
 	case analysisResultStatus::validationError:	return Analysis::ValidationError;
 	case analysisResultStatus::fatalError:		return Analysis::FatalError;
 	case analysisResultStatus::imageSaved:
@@ -428,7 +492,7 @@ Analysis::Status Analysis::analysisResultsStatusToAnalysisStatus(analysisResultS
 	case analysisResultStatus::imagesRewritten:
 	case analysisResultStatus::complete:		return Analysis::Complete;
 	case analysisResultStatus::running:			return Analysis::Running;
-	default:									throw std::logic_error("When you define new analysisResultStatuses like '" + analysisResultStatusToString(result)  +  "' you should add them to EngineRepresentation::analysisResultStatusToAnalysStatus!");
+	default:									return Analysis::Complete;
 	}
 }
 
@@ -438,13 +502,8 @@ std::string Analysis::statusToString(Status status)
 	{
 	case Analysis::Empty:			return "empty";
 	case Analysis::Running:			return "running";
-	case Analysis::RunningImg:		return "runningImg";
 	case Analysis::Complete:		return "complete";
 	case Analysis::Aborted:			return "aborted";
-	case Analysis::Aborting:		return "aborting";
-	case Analysis::SaveImg:			return "SaveImg";
-	case Analysis::EditImg:			return "EditImg";
-	case Analysis::RewriteImgs:		return "RewriteImgs";
 	case Analysis::ValidationError:	return "validationError";
 	case Analysis::FatalError:		return "fatalError";
 	default:						return "?????";
@@ -551,12 +610,6 @@ void Analysis::loadResultsUserdataAndRSourcesFromJASPFile(const Json::Value & an
 
 void Analysis::setStatus(Analysis::Status status)
 {
-	if(status == Analysis::KeepStatus)
-	{
-		Log::log() << "Analysis " << _id << " '" << _title << "' got setStatus(KeepStatus) so it ignores it." << std::endl;
-		return;
-	}
-
 	if(_status == status)
 		return;
 
@@ -618,20 +671,6 @@ void Analysis::requestComputedColumnDestructionHandler(const std::string& column
 	emit requestComputedColumnDestruction(columnName, this);
 }
 
-performType Analysis::desiredPerformTypeFromAnalysisStatus() const
-{
-	switch(status())
-	{
-	case Analysis::Empty:		return(performType::run);
-	case Analysis::SaveImg:		return(performType::saveImg);
-	case Analysis::EditImg:		return(performType::editImg);
-	case Analysis::RewriteImgs:	return(performType::rewriteImgs);
-	case Analysis::Aborted:
-	case Analysis::Aborting:	return(performType::abort);
-	default:					return(performType::run);
-	}
-}
-
 stringset Analysis::usedVariables()
 {
 	if (form())	return form()->usedVariables();
@@ -654,45 +693,6 @@ void Analysis::filterByNameDone(const QString &name, const QString &error)
 {
 	if (_analysisForm)
 		_analysisForm->filterByNameDone(name, error);
-}
-
-Json::Value Analysis::createAnalysisRequestJson()
-{
-	performType perform = desiredPerformTypeFromAnalysisStatus();
-
-	switch(perform)
-	{
-	case performType::abort:		setStatus(Analysis::Aborted);	break;
-	case performType::run:			setStatus(Analysis::Running);	break;
-	case performType::saveImg:
-	case performType::editImg:
-	case performType::rewriteImgs:	setStatus(Analysis::RunningImg); break;
-	default:														break;
-	}
-
-	Json::Value json = Json::Value(Json::objectValue);
-
-	json["typeRequest"]			= engineStateToString(engineState::analysis);
-	json["id"]					= int(id());
-	json["perform"]				= performTypeToString(perform);
-	json["preloadData"]			= _moduleData ? _moduleData->preloadData() : true;
-	json["revision"]			= revision();
-	json["rfile"]				= _moduleData == nullptr ? rfile() : "";
-	json["dynamicModuleCall"]	= _moduleData == nullptr ? "" : _moduleData->getFullRCall();
-	json["resultFont"]			= PreferencesModel::prefs()->resultFont().toStdString();
-
-	if (!isAborted())
-	{
-		json["name"]			= name();
-		json["title"]			= title();
-
-		bool imgP = perform == performType::saveImg || perform == performType::editImg;
-		if (imgP)	json["image"]		= imgOptions();
-
-		json["options"]		= boundValues();
-	}
-
-	return json;
 }
 
 void Analysis::emitDuplicationSignals()

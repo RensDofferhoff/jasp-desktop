@@ -73,8 +73,11 @@ class DynamicModule : public QObject
 
 public:
 	//To do make the constructors less misleading (std::string vs QString does not do the same thing at all!) Some kind of a static MakeDynamicModule function and making the constructors private should do the trick
-	///This constructor takes the path to an installed jasp-module as path (aka a directory that contains a library of R packages, one of which is the actual module with QML etc)
-	explicit DynamicModule(QString moduleDirectory, QObject *parent, bool isBundled, bool isCommon);
+	///This constructor takes the path to the module's *package directory* — the dir containing
+	///Description.qml, qml/, icons/, help/ (an installed R package dir, named after the package).
+	///The R library containing it is its parent. Trailing slashes are normalized away; see the
+	///.cpp for the storage invariant that makes moduleRLibrary()/moduleInstFolder() come out right.
+	explicit DynamicModule(QString modulePackageDir, QObject *parent, bool isBundled, bool isCommon);
 
 	///This constructor takes the path to an R-package as first argument, this R-package must also be a jasp-module and will be installed to the app-directory for the particular OS it runs on.
 	explicit DynamicModule(QQmlContext * context, std::string modulePackageFile, QObject *parent, bool unpack = true);

@@ -1,0 +1,18 @@
+gmacro
+AutoReport
+
+Worksheet "File names"
+let k2 = count(c1)
+name k2 'NumberFiles'
+
+do k1 = 1:k2
+
+  let k4 = c1[k1]
+  Worksheet k4
+
+
+  # Necessary as constant k1 needs to be updated and it is stored in "File names"
+  Worksheet "File names"  
+
+enddo
+endmacro

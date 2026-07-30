@@ -4,8 +4,6 @@
 #include <QQuickItem>
 #include <QFileInfo>
 
-class EngineRepresentation;
-
 ///
 /// Interface for the R-commander. Keeps a log, and handles communication with the engine that belongs to it.
 class RCommander : public QQuickItem
@@ -59,7 +57,6 @@ private:
 	static RCommander		*	_lastCommander;
 	QString						_output			= "", //Set in qml to have it be translatable
 								_lastCmd		= "";
-	EngineRepresentation	*	_engine			= nullptr;
 	bool						_running		= false,
 								_isAnalysisCode = false,
 								_wdWasSet		= false;

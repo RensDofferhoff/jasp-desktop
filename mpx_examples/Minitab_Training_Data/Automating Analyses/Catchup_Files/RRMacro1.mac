@@ -1,0 +1,13 @@
+Macro
+
+RRMacro p o mdata
+
+MColumn p o mdata
+
+GageRR;
+  Parts p;
+  Opers o;
+  Response mdata;
+  Studyvar 6.
+
+EndMacro
