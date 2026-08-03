@@ -150,7 +150,8 @@ public:
 				QString				autoSavedFileName()					const;
 				bool				hasAnalyses()						const	{ return _analysesData.size() > 0;				}
 				bool				synchingData()						const	{ return _synchingData;								}
-				std::string			dataFilePath()						const	{ return _dataSet ? _dataSet->dataFilePath() : "";  }
+				std::string			dataFilePath()				const	{ return _dataSet ? _dataSet->dataFilePath() : "";  }
+		const	std::string		&	datasetId()					const	{ return _datasetId;	} ///< NEO: orchestrator-assigned id of the currently open dataset ("" until dataset_ready)
 				bool				dataFileCanHaveLabels()				const;
 				bool				isDatabase()						const	{ return _database != Json::nullValue;				}
 		const	Json::Value		&	databaseJson()						const	{ return _database;								}
@@ -176,6 +177,7 @@ public:
 				void				updateDbToCurrentVersion();							///< Should be ran immediately after loading the jasp file
 				void				setWarningMessage(std::string message)				{ _warningMessage				= message;			}
 				void				setDataFilePath(std::string filePath, long timestamp = 0);
+				void				neoOpenDataset(std::string filePath);	///< NEO: submit a source file as a data_open work to the orchestrator (main thread only)
 				void				setDatabaseJson(const Json::Value & dbInfo);
 				void				setInitialMD5(std::string initialMD5)				{ _initialMD5					= initialMD5;		}
 				void				setDataFileReadOnly(bool readOnly)					{ _dataFileReadOnly				= readOnly;			}
@@ -319,6 +321,7 @@ signals:
 				void				currentFileChanged();
 				void				synchingIntervalPassed();
 				void				newDataLoaded();
+				void				datasetIdChanged();	///< NEO: the orchestrator assigned/refreshed the current dataset id
 				void				dataModeChanged(bool dataMode);
 				void				synchingExternallyChanged(bool);
 				bool				askUserForExternalDataFile();
@@ -398,6 +401,8 @@ private:
 								_jaspVersion;
 
 	bool						_synchingData				= false;
+	std::string					_datasetId;		///< NEO: orchestrator dataset id of the open dataset (main thread only)
+	int							_nextDataOpen			= 0;	///< NEO: work_id counter for data_open submissions
 	std::map<std::string, bool> _columnNameUsedInEasyFilter;
 
 	SubNodeModel			*	_dataSubModel,

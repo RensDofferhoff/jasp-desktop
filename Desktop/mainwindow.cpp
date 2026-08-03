@@ -1820,7 +1820,10 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 			populateUIfromDataSet();
 
 			_package->setCurrentFile(event->path());
-			
+
+			// NEO data plane: open the dataset as a work on the orchestrator (CSV for now).
+			// Main thread (queued connection); the bytes are read by the data-runner process.
+			_package->neoOpenDataset(event->path().toStdString());
 
 			if(_package->currentFile().startsWith(AppDirs::autoSaveDir()))
 				_package->setModified(true); //Its autosaved after all

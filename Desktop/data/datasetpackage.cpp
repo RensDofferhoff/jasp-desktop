@@ -19,6 +19,7 @@
 #include "log.h"
 #include "utilities/qutils.h"
 #include <QThread>
+#include "jaspclient/jaspclient.h"
 #include "columnencoder.h"
 #include "analysis/analysis.h" // NEO gut: was transitive via engine/enginesync.h; now explicit
 #include "timers.h"
@@ -2548,6 +2549,64 @@ void DataSetPackage::setDataFilePath(std::string filePath, long timestamp)
 
 	setModified(true);
 	emit synchingExternallyChanged(synchingExternally());
+}
+
+void DataSetPackage::neoOpenDataset(std::string filePath)
+{
+	// NEO data plane (dataset-manager-design §5.1): opening a dataset is just a WORK — the
+	// orchestrator mints the dataset_id, assigns the cache path, routes the conversion to a
+	// lane, and answers with the normal terminal result (dataset_id spliced in). Submitted
+	// through JaspClient::submit like any analysis work — no special message, no special
+	// client path. Main-thread only (MainWindow::dataSetIOCompleted calls this once a file
+	// open succeeds); the CSV bytes are read by the data-runner PROCESS, not here — nothing
+	// in this call touches the file or a loader thread.
+	const QString qPath = tq(filePath);
+	if (!qPath.endsWith(".csv", Qt::CaseInsensitive))
+		return;
+	if (!JaspClient::client())
+		return;
+
+	// NEO wire shape: op data_open; cache_path is orchestrator-assigned at dispatch (the
+	// lane writes the Arrow there). ingest carries the JASP "threshold for scale"
+	// preference; the other knobs take orchestrator defaults for now.
+	Json::Value ingest(Json::objectValue);
+	ingest["threshold"] = PreferencesModel::prefs()->thresholdScale();
+
+	Json::Value payload(Json::objectValue);
+	payload["op"]			= "data_open";
+	payload["source"]		= filePath;
+	payload["cache_path"]	= "";	// assigned by the orchestrator at dispatch
+	payload["format"]		= "csv";
+	payload["ingest"]		= ingest;
+
+	const std::string workId = "data-open-" + std::to_string(_nextDataOpen++);
+
+	Json::Value work(Json::objectValue);
+	work["v"]			= 1;
+	work["type"]		= "work";
+	work["id"]			= workId;
+	work["work_id"]		= workId;
+	work["revision"]	= 0;
+	work["dataset_ids"]	= Json::Value(Json::arrayValue);
+	work["kind"]		= "data";
+	work["payload"]		= payload;
+
+	Log::log() << "NEO dataset_open work " << workId << ": " << filePath << std::endl;
+	JaspClient::client()->submit(work, [this](const Json::Value & results,
+											  const std::string  & status,
+											  const Json::Value  &)
+	{
+		if (status != "complete")
+		{
+			Log::log() << "NEO dataset_open failed (" << status << "): "
+					   << results.get("errorMessage", "").asString() << std::endl;
+			return;
+		}
+		_datasetId = results.get("dataset_id", "").asString();
+		Log::log() << "NEO dataset ready: " << _datasetId
+				   << " (" << results.get("rows", 0).asUInt64() << " rows)" << std::endl;
+		emit datasetIdChanged();
+	});
 }
 
 void DataSetPackage::setDatabaseJson(const Json::Value &dbInfo)		

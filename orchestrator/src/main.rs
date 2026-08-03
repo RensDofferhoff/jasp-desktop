@@ -34,7 +34,6 @@
 //!
 //! Environment (§8):
 //! * `JASP_ORCH_URL`             control endpoint; scheme selects transport (default `tcp://127.0.0.1:9555`).
-//! * `JASP_ORCH_TEST_DATASET`    alpha dataset path injected into each work (default `test_data/debug.arrow`).
 //! * `JASP_ORCH_DIR_ROOT`        orchestrator directory root (default `/tmp/jasp-orchestrator`).
 //! * `JASP_ORCH_HANG_TIMEOUT_MS` busy hang timeout (default `30000`).
 //! * `JASP_ORCH_ACTIVITY_MIN_MS` suggested `activity` rate-limit advertised to runners (default `1000`).
@@ -48,7 +47,7 @@
 mod messages;
 mod provisioner;
 
-use messages::{Capability, Envelope, Message, ModuleInfo, Status, WorkPayload};
+use messages::{Capability, DataOp, Envelope, Message, ModuleInfo, Status, WorkPayload};
 use nng::options::{LocalAddr, Options, RecvBufferSize, SendBufferSize};
 use nng::{Aio, AioResult, Listener, Pipe, PipeEvent, Protocol, Socket};
 use provisioner::{ProvEvent, ProvReq, RunnerProvisioner};
@@ -101,7 +100,6 @@ fn now_ms() -> u64 {
 
 struct Config {
     control_url: String,
-    dataset_path: String,
     orchestrator_dir_root: String,
     hang_timeout_ms: u64,
     activity_min_ms: u64,
@@ -176,7 +174,6 @@ impl Config {
         Config {
             control_url: std::env::var("JASP_ORCH_URL")
                 .unwrap_or_else(|_| "tcp://127.0.0.1:9555".into()),
-            dataset_path: alpha_dataset_path(),
             orchestrator_dir_root: std::env::var("JASP_ORCH_DIR_ROOT")
                 .unwrap_or_else(|_| "/tmp/jasp-orchestrator".into()),
             hang_timeout_ms: parse("JASP_ORCH_HANG_TIMEOUT_MS", 30_000),
@@ -224,21 +221,15 @@ impl Config {
         self.work_workspace(session_id, work_id)
             .join(format!("results_{revision}"))
     }
-}
 
-/// Resolve the alpha test dataset to an absolute path so the runner never depends on the
-/// orchestrator's cwd. Overridable via `JASP_ORCH_TEST_DATASET`. Phase 3 replaces this entirely
-/// with real per-dataset paths handed out by the data plane (§8).
-fn alpha_dataset_path() -> String {
-    let raw =
-        std::env::var("JASP_ORCH_TEST_DATASET").unwrap_or_else(|_| "test_data/debug.arrow".into());
-    let path = std::path::PathBuf::from(&raw);
-    if path.is_absolute() {
-        return raw;
+    /// Per-dataset cache file: `<orchestrator_dir_root>/<session_id>/datasets/<dataset_id>_<revision>.arrow`.
+    /// The orchestrator assigns the path (identity); the data lane writes the file (I/O).
+    /// The revision suffix is orchestrator-internal — the frontend sees only the stable id.
+    fn dataset_cache_path(&self, session_id: &str, dataset_id: &str, revision: u64) -> PathBuf {
+        self.session_workspace(session_id)
+            .join("datasets")
+            .join(format!("{dataset_id}_{revision}.arrow"))
     }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(path).to_string_lossy().into_owned())
-        .unwrap_or(raw)
 }
 
 /// Read back the address a listener actually bound, as a dialable URL — the single source of truth
@@ -319,12 +310,16 @@ impl FrontendRuntime {
 }
 
 /// One in-flight work unit's routing record (§6). Keyed in [`Router::work`] by
-/// `(session_id, work_id)`. `Clone` is cheap (two `Arc` bumps + a `u64`).
+/// `(session_id, work_id)`. `Clone` is cheap (two `Arc` bumps + small vecs).
 #[derive(Clone)]
 struct WorkRoute {
     frontend: Arc<FrontendRuntime>,
     runner: Arc<RunnerRuntime>,
     revision: u64,
+    /// Cache-file paths resolved from `dataset_ids` at dispatch; each holds a `path_refs`
+    /// reference for the route's whole lifetime, released at teardown. Empty for data work
+    /// (the lane writes its own cache file).
+    dataset_paths: Vec<PathBuf>,
 }
 
 /// A freshly-allocated data channel: the shared PAIR socket (used by both the Aio recv loop and
@@ -385,26 +380,42 @@ enum RouterMsg {
     /// Test-only: has any runner ever registered?
     #[allow(dead_code)]
     QueryEverRegistered(Reply<bool>),
+    /// Test-only: snapshot the dataset index — `(id, state, current_path, refs on that path)`.
+    #[allow(dead_code)]
+    QueryDatasets(Reply<Vec<(String, String, PathBuf, usize)>>),
 }
 
 // ─── Janitor (off-router filesystem reclamation) ─────────────────────────────
 
-/// Mailbox for the janitor: paths to delete recursively.
-type JanitorTx = mpsc::Sender<std::path::PathBuf>;
+/// A deferred filesystem reclamation request. The router only *decides* (pure memory) and
+/// enqueues non-blocking; the janitor thread does the I/O sequentially. `Dir` reclaims a
+/// workspace tree (`remove_dir_all`); `File` reclaims a single retired dataset cache file
+/// (`remove_file`) — the dataset manager's new-file + map-swap mechanism retires files the
+/// janitor deletes once their refcount drains.
+enum Reclaim {
+    Dir(PathBuf),
+    File(PathBuf),
+}
 
-/// Spawn the single janitor thread and return its mailbox. Recursive directory deletion is
-/// blocking filesystem I/O of unbounded duration, so it must never run on the router thread (the
-/// "router never blocks" invariant). The router only ever enqueues a path (non-blocking); the
-/// janitor does the deletion sequentially. Deletion is best-effort — `NotFound` is treated as
-/// success (already gone), so cleanup is idempotent and a failed or repeated delete is harmless;
-/// startup GC is the backstop for anything leaked.
+/// Mailbox for the janitor: reclamation requests.
+type JanitorTx = mpsc::Sender<Reclaim>;
+
+/// Spawn the single janitor thread and return its mailbox. Filesystem deletion is blocking
+/// I/O of unbounded duration, so it must never run on the router thread (the "router never
+/// blocks" invariant). Deletion is best-effort — `NotFound` is treated as success (already
+/// gone), so cleanup is idempotent and a failed or repeated delete is harmless; startup GC
+/// is the backstop for anything leaked.
 fn start_janitor() -> JanitorTx {
-    let (tx, rx) = mpsc::channel::<std::path::PathBuf>();
+    let (tx, rx) = mpsc::channel::<Reclaim>();
     std::thread::Builder::new()
         .name("orch-janitor".into())
         .spawn(move || {
-            while let Ok(path) = rx.recv() {
-                match std::fs::remove_dir_all(&path) {
+            while let Ok(reclaim) = rx.recv() {
+                let (path, result) = match reclaim {
+                    Reclaim::Dir(path) => (path.clone(), std::fs::remove_dir_all(&path)),
+                    Reclaim::File(path) => (path.clone(), std::fs::remove_file(&path)),
+                };
+                match result {
                     Ok(()) => println!("[orch] reclaimed {}", path.display()),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                     Err(e) => eprintln!("[orch] cleanup failed for {}: {e}", path.display()),
@@ -435,6 +446,42 @@ struct ParkedWork {
     parked_ms: u64,
 }
 
+// ── Dataset manager (identity + lifecycle, not I/O; dataset-manager-design.md) ─
+
+/// Lifecycle of a dataset in the index. A failed open removes the entry — a dataset either
+/// exists (opening/ready) or it does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DatasetState {
+    /// The open work is in flight on a lane.
+    Opening,
+    /// The lane wrote the cache file and reported `{schema, rows}`; `work` may reference it.
+    Ready,
+}
+
+/// One dataset the orchestrator owns the identity of. The router never reads or converts a
+/// byte — it mints ids, tracks `id → current cache file`, routes conversion/edits to lanes,
+/// and reclaims retired files (via the janitor).
+// `id`/`revision`/`ingest` are consumed by the edit flow (map swap re-forwards `ingest`);
+// this increment (open only) stores them but does not read them back.
+#[allow(dead_code)]
+struct DatasetEntry {
+    id: String,
+    /// The session that opened it; scopes the cache dir.
+    session: String,
+    /// What `id` resolves to now: `<session>/datasets/<id>_<revision>.arrow`. Swapped on
+    /// edit (new file + map swap; the old file is retired to the janitor once refs drain).
+    current_path: PathBuf,
+    /// Column schema reported by the lane (a few KB); known once `Ready`. Opaque to the
+    /// router — carried verbatim into `dataset_ready`.
+    schema: Option<serde_json::Value>,
+    /// Bumped per edit; also the cache-file name suffix. The initial open is revision 0.
+    revision: u64,
+    state: DatasetState,
+    /// Ingestion settings captured at open; forwarded on every routed data op (the lane is
+    /// stateless). Changing them is a re-open, not an edit.
+    ingest: messages::IngestParams,
+}
+
 /// The single-threaded state machine. Owns the registries, correlation table, and channel keep-
 /// alives as plain `HashMap`s — safe because only the router thread ever touches them. Created once
 /// by [`Broker::start`], moved into the router thread, and driven by [`Router::run`].
@@ -445,6 +492,15 @@ struct Router {
     /// Work awaiting a runner that does not exist yet, keyed `(session_id, work_id)`. Only used when
     /// a provisioner is configured; empty otherwise.
     parked: HashMap<(String, String), ParkedWork>,
+    /// The dataset index: `dataset_id → entry` (identity + current cache file + state).
+    /// Single-threaded convention: a plain `HashMap`, touched only by the router thread.
+    datasets: HashMap<String, DatasetEntry>,
+    /// Outstanding dispatch references per cache file (acquire at dispatch, release at
+    /// teardown). Decision state only — the router never stats/deletes; the janitor does.
+    path_refs: HashMap<PathBuf, usize>,
+    /// Data work in flight, keyed by `(session_id, work_id)` → the dataset it serves (the
+    /// orchestrator mints the dataset_id at dispatch). The terminal result completes it.
+    data_works: HashMap<(String, String), String>,
     /// Strong `Aio` refs keep the per-channel recv loops alive. Keyed by runner_id / session_id
     /// (and "control" for the REP socket).
     aios: HashMap<String, Aio>,
@@ -523,6 +579,26 @@ impl Router {
                 }
                 RouterMsg::QueryEverRegistered(reply) => {
                     let _ = reply.send(self.ever_registered);
+                }
+                RouterMsg::QueryDatasets(reply) => {
+                    let snap: Vec<(String, String, PathBuf, usize)> = self
+                        .datasets
+                        .values()
+                        .map(|e| {
+                            let state = match e.state {
+                                DatasetState::Opening => "opening",
+                                DatasetState::Ready => "ready",
+                            };
+                            let refs = self.path_refs.get(&e.current_path).copied().unwrap_or(0);
+                            (
+                                e.id.clone(),
+                                state.to_string(),
+                                e.current_path.clone(),
+                                refs,
+                            )
+                        })
+                        .collect();
+                    let _ = reply.send(snap);
                 }
             }
         }
@@ -948,16 +1024,42 @@ impl Router {
         // 2. Stamp session_id so (session_id, work_id) round-trips through the runner.
         env.session_id = Some(fe.session_id.clone());
 
-        // 3. Inject runner-facing fields (§19.3): absolute dataset path + this revision's
-        // self-contained workspace. Per-revision isolation: `output_dir` is `results_<revision>`,
-        // so concurrent/out-of-order revisions never share a mutable workspace. The orchestrator
-        // owns workspace *lifecycle* (naming + reclamation via the janitor) but never touches the
-        // filesystem on the router thread — the runner creates `output_dir` and seeds it.
+        // 3. Resolve dataset_ids → current cache paths through the dataset index, ACQUIRING
+        // a `path_refs` reference on each resolved file (§5.3: the work holds its dataset
+        // refs for its whole lifetime, released at teardown). Unknown / not-Ready ids fail
+        // the dispatch with a stateless `dataset_not_ready` error — no waiters (the
+        // frontend is gated on the open's result; dataset-manager-design §8).
+        let mut resolved: Vec<(String, PathBuf)> = Vec::with_capacity(w.dataset_ids.len());
+        for id in &w.dataset_ids {
+            let path = match self.datasets.get(id) {
+                Some(entry) if entry.state == DatasetState::Ready => entry.current_path.clone(),
+                _ => {
+                    // Roll back the refs acquired earlier in this loop.
+                    let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
+                    self.release_paths(&acquired);
+                    self.send_dataset_not_ready(&fe, w, id);
+                    return;
+                }
+            };
+            *self.path_refs.entry(path.clone()).or_insert(0) += 1;
+            resolved.push((id.clone(), path));
+        }
+
+        // 4. Inject runner-facing fields (§19.3): the resolved dataset paths + this
+        // revision's self-contained workspace. Per-revision isolation: `output_dir` is
+        // `results_<revision>`, so concurrent/out-of-order revisions never share a mutable
+        // workspace. The orchestrator owns workspace *lifecycle* (naming + reclamation via
+        // the janitor) but never touches the filesystem on the router thread — the runner
+        // creates `output_dir` and seeds it.
         let output_dir = self
             .config
             .revision_dir(&fe.session_id, &w.work_id, w.revision);
+        let mut dataset_paths = serde_json::Map::new();
+        for (id, path) in &resolved {
+            dataset_paths.insert(id.clone(), json!(path.to_string_lossy()));
+        }
         let mut value = serde_json::to_value(&env).expect("work envelope to value");
-        value["dataset_paths"] = json!({ "ds-001": self.config.dataset_path });
+        value["dataset_paths"] = serde_json::Value::Object(dataset_paths);
         value["output_dir"] = json!(output_dir.to_string_lossy());
         // Base revision to seed incremental recompute from (frontend-declared): inject the concrete
         // path so the runner can copy it into its own dir; absent → full recompute (no seed).
@@ -965,22 +1067,68 @@ impl Router {
             let base_dir = self.config.revision_dir(&fe.session_id, &w.work_id, base);
             value["base_results_dir"] = json!(base_dir.to_string_lossy());
         }
+
+        // Data-open work: the orchestrator assigns identity — mint the dataset_id, assign
+        // the revision-0 cache path, index the dataset as Opening, and inject the path into
+        // the payload (the sender leaves it empty; identity, not I/O — the lane writes the
+        // file). The lane's terminal result completes the open (`route_result`).
+        if let WorkPayload::Data(d) = &w.payload
+            && d.op == DataOp::Open
+        {
+            let (dataset_id, _seq) = self.next_id("ds");
+            let cache_path = self
+                .config
+                .dataset_cache_path(&fe.session_id, &dataset_id, 0);
+            println!(
+                "[orch] dataset_open {dataset_id} (session {}) format='{}' '{}' -> lane {}",
+                fe.session_id, d.format, d.source, runner.runner_id
+            );
+            let mut ingest = d.ingest.clone();
+            if ingest.format.is_empty() {
+                ingest.format = d.format.clone();
+            }
+            self.datasets.insert(
+                dataset_id.clone(),
+                DatasetEntry {
+                    id: dataset_id.clone(),
+                    session: fe.session_id.clone(),
+                    current_path: cache_path.clone(),
+                    schema: None,
+                    revision: 0,
+                    state: DatasetState::Opening,
+                    ingest,
+                },
+            );
+            self.data_works
+                .insert((fe.session_id.clone(), w.work_id.clone()), dataset_id);
+            value["payload"]["cache_path"] = json!(cache_path.to_string_lossy());
+            if d.ingest.format.is_empty() {
+                value["payload"]["ingest"]["format"] = json!(d.format);
+            }
+        }
+
         let frame = frame_bytes(&serde_json::to_vec(&value).expect("re-serialize work"));
 
-        // 4. Record the route, bump outstanding, forward.
+        // 5. Record the route, bump outstanding, forward.
         let key = (fe.session_id.clone(), w.work_id.clone());
         println!(
             "[orch] fe->rn work work_id={} revision={} session={} runner={}",
             w.work_id, w.revision, fe.session_id, runner.runner_id
         );
-        self.work.insert(
+        let superseded = self.work.insert(
             key,
             WorkRoute {
                 frontend: fe,
                 runner: Arc::clone(&runner),
                 revision: w.revision,
+                dataset_paths: resolved.into_iter().map(|(_, p)| p).collect(),
             },
         );
+        // A resubmit of the same work_id supersedes the in-flight revision: its late result
+        // is dropped as stale, so its route (and dataset refs) end here.
+        if let Some(old) = superseded {
+            self.release_paths(&old.dataset_paths);
+        }
         runner.outstanding.fetch_add(1, Ordering::Relaxed);
         if let Err(e) = runner.send(frame) {
             // Backpressure (buffer full) or a closed peer: the runner is hung/gone → evict it.
@@ -1014,6 +1162,10 @@ impl Router {
                     )
                 }
                 WorkPayload::Rcode(_) => "No runner is available to run R code.".to_string(),
+                WorkPayload::Data(d) => format!(
+                    "No data lane is available to perform {:?} (format '{}').",
+                    d.op, d.format
+                ),
             };
             eprintln!(
                 "[orch] no live runner for work_id={} — returning error",
@@ -1182,12 +1334,46 @@ impl Router {
 
     /// Result (runner → frontend) — §6.2.
     fn route_result(&mut self, env: Envelope, terminal: bool) {
-        let (work_id, revision) = match &env.body {
-            Message::Result(r) => (r.work_id.clone(), r.revision),
+        let (work_id, revision, status) = match &env.body {
+            Message::Result(r) => (r.work_id.clone(), r.revision, r.status.clone()),
             _ => return,
         };
         let session_id = env.session_id.clone().unwrap_or_default();
         let key = (session_id.clone(), work_id.clone());
+
+        // Data-plane work (a dataset open; later edits): the terminal result completes it —
+        // flip the dataset entry and splice the orchestrator-minted dataset_id into the
+        // forwarded result, so the submitter learns the identity to reference in work.
+        // (The router still manages the dataset; the open just rides the work pipeline.)
+        let data_dataset = if terminal {
+            self.data_works.remove(&key)
+        } else {
+            None
+        };
+        if let Some(dataset_id) = &data_dataset {
+            if matches!(status, Status::Complete) {
+                if let Some(entry) = self.datasets.get_mut(dataset_id) {
+                    entry.state = DatasetState::Ready;
+                    if let Message::Result(r) = &env.body {
+                        entry.schema = Some(
+                            r.payload
+                                .results
+                                .get("schema")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
+                        );
+                    }
+                }
+                println!("[orch] dataset {dataset_id} ready — {session_id}");
+            } else {
+                // Failed open: drop the entry; the janitor sweeps any partial cache file.
+                eprintln!("[orch] dataset {dataset_id} open failed (lane error)");
+                if let Some(entry) = self.datasets.remove(dataset_id) {
+                    self.path_refs.remove(&entry.current_path);
+                    let _ = self.janitor.send(Reclaim::File(entry.current_path));
+                }
+            }
+        }
 
         let Some(route) = self.work.get(&key).cloned() else {
             println!("[orch] result for unknown work ({session_id},{work_id}) — dropping");
@@ -1202,15 +1388,26 @@ impl Router {
             return;
         }
         // Frontend send is best-effort (a user session is tolerated, not evicted, on a transient
-        // full buffer). The route is still removed on terminal so the table doesn't leak.
-        if let Err(e) = route.frontend.send(frame_envelope(&env)) {
+        // full buffer). The route is still removed on terminal so the table doesn't leak. A
+        // terminal data-work result carries the spliced dataset_id.
+        let frame = if let Some(dataset_id) = &data_dataset {
+            let mut value = serde_json::to_value(&env).expect("result envelope to value");
+            value["payload"]["results"]["dataset_id"] = json!(dataset_id);
+            frame_bytes(&serde_json::to_vec(&value).expect("re-serialize result"))
+        } else {
+            frame_envelope(&env)
+        };
+        if let Err(e) = route.frontend.send(frame) {
             eprintln!(
                 "[orch] result to frontend {} failed ({e}); dropping result",
                 route.frontend.session_id
             );
         }
         if terminal {
-            self.work.remove(&key);
+            // Teardown: release the work's dataset references (acquired at dispatch).
+            if let Some(route) = self.work.remove(&key) {
+                self.release_paths(&route.dataset_paths);
+            }
         }
     }
 
@@ -1237,7 +1434,7 @@ impl Router {
                 }
                 let dir = self.config.revision_dir(&fe.session_id, &work_id, rev);
                 if !self.config.keep_workspaces {
-                    let _ = self.janitor.send(dir);
+                    let _ = self.janitor.send(Reclaim::Dir(dir));
                 }
                 println!(
                     "[orch] work {work_id} rev {rev} (session {}) closed; results_{rev} reclaimed",
@@ -1251,7 +1448,7 @@ impl Router {
                 }
                 let dir = self.config.work_workspace(&fe.session_id, &work_id);
                 if !self.config.keep_workspaces {
-                    let _ = self.janitor.send(dir);
+                    let _ = self.janitor.send(Reclaim::Dir(dir));
                 }
                 println!(
                     "[orch] work {work_id} (session {}) closed; workspace reclaimed",
@@ -1264,11 +1461,13 @@ impl Router {
     /// Best-effort: tell a runner to stop an in-flight work and release its outstanding slot (used
     /// by `close_work`). Does not evict the runner — a failed abort means it is already gone or
     /// backpressured, which its own pipe_notify/eviction handles.
-    fn abort_and_release(&self, route: &WorkRoute, session_id: &str, work_id: &str) {
+    fn abort_and_release(&mut self, route: &WorkRoute, session_id: &str, work_id: &str) {
         let _ = route
             .runner
             .outstanding
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_sub(1));
+        // Teardown: release the work's dataset references (acquired at dispatch).
+        self.release_paths(&route.dataset_paths);
         let abort = Envelope {
             v: 1,
             id: format!("orch-abort-{work_id}"),
@@ -1283,6 +1482,66 @@ impl Router {
             eprintln!(
                 "[orch] abort-on-close to runner {} failed ({e})",
                 route.runner.runner_id
+            );
+        }
+    }
+
+    /// Release one dataset-path reference per entry in `paths` (acquired at dispatch). When
+    /// a *retired* path's refcount drains to zero — and it is no longer any dataset's
+    /// `current_path` — drop it from `path_refs` and enqueue a single-file delete on the
+    /// janitor. This decision is pure memory (no `stat`, no I/O); the janitor deletes.
+    ///
+    /// Enqueue-once: after a map swap no dispatch resolves a retired path, so its refcount
+    /// only ever decreases to zero, exactly once; removing it from `path_refs` at enqueue
+    /// makes a second enqueue impossible.
+    fn release_paths(&mut self, paths: &[PathBuf]) {
+        for path in paths {
+            let Some(entry) = self.path_refs.get_mut(path) else {
+                continue;
+            };
+            *entry = entry.saturating_sub(1);
+            if *entry > 0 {
+                continue;
+            }
+            // Refcount hit zero. Only a *retired* path is deletable: if it is still some
+            // dataset's `current_path`, keep the zero entry (a future dispatch re-acquires
+            // it) — deleting a live dataset's file out from under it would be wrong.
+            let still_current = self.datasets.values().any(|e| &e.current_path == path);
+            if still_current {
+                continue;
+            }
+            self.path_refs.remove(path);
+            println!("[orch] retired dataset file {} reclaimed", path.display());
+            let _ = self.janitor.send(Reclaim::File(path.clone()));
+        }
+    }
+
+    /// A `dataset_not_ready` error for a work unit referencing an unknown / not-`Ready`
+    /// dataset (stateless guard, dataset-manager-design §8): the frontend retries after
+    /// `dataset_ready`. No queue, no state.
+    fn send_dataset_not_ready(&self, fe: &FrontendRuntime, w: &messages::Work, dataset_id: &str) {
+        eprintln!(
+            "[orch] work_id={} references dataset '{dataset_id}' that is not ready",
+            w.work_id
+        );
+        let env = Envelope {
+            v: 1,
+            id: format!("orch-ds-notready-{}", w.work_id),
+            reply_to: None,
+            session_id: Some(fe.session_id.clone()),
+            ts: None,
+            body: Message::Error(messages::ErrorMsg {
+                code: "dataset_not_ready".to_string(),
+                message: format!(
+                    "dataset '{dataset_id}' is unknown or still opening; retry after dataset_ready"
+                ),
+                work_id: Some(w.work_id.clone()),
+            }),
+        };
+        if let Err(e) = fe.send(frame_envelope(&env)) {
+            eprintln!(
+                "[orch] dataset_not_ready to frontend {} failed: {e}",
+                fe.session_id
             );
         }
     }
@@ -1353,9 +1612,24 @@ impl Router {
             .work
             .iter()
             .filter(|(_, r)| r.runner.runner_id == runner_id)
-            .map(|(k, r)| (k.clone(), Arc::clone(&r.frontend), r.revision))
+            .map(|(k, r)| {
+                (
+                    k.clone(),
+                    Arc::clone(&r.frontend),
+                    r.revision,
+                    r.dataset_paths.clone(),
+                )
+            })
             .collect::<Vec<_>>();
-        for (key, frontend, revision) in &affected {
+        for (key, frontend, revision, _) in &affected {
+            // A data work in flight on this lane: its dataset dies with the lane (the
+            // frontend gets the generic no-runner failure below, like any work).
+            if let Some(dataset_id) = self.data_works.remove(key)
+                && let Some(entry) = self.datasets.remove(&dataset_id)
+            {
+                self.path_refs.remove(&entry.current_path);
+                let _ = self.janitor.send(Reclaim::File(entry.current_path));
+            }
             let err = no_runner_result(
                 &key.1,
                 *revision,
@@ -1371,8 +1645,10 @@ impl Router {
                 );
             }
         }
-        for (key, _, _) in &affected {
+        for (key, _, _, paths) in &affected {
             self.work.remove(key);
+            // Teardown: release the evicted work's dataset references.
+            self.release_paths(paths);
         }
         println!(
             "[orch] runner {runner_id} evicted ({} outstanding work unit(s) failed)",
@@ -1383,12 +1659,38 @@ impl Router {
     fn drop_frontend(&mut self, session_id: &str) {
         self.frontends.remove(session_id);
         self.aios.remove(session_id);
-        // The frontend is gone; drop its work entries (results would have nowhere to go).
+        // The frontend is gone; drop its work entries (results would have nowhere to go),
+        // releasing the dataset references each held (acquired at dispatch). The cache
+        // files sit under the session workspace reclaimed below, so `release_paths` only
+        // decrements here (the paths are still `current_path`s — nothing is enqueued).
+        let released: Vec<PathBuf> = self
+            .work
+            .iter()
+            .filter(|((sid, _), _)| sid == session_id)
+            .flat_map(|(_, r)| r.dataset_paths.clone())
+            .collect();
         self.work.retain(|(sid, _), _| sid != session_id);
+        self.release_paths(&released);
+        // Drop its dataset bookkeeping: in-flight data work (no one to answer anymore) and
+        // index entries. Their cache files go with the session workspace, so drop the (now
+        // stale) refcount entries with them.
+        self.data_works.retain(|(sid, _), _| sid != session_id);
+        let cache_paths: Vec<PathBuf> = self
+            .datasets
+            .values()
+            .filter(|entry| entry.session == session_id)
+            .map(|entry| entry.current_path.clone())
+            .collect();
+        self.datasets.retain(|_, entry| entry.session != session_id);
+        for path in cache_paths {
+            self.path_refs.remove(&path);
+        }
         // Reclaim the whole session workspace (best-effort, off the router thread) — unless
         // workspaces are being kept for inspection.
         if !self.config.keep_workspaces {
-            let _ = self.janitor.send(self.config.session_workspace(session_id));
+            let _ = self
+                .janitor
+                .send(Reclaim::Dir(self.config.session_workspace(session_id)));
         }
         println!("[orch] frontend {session_id} dropped");
     }
@@ -1616,7 +1918,9 @@ impl Broker {
         // Start the janitor, then wipe the orchestrator dir root: at startup no sessions are live
         // by definition, so everything under it is stale from a previous run. Best-effort.
         let janitor = start_janitor();
-        let _ = janitor.send(std::path::PathBuf::from(&config.orchestrator_dir_root));
+        let _ = janitor.send(Reclaim::Dir(std::path::PathBuf::from(
+            &config.orchestrator_dir_root,
+        )));
         let (prov_tx, park_timeout_ms, libset_modules) = match provisioner {
             Some((req_tx, timeout, modules)) => (Some(req_tx), timeout, modules),
             None => (None, 0, Vec::new()),
@@ -1626,6 +1930,9 @@ impl Broker {
             frontends: HashMap::new(),
             work: HashMap::new(),
             parked: HashMap::new(),
+            datasets: HashMap::new(),
+            path_refs: HashMap::new(),
+            data_works: HashMap::new(),
             aios: HashMap::new(),
             counter: 0,
             ever_registered: false,
@@ -1709,6 +2016,13 @@ impl Broker {
         let _ = self.tx.send(RouterMsg::QueryEverRegistered(tx));
         rx.recv().unwrap_or(false)
     }
+
+    /// Snapshot the dataset index: `(id, state, current_path, refs on that path)`.
+    fn datasets_snapshot(&self) -> Vec<(String, String, PathBuf, usize)> {
+        let (tx, rx) = mpsc::channel();
+        let _ = self.tx.send(RouterMsg::QueryDatasets(tx));
+        rx.recv().unwrap_or_default()
+    }
 }
 
 // ─── Runner selection (§4.1, §9.4, §25.6) ────────────────────────────────────
@@ -1730,6 +2044,19 @@ fn select_runner(
             .capabilities
             .iter()
             .any(|c| matches!(c, Capability::Rcode {})),
+        // Data-plane work: match a `data` capability with the same op; for `data_open`
+        // the lane must also advertise the source format (§5.4: the routing table is a
+        // capability advertisement, so a format migrates lanes with no protocol change).
+        WorkPayload::Data(d) => rt.capabilities.iter().any(|c| match c {
+            Capability::Data { op, formats } => {
+                op == &d.op
+                    && (d.op != DataOp::Open
+                        || formats
+                            .as_ref()
+                            .is_some_and(|fs| fs.iter().any(|f| f == &d.format)))
+            }
+            _ => false,
+        }),
     };
     runners
         .values()
@@ -1743,6 +2070,7 @@ fn analysis_module(payload: &WorkPayload) -> Option<(&str, &str)> {
     match payload {
         WorkPayload::Analysis(a) => Some((a.module.as_str(), a.module_version.as_str())),
         WorkPayload::Rcode(_) => None,
+        WorkPayload::Data(_) => None,
     }
 }
 
@@ -1897,7 +2225,6 @@ mod tests {
     fn test_config(control_url: String) -> Config {
         Config {
             control_url,
-            dataset_path: alpha_dataset_path(),
             orchestrator_dir_root: format!(
                 "/tmp/jasp-orchestrator-test-{}-{}",
                 std::process::id(),
@@ -1947,7 +2274,7 @@ mod tests {
             work_id: id.to_string(),
             revision,
             base_revision,
-            dataset_ids: vec!["ds-001".to_string()],
+            dataset_ids: Vec::new(),
             payload: WorkPayload::Analysis(AnalysisWork {
                 module: module.to_string(),
                 module_version: "0.1".to_string(),
@@ -3121,5 +3448,420 @@ mod tests {
             ),
             other => panic!("expected modules, got {other:?}"),
         }
+    }
+
+    // ── Dataset manager (dataset_open → lane → dataset_ready → dispatch) ─────
+
+    /// Register a runner with an explicit capability list (the dataset tests need `data`
+    /// capabilities, which [`register_runner_full`] does not advertise).
+    fn register_with_caps(control_url: &str, caps: Vec<Capability>) -> (Socket, String) {
+        let req = Socket::new(Protocol::Req0).unwrap();
+        req.set_opt::<RecvTimeout>(Some(Duration::from_secs(5)))
+            .unwrap();
+        req.dial(control_url).unwrap();
+        let reg = envelope(Message::Register(Register {
+            runner_id: None,
+            capabilities: caps,
+            priority: 0,
+            environment: Value::Null,
+        }));
+        req.send(frame_envelope(&reg).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let ack_raw = req.recv().expect("register_ack");
+        let ack = deframe(&ack_raw[..]).expect("valid ack");
+        let (runner_id, channel_url) = match ack.body {
+            Message::RegisterAck(a) => {
+                assert!(a.ok, "registration accepted: {:?}", a.reason);
+                (
+                    a.runner_id.unwrap(),
+                    a.channel_url.expect("channel_url present"),
+                )
+            }
+            other => panic!("expected register_ack, got {other:?}"),
+        };
+        drop(req);
+        let ch = Socket::new(Protocol::Pair1).unwrap();
+        ch.set_opt::<RecvTimeout>(Some(Duration::from_secs(5)))
+            .unwrap();
+        ch.set_opt::<SendBufferSize>(64).unwrap();
+        ch.set_opt::<RecvBufferSize>(64).unwrap();
+        ch.dial(&channel_url).unwrap();
+        (ch, runner_id)
+    }
+
+    /// Register a mock data lane advertising `data_open` for the given source formats.
+    fn register_data_lane(control_url: &str, formats: &[&str]) -> (Socket, String) {
+        register_with_caps(
+            control_url,
+            vec![Capability::Data {
+                op: DataOp::Open,
+                formats: Some(formats.iter().map(|s| s.to_string()).collect()),
+            }],
+        )
+    }
+
+    /// A `data_open` work for a source with default ingest settings — a dataset open rides
+    /// the work pipeline (kind "data"), so it IS a work unit. `cache_path` is left empty:
+    /// the orchestrator assigns it at dispatch.
+    fn data_open_work(work_id: &str, path: &str, format: &str) -> Envelope {
+        envelope(Message::Work(Work {
+            work_id: work_id.to_string(),
+            revision: 0,
+            base_revision: None,
+            dataset_ids: Vec::new(),
+            payload: WorkPayload::Data(messages::DataWork {
+                op: DataOp::Open,
+                source: path.to_string(),
+                cache_path: String::new(),
+                format: format.to_string(),
+                ingest: messages::IngestParams::default(),
+            }),
+        }))
+    }
+
+    /// Drive an open to `Ready`: submit the data work, let the (mock) lane receive it, and
+    /// answer it with `{schema, rows}`. Returns the dataset_id the orchestrator splices into
+    /// the forwarded result.
+    fn open_to_ready(fe: &Socket, lane: &Socket, session: &str) -> String {
+        let work_id = format!("w-open-{}", unique());
+        let open = data_open_work(&work_id, "/tmp/some.csv", "csv");
+        fe.send(frame_envelope(&open).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let _ = lane.recv().expect("lane recv data work");
+        lane_complete(
+            lane,
+            session,
+            &work_id,
+            json!({"schema": [{"name": "x"}]}),
+            7,
+        );
+        match deframe(&fe.recv().expect("open result")[..]).unwrap().body {
+            Message::Result(r) => {
+                assert!(matches!(r.status, Status::Complete));
+                assert_eq!(r.payload.results["rows"], 7);
+                r.payload.results["dataset_id"]
+                    .as_str()
+                    .expect("dataset_id spliced into the result")
+                    .to_string()
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
+    }
+
+    /// The mock lane answers a data work with `{schema, rows}` (status Complete).
+    fn lane_complete(lane: &Socket, session: &str, work_id: &str, schema: Value, rows: u64) {
+        let result = Envelope {
+            v: 1,
+            id: format!("rn-{work_id}"),
+            reply_to: None,
+            session_id: Some(session.to_string()),
+            ts: None,
+            body: Message::Result(ResultMsg {
+                work_id: work_id.to_string(),
+                revision: 0,
+                status: Status::Complete,
+                payload: ResultPayload {
+                    results: json!({ "schema": schema, "rows": rows }),
+                },
+            }),
+        };
+        lane.send(frame_envelope(&result).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+    }
+
+    // 17. A data_open work submitted by the frontend is capability-routed to the lane with
+    //     orchestrator-assigned identity: cache_path injected into the payload, an index
+    //     entry minted as Opening; the lane's terminal {schema, rows} result comes back with
+    //     the dataset_id spliced in and the entry Ready.
+    #[test]
+    fn data_open_work_flows_to_lane_and_readies() {
+        let url = format!("inproc://orch-ds-open-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_data_lane(&url, &["csv"]);
+        let (fe, session) = hello_frontend(&url);
+
+        let open = data_open_work("w-open", "/tmp/some.csv", "csv");
+        fe.send(frame_envelope(&open).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+
+        // The lane receives the data work, session-stamped, with identity injected.
+        let raw = lane.recv().expect("lane recv data work");
+        let env = deframe(&raw[..]).unwrap();
+        assert_eq!(env.session_id.as_deref(), Some(session.as_str()));
+        let data = match &env.body {
+            Message::Work(w) => match &w.payload {
+                WorkPayload::Data(d) => d.clone(),
+                other => panic!("expected data work payload, got {other:?}"),
+            },
+            other => panic!("expected work, got {other:?}"),
+        };
+        assert!(matches!(data.op, DataOp::Open));
+        assert_eq!(data.source, "/tmp/some.csv");
+        assert_eq!(data.format, "csv");
+        assert_eq!(
+            data.ingest.format, "csv",
+            "empty ingest.format filled from the work"
+        );
+        assert!(
+            data.cache_path.contains("/datasets/") && data.cache_path.ends_with("_0.arrow"),
+            "cache path assigned at dispatch: {}",
+            data.cache_path
+        );
+
+        // While in flight the index shows `opening`.
+        let snap = broker.datasets_snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].1, "opening");
+        let dataset_id = snap[0].0.clone();
+
+        // The lane's terminal {schema, rows} result comes back with the dataset_id spliced in.
+        lane_complete(&lane, &session, "w-open", json!([{"name": "x"}]), 42);
+        let res = deframe(&fe.recv().expect("open result")[..]).unwrap();
+        assert_eq!(res.session_id.as_deref(), Some(session.as_str()));
+        match res.body {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-open");
+                assert!(matches!(r.status, Status::Complete));
+                assert_eq!(r.payload.results["dataset_id"], json!(dataset_id));
+                assert_eq!(r.payload.results["rows"], 42);
+                assert_eq!(r.payload.results["schema"], json!([{"name": "x"}]));
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
+        assert_eq!(broker.datasets_snapshot()[0].1, "ready");
+    }
+
+    // 18. Dispatch resolves dataset_ids → the current cache path (baked into dataset_paths),
+    //     acquiring a path ref at dispatch and releasing it at teardown (refcount symmetry).
+    #[test]
+    fn work_resolves_ready_dataset_and_releases_refs_on_teardown() {
+        let url = format!("inproc://orch-ds-resolve-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_data_lane(&url, &["csv"]);
+        let (runner, _rid) = register_runner(&url, "jaspTTests");
+        let (fe, session) = hello_frontend(&url);
+
+        let dataset_id = open_to_ready(&fe, &lane, &session);
+        let cache_path = broker.datasets_snapshot()[0].2.clone();
+
+        // Work referencing the dataset: the runner sees it resolved into dataset_paths.
+        let work = envelope(Message::Work(Work {
+            work_id: "w-ds".to_string(),
+            revision: 0,
+            base_revision: None,
+            dataset_ids: vec![dataset_id.clone()],
+            payload: WorkPayload::Analysis(AnalysisWork {
+                module: "jaspTTests".to_string(),
+                module_version: "0.1".to_string(),
+                analysis: "A".to_string(),
+                options: Value::Null,
+                settings: Settings {
+                    ppi: 96,
+                    num_decimals: 3,
+                },
+            }),
+        }));
+        fe.send(frame_envelope(&work).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let raw = runner.recv().expect("runner recv work");
+        let value: Value = serde_json::from_slice(&raw[4..]).unwrap();
+        assert_eq!(
+            value["dataset_paths"][&dataset_id],
+            json!(cache_path.to_string_lossy()),
+            "dataset id resolves to the cache path"
+        );
+        assert_eq!(
+            broker.datasets_snapshot()[0].3,
+            1,
+            "dispatch acquired a path ref"
+        );
+
+        // Terminal result → teardown releases the ref.
+        send_result(&runner, &session, "w-ds", 0);
+        let _ = fe.recv().expect("frontend recv result");
+        assert_eq!(
+            broker.datasets_snapshot()[0].3,
+            0,
+            "teardown released the path ref"
+        );
+    }
+
+    // 19. Work referencing an unknown / not-Ready dataset fails statelessly
+    //     (dataset_not_ready) and never reaches a runner — no waiters by design.
+    #[test]
+    fn work_referencing_unknown_dataset_errors_statelessly() {
+        let url = format!("inproc://orch-ds-notready-{}", unique());
+        let (_broker, _ctl) = start_broker(url.clone());
+        let (runner, _rid) = register_runner(&url, "jaspTTests");
+        let (fe, _session) = hello_frontend(&url);
+
+        let work = envelope(Message::Work(Work {
+            work_id: "w-unknown".to_string(),
+            revision: 0,
+            base_revision: None,
+            dataset_ids: vec!["ds-nope".to_string()],
+            payload: WorkPayload::Analysis(AnalysisWork {
+                module: "jaspTTests".to_string(),
+                module_version: "0.1".to_string(),
+                analysis: "A".to_string(),
+                options: Value::Null,
+                settings: Settings {
+                    ppi: 96,
+                    num_decimals: 3,
+                },
+            }),
+        }));
+        fe.send(frame_envelope(&work).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+
+        match deframe(&fe.recv().expect("dataset_not_ready error")[..])
+            .unwrap()
+            .body
+        {
+            Message::Error(e) => {
+                assert_eq!(e.code, "dataset_not_ready");
+                assert_eq!(e.work_id.as_deref(), Some("w-unknown"));
+            }
+            other => panic!("expected error, got {other:?}"),
+        }
+        // The runner never saw the work.
+        runner
+            .set_opt::<RecvTimeout>(Some(Duration::from_millis(300)))
+            .unwrap();
+        assert!(runner.recv().is_err(), "no work reaches the runner");
+    }
+
+    // 20. No lane advertises the format → the data work fails like any unservable work
+    //     (fatalError result), and a lane for other formats does not match.
+    #[test]
+    fn data_open_without_a_matching_lane_errors() {
+        let url = format!("inproc://orch-ds-nolane-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (_lane, _lid) = register_data_lane(&url, &["csv"]);
+        let (fe, _session) = hello_frontend(&url);
+
+        // spss: the csv lane does not match → the work fails with a no-runner result.
+        let open = data_open_work("w-open-spss", "/tmp/some.sav", "spss");
+        fe.send(frame_envelope(&open).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        match deframe(&fe.recv().expect("no-runner result")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-open-spss");
+                assert!(matches!(r.status, Status::FatalError));
+            }
+            other => panic!("expected fatalError result, got {other:?}"),
+        }
+        // Nothing was minted/stored for the failed open.
+        assert!(broker.datasets_snapshot().is_empty());
+    }
+
+    // 21. The lane errors mid-conversion (fatalError result) → the failure flows to the
+    //     submitting frontend like any work failure, and the index entry is dropped.
+    #[test]
+    fn lane_error_fails_the_open() {
+        let url = format!("inproc://orch-ds-lanefail-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_data_lane(&url, &["csv"]);
+        let (fe, session) = hello_frontend(&url);
+
+        let open = data_open_work("w-open-broken", "/tmp/broken.csv", "csv");
+        fe.send(frame_envelope(&open).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let _ = lane.recv().expect("lane recv data work");
+
+        // The lane reports a fatalError with a user-facing detail.
+        let result = Envelope {
+            v: 1,
+            id: "rn-w-open-broken".to_string(),
+            reply_to: None,
+            session_id: Some(session.clone()),
+            ts: None,
+            body: Message::Result(ResultMsg {
+                work_id: "w-open-broken".to_string(),
+                revision: 0,
+                status: Status::FatalError,
+                payload: ResultPayload {
+                    results: json!({
+                        "error": true,
+                        "errorMessage": "malformed csv at line 3",
+                    }),
+                },
+            }),
+        };
+        lane.send(frame_envelope(&result).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+
+        match deframe(&fe.recv().expect("failed result")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-open-broken");
+                assert!(matches!(r.status, Status::FatalError));
+                assert!(
+                    r.payload.results["errorMessage"]
+                        .as_str()
+                        .unwrap()
+                        .contains("malformed csv at line 3")
+                );
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
+        // The failed open left no index entry behind.
+        assert!(broker.datasets_snapshot().is_empty());
+    }
+
+    // 22. The janitor deletes both single files (retired dataset cache files) and directory
+    //     trees (workspaces), treats NotFound as success, and keeps running after either.
+    #[test]
+    fn janitor_deletes_files_and_dirs() {
+        let janitor = start_janitor();
+        let base =
+            std::env::temp_dir().join(format!("jasp-janitor-{}-{}", std::process::id(), unique()));
+        std::fs::create_dir_all(base.join("workspace")).unwrap();
+        std::fs::write(base.join("ds-1_0.arrow"), b"x").unwrap();
+        std::fs::write(base.join("ds-2_1.arrow"), b"y").unwrap();
+
+        janitor
+            .send(Reclaim::File(base.join("ds-1_0.arrow")))
+            .unwrap();
+        janitor.send(Reclaim::Dir(base.join("workspace"))).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while base.join("ds-1_0.arrow").exists() || base.join("workspace").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "janitor reclaimed the file and the dir"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // NotFound is success, and the janitor survives it: a later real delete still lands.
+        janitor
+            .send(Reclaim::File(base.join("missing.arrow")))
+            .unwrap();
+        janitor
+            .send(Reclaim::File(base.join("ds-2_1.arrow")))
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while base.join("ds-2_1.arrow").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "janitor alive after NotFound"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::fs::remove_dir_all(&base).ok();
     }
 }

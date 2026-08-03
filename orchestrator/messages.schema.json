@@ -43,6 +43,25 @@
               "$ref": "#/definitions/RcodeWork"
             }
           }
+        },
+        {
+          "description": "Synthesized data-plane work the orchestrator routes to a data lane (§5.4): a `dataset_open` from the frontend becomes a `kind:\"data\"` work unit carrying a `data_open` op. The lane writes the converted Arrow to the orchestrator-assigned `cache_path` and replies `{schema, rows}` — data never crosses the wire.",
+          "type": "object",
+          "required": [
+            "kind",
+            "payload"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "data"
+              ]
+            },
+            "payload": {
+              "$ref": "#/definitions/DataWork"
+            }
+          }
         }
       ],
       "required": [
@@ -52,6 +71,15 @@
         "work_id"
       ],
       "properties": {
+        "base_revision": {
+          "description": "Revision to seed incremental recompute from — the last result the frontend is iterating off. The orchestrator resolves it to a concrete `base_results_dir`; the runner copies that finished dir into its own `results_<revision>` before running (copy-on-seed). Absent → full recompute (no seed). The frontend is the authority on revision numbers (§17.1).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "dataset_ids": {
           "type": "array",
           "items": {
@@ -133,6 +161,15 @@
         "work_id"
       ],
       "properties": {
+        "revision": {
+          "description": "Present → close only this revision (`results_<revision>`), aborting it if it is the in-flight one. Absent → close the whole work (every revision). Idempotent either way.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "type": {
           "type": "string",
           "enum": [
@@ -196,58 +233,6 @@
           "type": [
             "string",
             "null"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "path",
-        "type"
-      ],
-      "properties": {
-        "format_hint": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "path": {
-          "type": "string"
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "dataset_open"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "dataset_id",
-        "rows",
-        "schema",
-        "type"
-      ],
-      "properties": {
-        "dataset_id": {
-          "type": "string"
-        },
-        "rows": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "schema": {
-          "description": "Column schema (name / display_name / type / levels). Kept flexible for the alpha."
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "dataset_ready"
           ]
         }
       }
@@ -444,6 +429,42 @@
           ]
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "list_modules"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Orchestrator → Frontend: the module catalog. Sent three ways, all handled identically by the frontend (\"replace your menu\"): unsolicited as the **first frame on the data channel** (buffered at channel setup in `handle_hello`), unsolicited on every actual catalog change, and as the correlated reply to `list_modules` (`reply_to` echoes the query's `id` — the only case where `reply_to` is present). Deliberately lightweight: `{name, version, base_uri}` per module; the frontend parses `Description.qml` at the base URI for ribbon metadata (title, icon, menu placement) and lazy-loads everything else relative to it.",
+      "type": "object",
+      "required": [
+        "modules",
+        "type"
+      ],
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ModuleInfo"
+          }
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "modules"
+          ]
+        }
+      }
     }
   ],
   "required": [
@@ -517,7 +538,7 @@
       "description": "A capability a runner advertises — the routing-key projection of a work `kind` (§9.3).\n\nMirrors the work `kind` enum one-to-one: a work unit *requests* a computation; a capability *advertises* the ability to satisfy such requests. Each variant carries only the **routing key** for its kind (analysis name+version; data op+formats; rcode is unconstrained for now), never the full request payload — a runner that can run Anova can run it with *any* options, so it advertises `{name, version}`, not an `AnalysisWork`.",
       "oneOf": [
         {
-          "description": "Can run an analysis module — version-matched routing (§9.4).",
+          "description": "Can run an analysis module — version-matched routing (§9.4). `{name, version}` is the routing key; `base_uri` is *discovery* metadata, NOT part of the key: the directory (a `file://` URI now, `http://` for the webapp later) the frontend lazy-loads this module's assets from (Description.qml, qml/, icons/, help/). A runner that computes a module but does not vouch for its assets omits it — it is still routed to, but left out of the module catalog handed to frontends.",
           "type": "object",
           "required": [
             "kind",
@@ -525,6 +546,12 @@
             "version"
           ],
           "properties": {
+            "base_uri": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "kind": {
               "type": "string",
               "enum": [
@@ -593,6 +620,121 @@
         "data_close",
         "data_update"
       ]
+    },
+    "DataWork": {
+      "description": "A data-plane work unit (frontend → orchestrator → data lane). The lane is **stateless**: the orchestrator assigns identity at dispatch — for `data_open` it mints the `dataset_id`, fills in the `cache_path` (the lane writes the converted `.arrow` there), and tracks the work → dataset mapping; the lane's terminal result (with the `dataset_id` spliced in by the orchestrator) is the frontend's \"dataset ready\". An open is just a work; the orchestrator manages the dataset.",
+      "type": "object",
+      "required": [
+        "cache_path",
+        "format",
+        "ingest",
+        "op",
+        "source"
+      ],
+      "properties": {
+        "cache_path": {
+          "description": "**Orchestrator-assigned at dispatch** (identity, not I/O — the lane writes the file); the sender leaves it empty: `<state_root>/<session>/datasets/<dataset_id>_<revision>.arrow`.",
+          "type": "string"
+        },
+        "format": {
+          "description": "Routing key selecting the lane + parser (`\"csv\"`, later `\"spss\"`, `\"arrow\"`, …). Meaningful for `data_open`.",
+          "type": "string"
+        },
+        "ingest": {
+          "description": "Ingestion settings captured at open; forwarded verbatim on every op.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/IngestParams"
+            }
+          ]
+        },
+        "op": {
+          "description": "The operation to perform (`data_open` in this increment).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DataOp"
+            }
+          ]
+        },
+        "source": {
+          "description": "The source file to read (`data_open`: the user's CSV/… file). The lane reads it directly — the orchestrator never touches the bytes.",
+          "type": "string"
+        }
+      }
+    },
+    "IngestParams": {
+      "description": "Ingestion parameters carried by a data `work` (the frontend sends them on the open; the orchestrator stores them on the dataset entry and they ride every data op, since the lane is stateless). They **change the result** — locale decides how numbers are parsed/canonicalized and `threshold` decides ordinal-vs-scale — so they are baked into the cached Arrow at conversion. Changing them is a re-open, not an edit. Maps 1:1 onto the `csv2arrow` lane's knobs.",
+      "type": "object",
+      "properties": {
+        "decimal_sep": {
+          "description": "Locale decimal separator ('.' or ',').",
+          "default": ".",
+          "type": "string",
+          "maxLength": 1,
+          "minLength": 1
+        },
+        "format": {
+          "description": "Routing key: `\"csv\"` | `\"spss\"` | `\"excel\"` | `\"arrow\"` | …",
+          "default": "",
+          "type": "string"
+        },
+        "nulls": {
+          "description": "Null spellings (the empty string is included so blank cells read as null).",
+          "default": [
+            "",
+            "NA",
+            "NaN"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sort_limit": {
+          "description": "Value-sort dictionaries with ≤ this many distinct values.",
+          "default": 2000,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "thousands_sep": {
+          "description": "Locale thousands separator (',' / '.' / ' ' / none).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1,
+          "minLength": 1
+        },
+        "threshold": {
+          "description": "Ordinal-vs-scale threshold (JASP \"threshold for scale\").",
+          "default": 10,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ModuleInfo": {
+      "description": "One discoverable module. `base_uri` is the directory found by scanning (the orchestrator's libset scan or a runner's advertisement), always trailing-slash so assets resolve by simple concatenation. The wire carries nothing richer — no titles, icons, or menus.",
+      "type": "object",
+      "required": [
+        "base_uri",
+        "name",
+        "version"
+      ],
+      "properties": {
+        "base_uri": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
     },
     "RcodeWork": {
       "type": "object",

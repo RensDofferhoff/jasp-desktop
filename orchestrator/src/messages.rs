@@ -60,8 +60,6 @@ pub enum Message {
     Ping,
     Pong,
     Error(ErrorMsg),
-    DatasetOpen(DatasetOpen),
-    DatasetReady(DatasetReady),
     Register(Register),
     RegisterAck(RegisterAck),
     Hello(Hello),
@@ -98,6 +96,35 @@ pub enum WorkPayload {
     Analysis(AnalysisWork),
     #[serde(rename = "rcode")]
     Rcode(RcodeWork),
+    /// Synthesized data-plane work the orchestrator routes to a data lane (§5.4): a
+    /// `dataset_open` from the frontend becomes a `kind:"data"` work unit carrying a
+    /// `data_open` op. The lane writes the converted Arrow to the orchestrator-assigned
+    /// `cache_path` and replies `{schema, rows}` — data never crosses the wire.
+    #[serde(rename = "data")]
+    Data(DataWork),
+}
+
+/// A data-plane work unit (frontend → orchestrator → data lane). The lane is **stateless**:
+/// the orchestrator assigns identity at dispatch — for `data_open` it mints the `dataset_id`,
+/// fills in the `cache_path` (the lane writes the converted `.arrow` there), and tracks the
+/// work → dataset mapping; the lane's terminal result (with the `dataset_id` spliced in by
+/// the orchestrator) is the frontend's "dataset ready". An open is just a work; the
+/// orchestrator manages the dataset.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DataWork {
+    /// The operation to perform (`data_open` in this increment).
+    pub op: DataOp,
+    /// The source file to read (`data_open`: the user's CSV/… file). The lane reads it
+    /// directly — the orchestrator never touches the bytes.
+    pub source: String,
+    /// **Orchestrator-assigned at dispatch** (identity, not I/O — the lane writes the file);
+    /// the sender leaves it empty: `<state_root>/<session>/datasets/<dataset_id>_<revision>.arrow`.
+    pub cache_path: String,
+    /// Routing key selecting the lane + parser (`"csv"`, later `"spss"`, `"arrow"`, …).
+    /// Meaningful for `data_open`.
+    pub format: String,
+    /// Ingestion settings captured at open; forwarded verbatim on every op.
+    pub ingest: IngestParams,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -175,19 +202,61 @@ pub struct ErrorMsg {
     pub work_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct DatasetOpen {
-    pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub format_hint: Option<String>,
+/// Ingestion parameters carried by a data `work` (the frontend sends them on the open;
+/// the orchestrator stores them on the dataset entry and they ride every data op, since
+/// the lane is stateless).
+/// They **change the result** — locale decides how numbers are parsed/canonicalized and
+/// `threshold` decides ordinal-vs-scale — so they are baked into the cached Arrow at
+/// conversion. Changing them is a re-open, not an edit. Maps 1:1 onto the `csv2arrow`
+/// lane's knobs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct IngestParams {
+    /// Routing key: `"csv"` | `"spss"` | `"excel"` | `"arrow"` | …
+    #[serde(default)]
+    pub format: String,
+    /// Locale decimal separator ('.' or ',').
+    #[serde(default = "IngestParams::default_decimal_sep")]
+    pub decimal_sep: char,
+    /// Locale thousands separator (',' / '.' / ' ' / none).
+    #[serde(default)]
+    pub thousands_sep: Option<char>,
+    /// Ordinal-vs-scale threshold (JASP "threshold for scale").
+    #[serde(default = "IngestParams::default_threshold")]
+    pub threshold: usize,
+    /// Null spellings (the empty string is included so blank cells read as null).
+    #[serde(default = "IngestParams::default_nulls")]
+    pub nulls: Vec<String>,
+    /// Value-sort dictionaries with ≤ this many distinct values.
+    #[serde(default = "IngestParams::default_sort_limit")]
+    pub sort_limit: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct DatasetReady {
-    pub dataset_id: String,
-    pub rows: u64,
-    /// Column schema (name / display_name / type / levels). Kept flexible for the alpha.
-    pub schema: Value,
+impl IngestParams {
+    fn default_decimal_sep() -> char {
+        '.'
+    }
+    fn default_threshold() -> usize {
+        10
+    }
+    fn default_nulls() -> Vec<String> {
+        vec![String::new(), "NA".into(), "NaN".into()]
+    }
+    fn default_sort_limit() -> usize {
+        2000
+    }
+}
+
+impl Default for IngestParams {
+    fn default() -> Self {
+        IngestParams {
+            format: String::new(),
+            decimal_sep: Self::default_decimal_sep(),
+            thousands_sep: None,
+            threshold: Self::default_threshold(),
+            nulls: Self::default_nulls(),
+            sort_limit: Self::default_sort_limit(),
+        }
+    }
 }
 
 /// Runner → Orchestrator: capability advertisement (Section 9.3, Section 19.5).
@@ -249,7 +318,7 @@ pub enum Capability {
 }
 
 /// The data-plane operations — the `op` of a `data` capability (and of `data` work, §19.3).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum DataOp {
     #[serde(rename = "data_open")]
     Open,

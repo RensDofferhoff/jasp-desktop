@@ -1,5 +1,14 @@
 # NEO Alpha — run it
 
+> **NOTE — describes the ORIGINAL alpha (historical).** The architecture has since moved on:
+> the orchestrator is now a single control endpoint + per-peer PAIR channels with a runner
+> **provisioner** (on-demand spawn from `JASP_ORCH_LIBSET`) and **module discovery**
+> (`list_modules`/`modules`, `base_uri`, pushed to the frontend), and the runner is
+> `runner_jaspbase.R` (real jaspBase analyses), not the hello-world `runner_alpha.R` below.
+> For the current state and next steps, see `HANDOVER-dataplane.md`, `HANDOVER-client-discovery.md`,
+> and `HANDOVER-module-discovery.md`. The e2e scripts `run_{provision,recompute,modules}_test.sh`
+> are the current way to run the stack.
+
 First end-to-end slice: **frontend → orchestrator → R runner → result renders**. The
 orchestrator is a **broker**: it forwards a submitted `work` to the connected R runner
 (injecting `dataset_paths`/`output_dir`), and streams the runner's `result` back to the

@@ -271,6 +271,9 @@ void Analysis::run()
 
 	// NEO: explicit submission replaces the old "set Empty, let the scheduler poll shouldRun()"
 	// trigger. run() is the single funnel — refresh() and option changes all end up here.
+	// Optimistic like every other submission: no pre-checks. If the dataset is not ready yet
+	// the orchestrator answers dataset_not_ready, which the client surfaces as a fatalError
+	// result (dataset-manager-design §8: stateless error, frontend retries — no waiters).
 	if (!JaspClient::client())
 	{
 		Log::log() << "Analysis::run() for " << title() << "(" << id() << ") but there is no JaspClient." << std::endl;
@@ -309,7 +312,7 @@ Json::Value Analysis::createWorkJson()
 	work["kind"]		= "analysis";
 	work["revision"]	= revision();
 	work["dataset_ids"]	= Json::Value(Json::arrayValue);
-	work["dataset_ids"].append("ds-001");	// NEO alpha: single hardcoded dataset
+	work["dataset_ids"].append(DataSetPackage::pkg()->datasetId());	// NEO: orchestrator-assigned id ("" until the open completes)
 
 	Json::Value payload(Json::objectValue);
 	payload["module"]			= module();

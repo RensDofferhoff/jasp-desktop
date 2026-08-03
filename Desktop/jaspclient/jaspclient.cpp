@@ -277,7 +277,7 @@ void JaspClient::abort(const std::string & workId)
 	sendFrame(msg);
 }
 
-// ── wire IO ──────────────────────────────────────────────────────────────────
+// ── wire IO ──────────────────────────────────────────────────────────────────────────────
 
 void JaspClient::handleMessage(const QByteArray & body)
 {
@@ -297,8 +297,26 @@ void JaspClient::handleMessage(const QByteArray & body)
 		return;
 	}
 
+	// Orchestrator error against a submitted work (e.g. dataset_not_ready): surfaced as a
+	// fatalError result on that slot so the analysis does not spin forever.
+	if (type == "error")
+	{
+		const std::string workId = env.get("work_id", "").asString();
+		auto sit = workId.empty() ? _slots.end() : _slots.find(workId);
+		if (sit != _slots.end())
+		{
+			ResultHandler handler = std::move(sit->second.handler);
+			_slots.erase(sit);
+			Json::Value results(Json::objectValue);
+			results["error"]		= true;
+			results["errorMessage"]	= env.get("message", "").asString();
+			handler(results, "fatalError", Json::Value(Json::nullValue));
+		}
+		return;
+	}
+
 	if (type != "result")
-		return;							// alpha only consumes results + the catalog (pong etc. ignored)
+		return;							// alpha only consumes results + the catalog
 
 	const std::string workId	= env.get("work_id", "").asString();
 	const uint64_t	revision	= env.get("revision", 0).asUInt64();
@@ -425,6 +443,10 @@ void JaspClient::logIo(const char * dir, const Json::Value & env) const
 		line += " kind=" + env.get("kind", "").asString();
 	if (env.isMember("status"))
 		line += " status=" + env.get("status", "").asString();
+	if (env.isMember("dataset_id"))
+		line += " dataset_id=" + env.get("dataset_id", "").asString();
+	if (env.isMember("code"))
+		line += " code=" + env.get("code", "").asString();
 
 	Log::log() << line << std::endl;
 }

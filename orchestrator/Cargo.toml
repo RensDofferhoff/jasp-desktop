@@ -3,10 +3,15 @@ name = "jasp-orchestrator"
 version = "0.1.0"
 edition = "2024"
 description = "NEO JASP orchestrator (alpha): PAIR v1 broker that forwards work frontend->runner and result runner->frontend."
+default-run = "jasp-orchestrator"
 
 [[bin]]
 name = "jasp-orchestrator"
 path = "src/main.rs"
+
+[[bin]]
+name = "jasp-data-runner"
+path = "src/bin/data_runner.rs"
 
 [dependencies]
 nng = "1.0"
@@ -14,3 +19,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Generates a JSON Schema *from* the Rust message types — the shared-schema source of truth.
 schemars = "0.8"
+# CSV → Arrow data lane (the jasp-data-runner binary's data_open path; a port of
+# refactor_design/poc/csv_arrow). NB: arrow's LZ4 is pure-Rust (lz4_flex); we deliberately
+# avoid the umbrella `ipc_compression` feature because it also pulls zstd-sys (a C build).
+arrow = { version = "59", features = ["csv", "prettyprint"] }
+arrow-ipc = { version = "59", features = ["lz4"] }
+csv = "1"
+# Ordered set (insertion order + O(1) dedup, one copy of each string) for the per-column
+# distinct set — gives a deterministic first-appearance dictionary order.
+indexmap = "2"
+regex = "1"

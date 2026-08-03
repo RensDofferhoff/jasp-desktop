@@ -2,11 +2,12 @@
 # NEO JASP frontend — independent-samples t-test round-trip driver (verification harness).
 #
 # Does the frontend half of the new handshake (REQ `hello` -> `welcome{session_id, channel_url}` ->
-# PAIR-dial the channel), then submits a `work` for jaspTTests::TTestIndependentSamples
-# (dependent = x, group = group, on test_data/debug.arrow) and waits for the `result` that
-# runner_jaspbase.R computes via jaspBase::runJaspResults(). Retries the submission until a runner
-# is registered and routes it (the runner loads jaspBase before registering, so once routed the
-# analysis returns quickly).
+# PAIR-dial the channel), then opens the dataset (`dataset_open` -> the Rust data lane converts
+# test_data/debug.csv to an Arrow cache file -> `dataset_ready` carries the dataset_id), and
+# submits a `work` for jaspTTests::TTestIndependentSamples (dependent = x, group = group) that
+# references that dataset_id. The runner reads the CONVERTED Feather via dataset_paths. Retries
+# the submission until a runner is registered and routes it (the runner loads jaspBase before
+# registering, so once routed the analysis returns quickly).
 #
 # Usage: Rscript refactor_design/frontend_ttest.R [control_url]
 
@@ -42,6 +43,50 @@ close(req)
 ch <- socket("poly", dial = channel_url)
 on.exit(close(ch), add = TRUE)
 
+# ── 2b. Open the dataset: submit a data_open WORK — the lane converts, the terminal result ──
+# carries the dataset_id. An open IS a work (kind "data", op "data_open"): the orchestrator
+# mints the dataset_id and assigns the cache path at dispatch, and the lane's terminal result
+# comes back with {dataset_id, schema, rows} spliced in. Retries while the data lane has not
+# registered yet (transient "No data lane" fatalError).
+csv_path <- normalizePath("test_data/debug.csv")
+dataset_id <- NULL
+for (attempt in 1:50) {
+  work_id <- sprintf("data-open-%d", attempt)
+  open_work <- list(
+    v = 1L, id = work_id, type = "work", work_id = work_id, revision = 0L,
+    dataset_ids = list(),
+    kind = "data",
+    payload = list(op = "data_open", source = csv_path, cache_path = "", format = "csv",
+                   ingest = list(decimal_sep = ".", threshold = 10L,
+                                 nulls = list("", "NA", "NaN"), sort_limit = 2000L))
+  )
+  send(ch, pack(toJSON(open_work, auto_unbox = TRUE, null = "null")), mode = "raw", block = 3000L)
+  # Read frames until the terminal result for THIS work arrives; skip unrelated frames.
+  done <- FALSE
+  repeat {
+    open_raw <- recv(ch, mode = "raw", block = 10000L)
+    if (is_err(open_raw) || length(open_raw) == 0) break   # timeout -> outer retry
+    r <- fromJSON(unframe(open_raw), simplifyVector = FALSE)
+    if (identical(r$type, "modules")) next                                  # catalog push
+    if (!identical(r$type, "result") || !identical(r$work_id, work_id)) next
+    msg <- if (is.null(r$payload$results$errorMessage)) "" else r$payload$results$errorMessage
+    if (identical(r$status, "complete")) {
+      dataset_id <- r$payload$results$dataset_id
+      cat(sprintf("[frontend] dataset ready: id=%s rows=%s\n", dataset_id, r$payload$results$rows))
+      done <- TRUE
+      break
+    }
+    if (grepl("No data lane", msg)) {
+      cat(sprintf("[frontend] data lane not ready yet (attempt %d), retrying...\n", attempt))
+      break
+    }
+    stop(sprintf("[frontend] dataset_open failed: %s", msg))
+  }
+  if (done) break
+  Sys.sleep(0.2)
+}
+if (is.null(dataset_id)) stop("[frontend] dataset_open never completed (is the data runner up?)")
+
 # ── 3. The t-test work (options: dependent = x, group = group; Student's t) ───
 options <- list(
   `.meta` = list(dependent = list(shouldEncode = TRUE), group = list(shouldEncode = TRUE)),
@@ -62,7 +107,7 @@ options <- list(
 work <- list(
   v = 1L, type = "work", id = "work-ttest-1",
   work_id = "w-ttest", revision = 0L,
-  dataset_ids = list("ds-001"),
+  dataset_ids = list(dataset_id),
   kind = "analysis",
   payload = list(
     module = "jaspTTests", module_version = "0.95.5",
@@ -74,14 +119,26 @@ work <- list(
 work_raw <- pack(toJSON(work, auto_unbox = TRUE, null = "null"))
 
 # ── 4. Submit (retry until a runner routes it), then wait for the result ──────
+# While the jaspbase runner is still loading jaspBase, the orchestrator answers with a
+# transient "No runner is available" fatalError — retry that specifically; any other
+# result ends the loop.
 result <- NULL
 for (attempt in 1:60) {
   send(ch, work_raw, mode = "raw", block = 3000L)
   res <- recv(ch, mode = "raw", block = 3000L)
   if (!is_err(res) && length(res) > 0) {
-    result <- fromJSON(unframe(res), simplifyVector = FALSE)
-    if (identical(result$type, "result")) break
-    cat(sprintf("[frontend] skipping type=%s frame (not a result)\n", result$type))
+    r <- fromJSON(unframe(res), simplifyVector = FALSE)
+    if (identical(r$type, "result")) {
+      msg <- if (is.null(r$payload$results$errorMessage)) "" else r$payload$results$errorMessage
+      if (identical(r$status, "fatalError") && grepl("No runner is available", msg)) {
+        cat(sprintf("[frontend] attempt %d: %s retrying...\n", attempt, msg))
+        Sys.sleep(1)
+        next
+      }
+      result <- r
+      break
+    }
+    cat(sprintf("[frontend] skipping type=%s frame (not a result)\n", r$type))
   }
   cat(sprintf("[frontend] attempt %d: no result yet (runner not ready?), retrying...\n", attempt))
 }
