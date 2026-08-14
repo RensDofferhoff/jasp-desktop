@@ -4,6 +4,8 @@
 #include <QTransposeProxyModel>
 #include "datasettablemodel.h"
 #include "variableinfo.h"
+#include "datamodel.h"
+#include "datasetregistry.h"
 
 /// 
 /// Model used by the filter-drag-n-drop to give all the columns and their datatypes
@@ -27,7 +29,8 @@ public:
 				int							rowCount(		const QModelIndex &parent = QModelIndex())							const override;
 				int							columnCount(	const QModelIndex &parent = QModelIndex())							const override;
 				QHash<int, QByteArray>		roleNames()																			const	override;
-				int							getColumnIndex(const std::string & col)												const				{ return _tableModel->getColumnIndex(col);	}
+				int							getColumnIndex(const std::string & col)												const	{ return _neoData ? _neoData->columnIndex(col) : _tableModel->getColumnIndex(col);	}
+				void							bindNeoData(DataModel * model);	///< NEO: serve the active lane dataset's schema instead of the legacy table (data-model-design.md §3.4)
 				QStringList					getColumnNames()																	const;
 	Q_INVOKABLE	int							getColumnType(const QString & name)													const;
 				QString						getColumnTransformedToolTip(const QString & name, columnType transformedTo)			const;
@@ -60,6 +63,7 @@ signals:
 
 private:
 	DataSetTableModel		* _tableModel	= nullptr;
+	DataModel				* _neoData		= nullptr;	///< NEO active dataset (schema from the lane); when set, it is the source of truth
 	static ColumnsModel		* _singleton;
 };
 

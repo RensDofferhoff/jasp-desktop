@@ -75,8 +75,8 @@ public:
 	bool				wasUpgraded()				const	override	{ return _wasUpgraded; }
 	bool				storedWithoutState()		const				{ return _storedWithoutState; }
 	bool				isWaitingForModule();
-	void				setResults(			const Json::Value & results, analysisResultStatus	status, const Json::Value & progress = Json::nullValue) { setResults(results, analysisResultsStatusToAnalysisStatus(status), progress); }
-	void				setResults(			const Json::Value & results, Status					status, const Json::Value & progress = Json::nullValue);
+	void				setResults(			const Json::Value & results, analysisResultStatus	status, const Json::Value & progress = Json::nullValue, const std::string & resultsDir = "") { setResults(results, analysisResultsStatusToAnalysisStatus(status), progress, resultsDir); }
+	void				setResults(			const Json::Value & results, Status					status, const Json::Value & progress = Json::nullValue, const std::string & resultsDir = "");
 	void				imageSaved(			const Json::Value & results);
 
 	void				saveImage(			const Json::Value & options);
@@ -90,7 +90,12 @@ public:
 	void				setRSources(const Json::Value& rSources);
 	void				setUserData(Json::Value userData);
 	void				setRefreshBlocked(bool block)								{ _refreshBlocked = block;						}
-	void				incrementRevision()											{ _revision++;									}
+	void				incrementRevision()						{ _revision++;									}
+	/// NEO: record the revision that last completed, so the next run can seed from it
+	/// (sent as `base_revision`; the orchestrator resolves it to the base results dir for
+	/// copy-on-seed incremental recompute). Highest-wins guards against out-of-order results.
+	void				setLastCompletedRevision(int rev)		{ if (rev > _lastCompletedRevision) _lastCompletedRevision = rev; }
+	int					lastCompletedRevision() const			{ return _lastCompletedRevision;			}
 
 	void				setErrorInResults(const std::string	& msg);
 
@@ -114,7 +119,8 @@ public:
 			Status				status()			const				{ return _status;							}
 			QString				statusQ()			const				{ return tq(statusToString(_status));		}
 			int					revision()			const				{ return _revision;							}
-			std::string			workId()			const				{ return "a" + std::to_string(_id);			}	///< stable work-unit id (§19.1): the analysis instance id. Unique per session via Analyses' id assignment, upholding JaspClient::submit's caller-uniqueness contract.
+			std::string			workId()			const		{ return "a" + std::to_string(_id);							}	///< stable work-unit id (§19.1): the analysis instance id. Unique per session via Analyses' id assignment, upholding JaspClient::submit's caller-uniqueness contract.
+			const std::string &	datasetId()			const		{ return _datasetId;									}	///< NEO: the dataset this analysis is bound to (data-model-design.md §3.5) — active id at creation, "" for legacy
 			bool				isRefreshBlocked()	const				{ return _refreshBlocked;					}
 	Q_INVOKABLE	QString			helpFile()			const	override	{ return _helpFile;							}
 	const	Json::Value		&	imgOptions()		const				{ return _imgOptions;						}
@@ -233,6 +239,16 @@ protected:
 								_oldMetaData		= Json::nullValue;
 	std::string					_preUpgraderVersion	= "0";
 
+	// NEO: orchestrator's per-revision dir holding this analysis' file artifacts (plot PNGs +
+	// plotly JSON) — wired in with each result. Asset paths in `_results` stay RELATIVE (that is
+	// what lands on disk); the dir is used only to rewrite them for the results webview.
+	std::string					_resultsDir;
+
+	// NEO (data-model-design.md §3.5): the dataset this analysis works on — bound at creation
+	// from the registry's active dataset, so an analysis keeps its dataset when the active one
+	// changes. "" for legacy/.jasp-loaded analyses (identical to pre-binding behavior).
+	std::string					_datasetId;
+
 
 private:
 	size_t						_id,
@@ -256,6 +272,7 @@ private:
 								_isReport				= false;
 	Json::Value					_lastSentMeta				= Json::nullValue;
 	int							_revision						= 0;
+	int							_lastCompletedRevision			= -1;	///< NEO: highest revision that completed (-1 = none yet); sent as base_revision
 
 	Modules::AnalysisEntry	*	_moduleData						= nullptr;
 	Modules::DynamicModule	*	_dynamicModule					= nullptr;

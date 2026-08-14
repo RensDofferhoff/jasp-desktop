@@ -80,7 +80,8 @@ Analysis::Analysis(size_t id, Analysis * duplicateMe)
 	, _dynamicModule(					duplicateMe->_dynamicModule						)
 	, _codedReferenceToAnalysisEntry(	duplicateMe->_codedReferenceToAnalysisEntry		)
 	, _helpFile(						duplicateMe->_helpFile							)
-	, _rSources(						duplicateMe->_rSources							)
+	, _rSources(						duplicateMe->_rSources			)
+	, _datasetId(						duplicateMe->_datasetId			)
 {
 	initAnalysis();
 }
@@ -103,6 +104,11 @@ Analysis::Analysis(size_t id, const std::string & title)
 
 void Analysis::initAnalysis()
 {
+	// NEO (data-model-design.md §3.5): bind to the dataset active at creation. Duplicates
+	// carry the original's id (copied in the ctor); .jasp loads and legacy datasets yield "".
+	if (_datasetId.empty() && DataSetPackage::pkg())
+		_datasetId = DataSetPackage::pkg()->datasetId();
+
 	watchQmlForm();
 	connect(&_QMLFileWatcher,	&QFileSystemWatcher::fileChanged,			this,	&Analysis::analysisQMLFileChanged,	Qt::UniqueConnection);
 	connect(this,				&Analysis::createFormWhenYouHaveAMoment,	this,	&Analysis::createForm,				Qt::QueuedConnection);
@@ -238,8 +244,9 @@ void Analysis::remove()
 }
 
 
-void Analysis::setResults(const Json::Value & results, Status status, const Json::Value & progress)
+void Analysis::setResults(const Json::Value & results, Status status, const Json::Value & progress, const std::string & resultsDir)
 {
+	_resultsDir		= resultsDir;
 	_results		= results;
 	_progress		= progress;
 	_resultsMeta	= _results.get(".meta", Json::arrayValue);
@@ -289,11 +296,18 @@ void Analysis::run()
 	Json::Value work = createWorkJson();
 
 	const size_t myId = id();
-	JaspClient::client()->submit(work, [myId](const Json::Value & results, const std::string & status, const Json::Value & progress)
+	const int submittedRev = revision();
+	JaspClient::client()->submit(work, [myId, submittedRev](const JaspClient::Result & result)
 	{
 		Analysis * a = Analyses::analyses()->get(myId);
 		if (!a) return;								// analysis was removed in the meantime
-		a->setResults(results, analysisResultStatusFromString(status), progress);
+		a->setResults(result.results, analysisResultStatusFromString(result.status), Json::Value(Json::nullValue), result.resultsDir);
+		// NEO: record the revision that completed, so the next run seeds from it
+		// (base_revision -> copy-on-seed incremental recompute). Resubmitting the same
+		// work_id evicts the prior handler, so the live handler always carries the
+		// current revision; highest-wins guards against out-of-order arrivals.
+		if (result.status == "complete")
+			a->setLastCompletedRevision(submittedRev);
 	});
 
 	Log::log() << "Analysis::run() submitted work " << workId() << " (revision " << revision() << ") for " << title() << std::endl;
@@ -311,8 +325,13 @@ Json::Value Analysis::createWorkJson()
 	work["work_id"]		= workId();	// stable analysis instance id (§19.1); revision travels separately
 	work["kind"]		= "analysis";
 	work["revision"]	= revision();
+	// NEO: seed incremental recompute from the last COMPLETED revision (copy-on-seed).
+	// Omitted on the first run (nothing completed yet). The orchestrator resolves it to the
+	// base results dir; the runner copies that into this revision's dir and reuses state/plots.
+	if (_lastCompletedRevision >= 0 && _lastCompletedRevision < revision())
+		work["base_revision"] = _lastCompletedRevision;
 	work["dataset_ids"]	= Json::Value(Json::arrayValue);
-	work["dataset_ids"].append(DataSetPackage::pkg()->datasetId());	// NEO: orchestrator-assigned id ("" until the open completes)
+	work["dataset_ids"].append(_datasetId);	// NEO: the dataset this analysis is bound to (data-model-design.md §3.5)
 
 	Json::Value payload(Json::objectValue);
 	payload["module"]			= module();
@@ -515,9 +534,23 @@ std::string Analysis::statusToString(Status status)
 
 Json::Value Analysis::loadPlotlyJsonInResults(Json::Value  results) const
 {
-	auto loadFile = [](const std::string & tempFileRelativePath)
+	// NEO: this analysis' file artifacts live in the orchestrator's per-revision results dir
+	// (_resultsDir, wired in with each result). Relative asset paths are rewritten against it
+	// HERE — only in the copy handed to the results webview; `_results` (and everything saved
+	// from it) keeps the relative paths. Without _resultsDir (engine path / file load) the
+	// session temp dir remains the base, as before.
+	auto resolveAssetPath = [this](const std::string & path) -> QString
 	{
-		QFile plotlyJsonFile(tq(TempFiles::sessionDirName() + "/" + tempFileRelativePath));
+		if(!path.empty() && path[0] == '/')							// already absolute
+			return tq(path);
+
+		const std::string base = _resultsDir.empty() ? TempFiles::sessionDirName() : _resultsDir;
+		return tq(base + "/" + path);
+	};
+
+	auto loadFile = [&resolveAssetPath](const std::string & path)
+	{
+		QFile plotlyJsonFile(resolveAssetPath(path));
 
 		if(plotlyJsonFile.open(QFile::OpenModeFlag::ReadOnly))
 		{
@@ -536,10 +569,23 @@ Json::Value Analysis::loadPlotlyJsonInResults(Json::Value  results) const
 
 	std::function<void(Json::Value &)> recursiveFixer;
 
-	recursiveFixer = [&loadFile, &recursiveFixer](Json::Value & results)
+	recursiveFixer = [&loadFile, &resolveAssetPath, &recursiveFixer, this](Json::Value & results)
 	{
-		if(results.isObject() && results.isMember("interactiveJsonData") && results["interactiveJsonData"].isString() && QFileInfo::exists(tq(TempFiles::sessionDirName() + "/" + results["interactiveJsonData"].asString())))
-			results["interactiveJsonData"] = loadFile(results["interactiveJsonData"].asString());
+		if(results.isObject())
+		{
+			// Plot image: rewrite the relative artifact path so the plot:// scheme handler can
+			// serve it (the webview has no other way to know the results dir).
+			if(!_resultsDir.empty() && results.isMember("data") && results["data"].isString())
+			{
+				const std::string data = results["data"].asString();
+				if(!data.empty() && data.find('/') == std::string::npos &&
+				   data.size() > 4 && data.compare(data.size() - 4, 4, ".png") == 0)
+					results["data"] = resolveAssetPath(data).toStdString();
+			}
+
+			if(results.isMember("interactiveJsonData") && results["interactiveJsonData"].isString() && QFileInfo::exists(resolveAssetPath(results["interactiveJsonData"].asString())))
+				results["interactiveJsonData"] = loadFile(results["interactiveJsonData"].asString());
+		}
 
 		if(results.isObject())
 			for(const std::string & member : results.getMemberNames())
@@ -888,7 +934,7 @@ bool Analysis::isOwnComputedColumn(const std::string & colName) const
 {
 	Column * col = DataSetPackage::pkg()->dataSet() ? DataSetPackage::pkg()->dataSet()->column(colName) : nullptr;
 
-	return col->analysisId() == id();
+	return col && col->analysisId() == id();	// NEO guard: lane datasets have no legacy columns
 }
 
 void Analysis::storeUserDataEtc()
@@ -1305,7 +1351,7 @@ bool Analysis::isColumnFreeOrMine(const QString & columnName) const
 
 	Column * col = DataSetPackage::pkg()->getColumn(columnName.toStdString());
 
-	return col->analysisId() == id();
+	return col && col->analysisId() == id();	// NEO guard: lane datasets have no legacy columns
 }
 
 

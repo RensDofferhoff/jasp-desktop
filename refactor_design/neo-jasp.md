@@ -2361,7 +2361,7 @@ unit produces *many* of these as it runs. This is the **same message the runner 
 | `kind` | string | ✓ | Echoes the work unit's `kind`. |
 | `revision` | int | ✓ | The revision this result was produced from (§23). |
 | `status` | string | ✓ | See the status enum (§22). |
-| `payload` | object | – | **Kind-specific output.** For `kind:"analysis"`: `{results: <results tree>, images: [<paths relative to output_dir>]}`. For `kind:"rcode"`: `{output, value, …}`. Present on `changed`/`complete`. |
+| `payload` | object | – | **Kind-specific output** — normative shapes in *Result payloads by kind* below. Present on `changed`/`complete`. |
 | `module_version` | string | – | Module version that produced this result (provenance). |
 | `message` | string | – | Human-readable detail on `error`/`aborted`. |
 
@@ -2375,10 +2375,86 @@ output, a computed-column confirmation, or anything added later — the frontend
   "status":"changed",
   "payload":{
     "results":{"title":"Descriptives","tables":[ … ]},
-    "images":["descriptives/fig1.png"] } }
+    "results_dir":"/home/u/.local/share/JASP/orchestrator/s-2/a17/results_3" } }
 ```
 
+#### Result payloads by kind (normative)
+
+The `payload` of a `result` is determined by its `kind` — mirroring the work side (§19.1),
+adjacently tagged `{"kind": …, "payload": {…}}`. One work kind, one result shape. Division of
+labor: **producers fill content; the orchestrator fills identity & location** — as typed fields
+on the payload, never by surgery on an opaque tree.
+
+##### `kind:"analysis"`
+
+| Field | Type | Filled by | Description |
+|---|---|---|---|
+| `results` | object | runner | The jaspResults tree. **Opaque to the orchestrator**: forwarded verbatim, never interpreted or mutated. On failure this is the error tree `{error, errorMessage, title}`. |
+| `results_dir` | string | orchestrator | Absolute path of the revision dir holding this result's file artifacts (`<dir_root>/<session>/<work_id>/results_<rev>`). **Wire-only** bootstrap for asset resolution — never persisted. |
+| `images` | string[] | runner | Optional artifact manifest, paths relative to `results_dir` (runner computes it from its keep-list). For save/archive/GC. Shape reserved; not filled in the alpha. |
+
+**The asset-path rule.** Artifact references inside `results` (plot `data`,
+`interactiveJsonData`) are **relative to `results_dir`** — on disk the artifacts are siblings
+of the results JSON, so the stored form stays self-describing and portable with **no absolute
+paths anywhere on disk**. The frontend combines `results_dir` + reference **only on the copy
+handed to the results webview**; the stored tree (and everything saved from it) keeps the
+relative references. Loading from disk resolves against the JSON's own location.
+
+##### `kind:"data"`
+
+Terminal result of a dataset-open work — this **replaces the removed `dataset_ready`
+message** (HANDOVER-dataplane-done.md): dataset open rides the work pipeline, and the ready
+notification IS this terminal result.
+
+| Field | Type | Filled by | Description |
+|---|---|---|---|
+| `dataset_id` | string | orchestrator | The minted identity the frontend references in later work (`dataset_ids`). |
+| `rows` | int | runner (lane) | Row count. |
+| `schema` | object[] | runner (lane) | The frontend's column view: `[{name, display_name, type, levels?, all_integer?}]` (§24). |
+| `error_message` | string | runner (lane) | Present when `status` is a failure. |
+
+> The dataset registry (index entry: id → current path, state, revision) does **not** cache
+> the schema. Schema is content, not routing metadata: it flows lane → frontend on the Data
+> payload, and analysis runners self-serve the schema of the Arrow file they actually read
+> (which cannot disagree with the data). A registry-side copy is a write-only duplicate that
+> can drift across dataset revisions; re-add it only together with a consumer (e.g.
+> dataset-edit validation).
+
+##### `kind:"rcode"` (reserved)
+
+`{output, value, …}` — pinned when the rcode work kind lands.
+
+**Producer/consumer contracts (the step-2 refactor):**
+
+- `orchestrator/src/messages.rs`: `ResultPayload` becomes the adjacently-tagged enum above
+  (`AnalysisResult` / `DataResult` / `RcodeResult`); `messages.schema.json` regenerated
+  (`--schema`).
+- Orchestrator `route_result`: fills `results_dir` (analysis) and `dataset_id` (data) as
+  typed field assignments; no raw-JSON splices, no writes into the opaque `results` tree.
+- R runner (`runner_jaspbase.R`): emits `kind` + the shaped payload (+ `module_version`
+  provenance from §19.4).
+- Data lane (`data_runner.rs`): emits the Data payload content (`schema`, `rows`).
+- Frontend (`JaspClient`): switches on `kind`; kind-specific handlers replace the positional
+  `(results, status, progress, resultsDir)` blob. `progress` returns to the signature when it
+  is real.
+
+> **Step 2 landed (one atomic change — spec + orchestrator + both runners + frontend handlers
+> + R harnesses moved together; no dual-shape transition):** `ResultPayload` is the
+> adjacently-tagged enum above (`messages.rs`; `messages.schema.json` regenerated with
+> `--schema`). The orchestrator fills `results_dir` / `dataset_id` as typed field assignments
+> in `route_result` — no JSON surgery, and the write-only registry schema cache went with it.
+> The R runner emits `kind` + the shaped payload + `module_version` provenance; the Rust data
+> lane emits the Data payload; the frontend dispatches on `kind` (`JaspClient::Result`
+> replaced the positional `(results, status, progress, resultsDir)` blob — `progress` returns
+> to the signature when it is real).
+
 #### `dataset_ready`
+
+> **Superseded (work model, HANDOVER-dataplane-done.md).** Dataset open rides the work
+> pipeline as a `kind:"data"` work unit; the ready notification is the terminal `result`
+> carrying the Data payload (§19.2, *Result payloads by kind*). There is no separate
+> `dataset_ready` message on the wire. The fields below live on the Data payload.
+
 The dataset is cached and ready to analyze.
 
 | Field | Type | Req | Description |
@@ -2570,7 +2646,7 @@ frontend** (§19.2), so a result has one shape end to end.
 | `kind` | string | ✓ | Echoes the work unit's `kind`. |
 | `revision` | int | ✓ | – |
 | `status` | string | ✓ | §22. |
-| `payload` | object | – | Kind-specific output (for `kind:"analysis"`: `{results, images}`); present on `changed`/`complete`. |
+| `payload` | object | – | Kind-specific output — normative shapes in §19.2 *Result payloads by kind*; present on `changed`/`complete`. |
 | `module_version` | string | – | Module version that produced this result (provenance). |
 | `message` | string | – | Detail on error/abort. |
 

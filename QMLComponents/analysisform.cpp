@@ -455,16 +455,16 @@ Json::Value AnalysisForm::_controlOptionMeta(JASPControl* ctrl, bool includeDesc
 			entry["allowedTypes"] = allowedTypes;
 			entry["single"] = listCtrl->maxRows() == 1;
 
-			DataSet* ds = VariableInfo::info()->dataSet();
-			if (ds)
+			// NEO (data-model-design.md §3.6): no raw DataSet* handout — query the provider,
+			// which serves the active lane dataset's schema as well as legacy imports.
+			if (VariableInfo::info() && VariableInfo::info()->provider())
 			{
+				VariableInfoProvider * provider = VariableInfo::info()->provider();
+				const QStringList names = provider->provideInfo(VariableInfo::VariableNames).toStringList();
+
 				Json::Value vars(Json::objectValue);
-				for (int i = 0; i < ds->columnCount(); i++)
-				{
-					Column* col = ds->column(size_t(i));
-					if (col)
-						vars[col->name()] = columnTypeToString(col->type());
-				}
+				for (const QString & name : names)
+					vars[name.toStdString()] = columnTypeToString(columnType(provider->provideInfo(VariableInfo::VariableType, name).toInt()));
 				entry["variables"] = vars;
 			}
 		}

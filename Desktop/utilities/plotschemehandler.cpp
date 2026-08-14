@@ -17,8 +17,19 @@ void PlotSchemeHandler::createUrlScheme()
 void PlotSchemeHandler::requestStarted(QWebEngineUrlRequestJob *request)
 {
 	QUrl	fileUrl		= request->requestUrl();
-	QString filePath	= QString::fromStdString(TempFiles::sessionDirName()) + fileUrl.toString(QUrl::RemoveScheme | QUrl::RemoveQuery);
+	QString pathPart	= fileUrl.toString(QUrl::RemoveScheme | QUrl::RemoveQuery);
 	//Maybe we could remove the whole ?rev=number thing because we are not caching anything here. But maybe webengine does, Im leaving it for now to avoid too many changes.
+
+	// NEO: the frontend rewrites plot asset paths to absolute ones (the orchestrator's
+	// per-revision results dir rides wire-only with each result) — serve those directly.
+	// Legacy artifacts stay bare file names resolved against the session temp dir.
+	QString stripped = pathPart;
+	while (stripped.startsWith('/'))
+		stripped = stripped.mid(1);
+
+	QString filePath = stripped.contains('/')
+						? "/" + stripped
+						: QString::fromStdString(TempFiles::sessionDirName()) + "/" + stripped;
 
 	if(filePath.indexOf(".png") == -1)
 	{

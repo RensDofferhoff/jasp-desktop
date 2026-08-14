@@ -174,16 +174,25 @@ void ListModelFilteredDataEntry::initTableTerms(const TableTerms& terms)
 	if (terms.values.size() > 1)
 		Log::log() << "Too many values in ListModelFilteredDataEntry" << std::endl;
 	
+	DataSet * dataSet = VariableInfo::info() ? VariableInfo::info()->dataSet() : nullptr;
+	if (!dataSet)
+	{
+		// NEO lane dataset: the frontend holds no cells and no legacy Filter can be built on
+		// it — the data-entry table lands with data_view (data-model-design.md §3.6).
+		Log::log() << "ListModelFilteredDataEntry: no frontend dataset (NEO lane dataset); data-entry table skipped" << std::endl;
+		return;
+	}
+
 	if(terms.filterName.isEmpty())
 	{
 		//We dont apparently have a previous filterName, so this is a fresh one, we need a new filter!
 		assert(!_filter && !_filterName.empty());
-		_filter = new Filter(VariableInfo::info()->dataSet(), _filterName, true);
+		_filter = new Filter(dataSet, _filterName, true);
 	}
 	else if(!_filter)
 	{
 		_filterName = fq(terms.filterName);
-		_filter		= new Filter(VariableInfo::info()->dataSet(), _filterName, true);
+		_filter		= new Filter(dataSet, _filterName, true);
 	}
 
 	if (terms.colName.isEmpty())

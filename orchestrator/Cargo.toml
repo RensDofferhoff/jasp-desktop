@@ -19,6 +19,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Generates a JSON Schema *from* the Rust message types — the shared-schema source of truth.
 schemars = "0.8"
+# Cross-platform user directories (XDG / Application Support / %LOCALAPPDATA%) for the
+# orchestrator's default dir root — mirrors the frontend's Qt AppLocalDataLocation.
+dirs = "6"
 # CSV → Arrow data lane (the jasp-data-runner binary's data_open path; a port of
 # refactor_design/poc/csv_arrow). NB: arrow's LZ4 is pure-Rust (lz4_flex); we deliberately
 # avoid the umbrella `ipc_compression` feature because it also pulls zstd-sys (a C build).

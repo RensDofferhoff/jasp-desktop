@@ -25,6 +25,7 @@
 #include <QThread>
 
 #include <boost/bind.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include "utilities/qutils.h"
 #include "utils.h"
@@ -245,18 +246,38 @@ void AsyncLoader::loadPackage(QString id)
 
 			DataSetPackage * pkg = DataSetPackage::pkg();
 
-			if(!pkg->dataSet())
+			// NEO data plane: CSV-family bytes are owned by the orchestrator's data lane — the
+			// data_open work (DataSetPackage::neoOpenDataset) has jasp-data-runner convert them to
+			// Arrow (the lane sniffs the delimiter, so .txt/.tsv ride the same op). The frontend no
+			// longer parses them into its own database — the UI will fetch views from the lane —
+			// so a local open/synch here is just a fresh empty dataset: no import, no MD5 pass
+			// over the file, no external-synch watcher. Online (OSF) nodes keep the legacy import
+			// until the lane learns their paths.
+			const bool laneOwned = !_currentEvent->isOnlineNode()
+				&& (boost::iequals(extension, ".csv") || boost::iequals(extension, ".txt") || boost::iequals(extension, ".tsv"));
+
+			if(laneOwned)
+			{
+				Log::log() << "NEO: '" << path << "' is loaded by the data lane — frontend import deleted." << std::endl;
+				pkg->beginLoadingData();
 				pkg->createDataSet();
-
-			if (_currentEvent->operation() == FileEvent::FileSyncData)
-				_loader.syncPackage(path, extension, boost::bind(&AsyncLoader::progressHandler, this, _1));
+				pkg->endLoadingData();
+			}
 			else
-				_loader.loadPackage(path, extension, boost::bind(&AsyncLoader::progressHandler, this, _1));
+			{
+				if(!pkg->dataSet())
+					pkg->createDataSet();
 
-			if(_currentEvent->operation() != FileEvent::FileSyncData && _currentEvent->type() != Utils::FileType::jasp && !_currentEvent->isReadOnly())
-				pkg->setSynchingExternally(true);
+				if (_currentEvent->operation() == FileEvent::FileSyncData)
+					_loader.syncPackage(path, extension, boost::bind(&AsyncLoader::progressHandler, this, _1));
+				else
+					_loader.loadPackage(path, extension, boost::bind(&AsyncLoader::progressHandler, this, _1));
 
-			QString calcMD5 = fileChecksum(tq(path), QCryptographicHash::Md5);
+				if(_currentEvent->operation() != FileEvent::FileSyncData && _currentEvent->type() != Utils::FileType::jasp && !_currentEvent->isReadOnly())
+					pkg->setSynchingExternally(true);
+			}
+
+			QString calcMD5 = laneOwned ? QString() : fileChecksum(tq(path), QCryptographicHash::Md5);
 
 			if (dataNode != nullptr && calcMD5 != dataNode->md5().toLower())
 				throw LoaderException("The security check of the downloaded file has failed.\n\nLoading has been cancelled due to an MD5 mismatch.");

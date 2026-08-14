@@ -192,7 +192,9 @@ void ResultsJsInterface::menuHiding()
 
 void ResultsJsInterface::getImageInBase64(int id, const QString &path)
 {
-	QString fullPath = tq(TempFiles::sessionDirName()) + "/" + path;
+	// NEO rewrites artifact paths to absolute before they reach the webview; legacy paths stay
+	// relative to the session temp dir.
+	QString fullPath = path.startsWith('/') ? path : tq(TempFiles::sessionDirName()) + "/" + path;
 	QFile *file = new QFile(fullPath);
 	file->open(QIODevice::ReadOnly);
 	QByteArray image = file->readAll();

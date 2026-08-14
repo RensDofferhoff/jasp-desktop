@@ -16,8 +16,12 @@
 //!   selects the `Message::Work` variant.
 //! * A `work`'s payload is *adjacently tagged*: `kind` names the variant, `payload` holds its
 //!   fields (§19.1, analysis vs rcode).
-//! * `payload.results` is deliberately an opaque `serde_json::Value`: the orchestrator forwards
-//!   the jaspResults tree verbatim and never interprets it.
+//! * A `result`'s payload is adjacently tagged the same way (§19.2 *Result payloads by kind*):
+//!   one work kind, one result shape. Division of labor: producers fill content; the
+//!   orchestrator fills identity & location — as typed fields on the payload, never by surgery
+//!   on an opaque tree.
+//! * `AnalysisResult.results` is deliberately an opaque `serde_json::Value`: the orchestrator
+//!   forwards the jaspResults tree verbatim and never interprets it.
 //!
 //! Only the messages the alpha needs are fleshed out; the rest of the catalog (data_edit,
 //! dataset_close, data_changed, form_reload, …) follows the identical pattern — one variant +
@@ -107,9 +111,9 @@ pub enum WorkPayload {
 /// A data-plane work unit (frontend → orchestrator → data lane). The lane is **stateless**:
 /// the orchestrator assigns identity at dispatch — for `data_open` it mints the `dataset_id`,
 /// fills in the `cache_path` (the lane writes the converted `.arrow` there), and tracks the
-/// work → dataset mapping; the lane's terminal result (with the `dataset_id` spliced in by
-/// the orchestrator) is the frontend's "dataset ready". An open is just a work; the
-/// orchestrator manages the dataset.
+/// work → dataset mapping; the lane's terminal result — a `kind:"data"` result the
+/// orchestrator fills with the `dataset_id` (§19.2) — is the frontend's "dataset ready". An
+/// open is just a work; the orchestrator manages the dataset.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DataWork {
     /// The operation to perform (`data_open` in this increment).
@@ -151,19 +155,80 @@ pub struct RcodeWork {
     pub env: Value,
 }
 
-/// Orchestrator → Frontend: a result (possibly one of a stream) for a work unit.
+/// Orchestrator → Frontend: a result (possibly one of a stream) for a work unit. This is the
+/// **same message the runner sends** (§19.4); the orchestrator forwards it, filling only the
+/// identity & location fields of the typed payload (§19.2, division of labor).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ResultMsg {
     pub work_id: String,
     pub revision: u64,
     pub status: Status,
+    /// `kind` + `payload`, flattened so they sit at the result level (adjacently tagged) —
+    /// mirrors the work side (§19.1).
+    #[serde(flatten)]
     pub payload: ResultPayload,
+    /// Module version that produced this result (provenance, §19.4); analysis results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_version: Option<String>,
+    /// Human-readable detail on error/aborted (§19.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
+/// The kind-specific part of a `result` message (adjacently tagged by `kind`/`payload`) —
+/// mirrors [`WorkPayload`]. One work kind, one result shape (§19.2 *Result payloads by kind*).
+/// Division of labor: **producers fill content; the orchestrator fills identity & location** —
+/// as typed fields on the payload, never by surgery on an opaque tree.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ResultPayload {
-    /// The jaspResults tree — opaque; forwarded verbatim, never interpreted.
+#[serde(tag = "kind", content = "payload")]
+pub enum ResultPayload {
+    #[serde(rename = "analysis")]
+    Analysis(AnalysisResult),
+    /// Terminal result of a dataset-open work — replaces the removed `dataset_ready` message:
+    /// the ready notification IS this result.
+    #[serde(rename = "data")]
+    Data(DataResult),
+    /// Reserved — `{output, value, …}`, pinned when the rcode work kind lands (§19.2).
+    #[serde(rename = "rcode")]
+    Rcode(Value),
+}
+
+/// The `kind:"analysis"` result payload (§19.2).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AnalysisResult {
+    /// The jaspResults tree — **opaque to the orchestrator**: forwarded verbatim, never
+    /// interpreted or mutated. On failure this is the error tree `{error, errorMessage, title}`.
     pub results: Value,
+    /// Absolute path of the revision dir holding this result's file artifacts
+    /// (`<dir_root>/<session>/<work_id>/results_<rev>`). **Orchestrator-filled, wire-only**
+    /// bootstrap for asset resolution — never persisted (§19.2, the asset-path rule: artifact
+    /// references inside `results` stay relative to this dir on disk).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results_dir: Option<String>,
+    /// Optional artifact manifest, paths relative to `results_dir` (the runner computes it from
+    /// its keep-list; for save/archive/GC). Shape reserved; not filled in the alpha.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<String>>,
+}
+
+/// The `kind:"data"` result payload (§19.2) — the terminal result of a dataset-open work.
+/// Schema is content, not routing metadata: it flows lane → frontend here; the dataset
+/// registry does not cache it.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DataResult {
+    /// The minted identity the frontend references in later work (`dataset_ids`).
+    /// **Orchestrator-filled** at the terminal result; the lane leaves it empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_id: Option<String>,
+    /// Row count (lane).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u64>,
+    /// The frontend's column view: `[{name, display_name, type, levels?, all_integer?}]` (§24).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Value>,
+    /// Present when `status` is a failure (lane).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
 }
 
 /// Result lifecycle status (wire values are camelCase, matching the existing engine strings).

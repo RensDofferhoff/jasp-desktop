@@ -41,6 +41,8 @@
 
 #include "gui/preferencesmodel.h"
 #include "data/exporters/jaspexporter.h"
+#include "data/datasetregistry.h"	// NEO data model (data-model-design.md)
+#include "data/datamodel.h"
 #include "utilities/application.h"
 #include "gui/jaspversionchecker.h"
 #include "ALTNavigation/altnavcontrol.h"
@@ -501,6 +503,17 @@ void MainWindow::makeConnections()
 	connect(_package,				&DataSetPackage::newDataLoaded,						_fileMenu,				[&](){ _fileMenu->enableButtonsForOpenedWorkspace(); }		);
 	connect(_package,				&DataSetPackage::dataModeChanged,					_analyses,				&Analyses::dataModeChanged									);
 	connect(_package,				&DataSetPackage::dataModeChanged,					this,					&MainWindow::onDataModeChanged								);
+
+	// NEO data plane: the frontend no longer populates _dataSet for lane-owned opens (CSV etc.
+	// is read by the data-runner), so populateUIfromDataSet's rowCount-based setDataAvailable()
+	// stays false. Readiness is the registry's active dataset instead (data-model-design.md §3.2):
+	// the lane's terminal result carries rows + schema, which the registry publishes. Legacy
+	// (non-lane) imports never touch the registry and keep the populateUIfromDataSet path.
+	connect(_package->registry(),	&DatasetRegistry::activeChanged,		this,			[this](const QString &)
+	{
+		auto * activeData = _package->registry()->active();
+		setDataAvailable(activeData && activeData->rows() > 0);
+	});
 	connect(_package,				&DataSetPackage::askUserForExternalDataFile,		this,					&MainWindow::startDataEditorHandler							);
 	connect(_package,				&DataSetPackage::makeAnAutoSave,					this,					&MainWindow::saveTmpFileHandler								);
 	
@@ -1437,9 +1450,20 @@ void MainWindow::registerRpcHandlers()
 
 			if (type == columnType::nominal || type == columnType::nominalText || type == columnType::ordinal)
 			{
-				Column * column = pkg->dataSet()->column(name);
-				if (column)
-					col["distinctCount"] = static_cast<int>(column->labelsNonEmptyCount());
+				// NEO (data-model-design.md §3.6): lane datasets answer from the active DataModel
+				// (levels from the wire schema); legacy imports keep the Column path.
+				auto * neo = pkg->registry() ? pkg->registry()->active() : nullptr;
+				if (neo)
+				{
+					if (const ColumnInfo * columnInfo = neo->column(name))
+						col["distinctCount"] = static_cast<int>(columnInfo->levels.size());
+				}
+				else
+				{
+					Column * column = pkg->dataSet()->column(name);
+					if (column)
+						col["distinctCount"] = static_cast<int>(column->labelsNonEmptyCount());
+				}
 			}
 
 			columns.append(col);

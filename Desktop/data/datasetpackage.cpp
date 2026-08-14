@@ -20,6 +20,8 @@
 #include "utilities/qutils.h"
 #include <QThread>
 #include "jaspclient/jaspclient.h"
+#include "datasetregistry.h"	// NEO data model (data-model-design.md)
+#include "datamodel.h"
 #include "columnencoder.h"
 #include "analysis/analysis.h" // NEO gut: was transitive via engine/enginesync.h; now explicit
 #include "timers.h"
@@ -75,6 +77,12 @@ DataSetPackage::DataSetPackage(QObject * parent) : QAbstractItemModel(parent)
 	connect(&_autoSaveTimer,			&QTimer::timeout, this, &DataSetPackage::handleAutoSave);
 	
 	_undoStack = new UndoStack(this);
+
+	// NEO data model (data-model-design.md §3.2): the registry owns the open DataModels;
+	// datasetId() and the metadata group delegate to its active dataset. Relay its
+	// activeChanged as the existing datasetIdChanged signal for legacy listeners.
+	_registry = new DatasetRegistry(this);
+	connect(_registry, &DatasetRegistry::activeChanged, this, [this](const QString &) { emit datasetIdChanged(); });
 	
 	_doWalCheckPointTimer	.setInterval(5*60*1000);
 	_doWalCheckPointTimer	.setSingleShot(false);
@@ -142,6 +150,8 @@ void DataSetPackage::reset(bool newDataSet)
 	_manualEdits				= false;
 
 	_columnNameUsedInEasyFilter.clear();
+
+	_registry->clear(); //NEO: no dataset open after a reset (clear emits activeChanged -> datasetIdChanged)
 
 	setLoaded(false);
 	setModified(false);
@@ -461,13 +471,19 @@ QVariant DataSetPackage::getDataSetViewLines(bool up, bool left, bool down, bool
 					(down ?		8 : 0);
 }
 
-int DataSetPackage::dataRowCount() const 
-{ 
+int DataSetPackage::dataRowCount() const
+{
+	if (_registry && _registry->active())
+		return int(_registry->active()->rows());
+
 	return !_dataSet ? 0 : rowCount(indexForSubNode(_dataSet->dataNode()));
 }
 
-int DataSetPackage::dataColumnCount() const 
-{ 
+int DataSetPackage::dataColumnCount() const
+{
+	if (_registry && _registry->active())
+		return int(_registry->active()->columnCount());
+
 	return !_dataSet ? 0 : columnCount(indexForSubNode(_dataSet->dataNode()));
 }
 
@@ -1127,7 +1143,17 @@ void DataSetPackage::setDescription(const QString &description)
 
 int DataSetPackage::findIndexByName(const std::string & name) const
 {
-	return _dataSet->getColumnIndex(name);
+	return getColumnIndex(name);
+}
+
+int DataSetPackage::getColumnIndex(const std::string & name) const
+{
+	// NEO: the active DataModel (schema from the lane) answers first; the legacy _dataSet
+	// remains the source for non-lane formats until their lane exists.
+	if (_registry && _registry->active())
+		return _registry->active()->columnIndex(name);
+
+	return _dataSet ? _dataSet->getColumnIndex(name) : -1;
 }
 
 bool DataSetPackage::isColumnNameFree(const std::string & name) const
@@ -1536,13 +1562,25 @@ void DataSetPackage::initializeComputedColumns()
 }
 
 
+std::string DataSetPackage::datasetId() const
+{
+	// NEO: identity lives in the registry now — the active dataset's orchestrator id.
+	return _registry ? _registry->activeId() : std::string();
+}
+
 stringvec DataSetPackage::getColumnNames()
 {
+	if (_registry && _registry->active())
+		return _registry->active()->columnNames();
+
 	return _dataSet ? _dataSet->getColumnNames() : stringvec();
 }
 
 std::map<std::string,columnType> DataSetPackage::getColumnTypesMap()
 {
+	if (_registry && _registry->active())
+		return _registry->active()->columnTypesMap();
+
 	return _dataSet ? _dataSet->getColumnTypesMap() : std::map<std::string,columnType>();
 }
 
@@ -2555,13 +2593,20 @@ void DataSetPackage::neoOpenDataset(std::string filePath)
 {
 	// NEO data plane (dataset-manager-design §5.1): opening a dataset is just a WORK — the
 	// orchestrator mints the dataset_id, assigns the cache path, routes the conversion to a
-	// lane, and answers with the normal terminal result (dataset_id spliced in). Submitted
-	// through JaspClient::submit like any analysis work — no special message, no special
-	// client path. Main-thread only (MainWindow::dataSetIOCompleted calls this once a file
-	// open succeeds); the CSV bytes are read by the data-runner PROCESS, not here — nothing
-	// in this call touches the file or a loader thread.
+	// lane, and answers with the normal terminal result — a kind:"data" result carrying the
+	// dataset_id on its typed Data payload (§19.2). Submitted through JaspClient::submit like
+	// any analysis work — no special message, no special client path. Main-thread only
+	// (MainWindow::dataSetIOCompleted calls this once a file open succeeds); the CSV bytes are
+	// read by the data-runner PROCESS, not here — nothing in this call touches the file or a
+	// loader thread.
 	const QString qPath = tq(filePath);
-	if (!qPath.endsWith(".csv", Qt::CaseInsensitive))
+	// CSV family: the lane sniffs the delimiter (, ; \t |), so .txt/.tsv ride the same op.
+	// Must match AsyncLoader::loadPackage's laneOwned set — these formats no longer have a
+	// frontend import.
+	const bool csvFamily = qPath.endsWith(".csv", Qt::CaseInsensitive)
+						|| qPath.endsWith(".txt", Qt::CaseInsensitive)
+						|| qPath.endsWith(".tsv", Qt::CaseInsensitive);
+	if (!csvFamily)
 		return;
 	if (!JaspClient::client())
 		return;
@@ -2592,20 +2637,21 @@ void DataSetPackage::neoOpenDataset(std::string filePath)
 	work["payload"]		= payload;
 
 	Log::log() << "NEO dataset_open work " << workId << ": " << filePath << std::endl;
-	JaspClient::client()->submit(work, [this](const Json::Value & results,
-											  const std::string  & status,
-											  const Json::Value  &)
+	JaspClient::client()->submit(work, [this, filePath](const JaspClient::Result & result)
 	{
-		if (status != "complete")
+		if (result.status == "running")
+			return;	// park marker: the open is parked while the lane boots — not a failure
+		if (result.status != "complete")
 		{
-			Log::log() << "NEO dataset_open failed (" << status << "): "
-					   << results.get("errorMessage", "").asString() << std::endl;
+			Log::log() << "NEO dataset_open failed (" << result.status << "): " << result.message << std::endl;
 			return;
 		}
-		_datasetId = results.get("dataset_id", "").asString();
-		Log::log() << "NEO dataset ready: " << _datasetId
-				   << " (" << results.get("rows", 0).asUInt64() << " rows)" << std::endl;
-		emit datasetIdChanged();
+		Log::log() << "NEO dataset ready: " << result.datasetId
+				   << " (" << result.rows << " rows)" << std::endl;
+		// NEO data model: the registry creates/populates the DataModel from the typed
+		// kind:"data" payload (dataset_id, rows, schema) and makes it active — that is
+		// the frontend's whole view of the dataset now (data-model-design.md §3.2).
+		_registry->openFromResult(result, filePath);
 	});
 }
 

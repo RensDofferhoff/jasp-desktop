@@ -216,6 +216,9 @@ main <- function(control_url = ORCH_URL) {
       work_id    = work$work_id,
       revision   = work$revision,
       status     = "complete",
+      # Adjacently-tagged kind+payload (§19.2 Result payloads by kind); the orchestrator
+      # fills results_dir when it forwards.
+      kind       = "analysis",
       payload    = list(results = results)
     )
 

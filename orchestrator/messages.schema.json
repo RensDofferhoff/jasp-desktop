@@ -103,18 +103,84 @@
       }
     },
     {
-      "description": "Orchestrator → Frontend: a result (possibly one of a stream) for a work unit.",
+      "description": "Orchestrator → Frontend: a result (possibly one of a stream) for a work unit. This is the **same message the runner sends** (§19.4); the orchestrator forwards it, filling only the identity & location fields of the typed payload (§19.2, division of labor).",
       "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "payload"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "analysis"
+              ]
+            },
+            "payload": {
+              "$ref": "#/definitions/AnalysisResult"
+            }
+          }
+        },
+        {
+          "description": "Terminal result of a dataset-open work — replaces the removed `dataset_ready` message: the ready notification IS this result.",
+          "type": "object",
+          "required": [
+            "kind",
+            "payload"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "data"
+              ]
+            },
+            "payload": {
+              "$ref": "#/definitions/DataResult"
+            }
+          }
+        },
+        {
+          "description": "Reserved — `{output, value, …}`, pinned when the rcode work kind lands (§19.2).",
+          "type": "object",
+          "required": [
+            "kind",
+            "payload"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "rcode"
+              ]
+            },
+            "payload": true
+          }
+        }
+      ],
       "required": [
-        "payload",
         "revision",
         "status",
         "type",
         "work_id"
       ],
       "properties": {
-        "payload": {
-          "$ref": "#/definitions/ResultPayload"
+        "message": {
+          "description": "Human-readable detail on error/aborted (§19.2).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "module_version": {
+          "description": "Module version that produced this result (provenance, §19.4); analysis results.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "revision": {
           "type": "integer",
@@ -507,6 +573,35 @@
     }
   },
   "definitions": {
+    "AnalysisResult": {
+      "description": "The `kind:\"analysis\"` result payload (§19.2).",
+      "type": "object",
+      "required": [
+        "results"
+      ],
+      "properties": {
+        "images": {
+          "description": "Optional artifact manifest, paths relative to `results_dir` (the runner computes it from its keep-list; for save/archive/GC). Shape reserved; not filled in the alpha.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "results": {
+          "description": "The jaspResults tree — **opaque to the orchestrator**: forwarded verbatim, never interpreted or mutated. On failure this is the error tree `{error, errorMessage, title}`."
+        },
+        "results_dir": {
+          "description": "Absolute path of the revision dir holding this result's file artifacts (`<dir_root>/<session>/<work_id>/results_<rev>`). **Orchestrator-filled, wire-only** bootstrap for asset resolution — never persisted (§19.2, the asset-path rule: artifact references inside `results` stay relative to this dir on disk).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
     "AnalysisWork": {
       "type": "object",
       "required": [
@@ -621,8 +716,40 @@
         "data_update"
       ]
     },
+    "DataResult": {
+      "description": "The `kind:\"data\"` result payload (§19.2) — the terminal result of a dataset-open work. Schema is content, not routing metadata: it flows lane → frontend here; the dataset registry does not cache it.",
+      "type": "object",
+      "properties": {
+        "dataset_id": {
+          "description": "The minted identity the frontend references in later work (`dataset_ids`). **Orchestrator-filled** at the terminal result; the lane leaves it empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error_message": {
+          "description": "Present when `status` is a failure (lane).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rows": {
+          "description": "Row count (lane).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "schema": {
+          "description": "The frontend's column view: `[{name, display_name, type, levels?, all_integer?}]` (§24)."
+        }
+      }
+    },
     "DataWork": {
-      "description": "A data-plane work unit (frontend → orchestrator → data lane). The lane is **stateless**: the orchestrator assigns identity at dispatch — for `data_open` it mints the `dataset_id`, fills in the `cache_path` (the lane writes the converted `.arrow` there), and tracks the work → dataset mapping; the lane's terminal result (with the `dataset_id` spliced in by the orchestrator) is the frontend's \"dataset ready\". An open is just a work; the orchestrator manages the dataset.",
+      "description": "A data-plane work unit (frontend → orchestrator → data lane). The lane is **stateless**: the orchestrator assigns identity at dispatch — for `data_open` it mints the `dataset_id`, fills in the `cache_path` (the lane writes the converted `.arrow` there), and tracks the work → dataset mapping; the lane's terminal result — a `kind:\"data\"` result the orchestrator fills with the `dataset_id` (§19.2) — is the frontend's \"dataset ready\". An open is just a work; the orchestrator manages the dataset.",
       "type": "object",
       "required": [
         "cache_path",
@@ -748,17 +875,6 @@
         },
         "env": {
           "description": "Opaque environment for the code."
-        }
-      }
-    },
-    "ResultPayload": {
-      "type": "object",
-      "required": [
-        "results"
-      ],
-      "properties": {
-        "results": {
-          "description": "The jaspResults tree — opaque; forwarded verbatim, never interpreted."
         }
       }
     },

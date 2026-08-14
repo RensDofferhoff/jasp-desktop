@@ -191,7 +191,10 @@ on work:   # work.payload.module is guaranteed loaded + advertised (§1a)
   2. jr <- jaspBase::runJaspResults(                      (§3)
             functionCall = paste0(work$payload$module, "::", work$payload$analysis), ...)
   3. results <- jr$.__enclos_env__$private$jaspObject$getResults()$results
-  4. send `result` { work_id, revision, status:"complete", payload:{ results } }
+  4. send `result` { work_id, revision, status:"complete",
+                    kind:"analysis", module_version:<the loaded module's version>,
+                    payload:{ results } }          (adjacently tagged, §19.2 Result payloads by kind;
+                                                    the orchestrator fills payload.results_dir when it forwards)
 ```
 
 The once-installed natives (§4.1, §4.2) read whatever context step 1 just set. Errors surface

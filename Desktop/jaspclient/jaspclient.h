@@ -54,11 +54,30 @@ public:
 		Full	///< the full JSON of every message
 	};
 
+	/// A `result` decoded by kind (§19.2 "Result payloads by kind"). JaspClient switches on
+	/// `kind` and fills the matching field group; a handler reads only its own kind's fields.
+	/// Replaces the old positional (results, status, progress, resultsDir) blob — `progress`
+	/// returns when it is real.
+	struct Result
+	{
+		std::string kind;		///< "analysis" | "data" ("rcode" reserved)
+		std::string status;		///< §22 status string
+
+		// kind:"analysis" — the jaspResults tree + its asset bootstrap.
+		Json::Value results;	///< the opaque jaspResults tree; on failure the error tree {error, errorMessage, title}
+		std::string resultsDir;	///< orchestrator's per-revision artifact dir; wire-only, never persisted
+
+		// kind:"data" — the terminal dataset-open outcome (replaces `dataset_ready`).
+		std::string datasetId;	///< the minted identity to reference in later work (dataset_ids)
+		uint64_t    rows = 0;	///< row count
+		Json::Value schema;		///< column view [{name, display_name, type, levels?, all_integer?}]
+
+		std::string message;	///< human-readable detail on failure (payload error_message / result message)
+	};
+
 	/// Invoked on the main thread for every `result` of a submitted work unit, i.e.
-	/// `submit(work) -> stream<result>`. Arguments: (results, status, progress).
-	using ResultHandler = std::function<void(const Json::Value & results,
-											 const std::string  & status,
-											 const Json::Value  & progress)>;
+	/// `submit(work) -> stream<result>`.
+	using ResultHandler = std::function<void(const Result & result)>;
 
 	static JaspClient * client();	///< singleton (created with the application)
 
@@ -148,6 +167,7 @@ private:
 	struct Slot
 	{
 		uint64_t		revision;
+		std::string		kind;	///< the submitted work's kind — shapes synthetic failures surfaced via `error` messages
 		ResultHandler	handler;
 	};
 	std::map<std::string, Slot>	_slots;	///< work_id -> {revision, handler} (main thread only)

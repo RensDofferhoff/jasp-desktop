@@ -259,7 +259,7 @@ std::string JaspClient::submit(const Json::Value & work, ResultHandler handler)
 
 	// Same work_id re-submitted → the assignment replaces the old slot (eviction by construction).
 	// No abort dance and no separate per-analysis map: this revision is the high-water mark (§23).
-	_slots[workId] = Slot{ revision, std::move(handler) };
+	_slots[workId] = Slot{ revision, work.get("kind", "analysis").asString(), std::move(handler) };
 
 	sendFrame(work);
 	return workId;
@@ -298,7 +298,8 @@ void JaspClient::handleMessage(const QByteArray & body)
 	}
 
 	// Orchestrator error against a submitted work (e.g. dataset_not_ready): surfaced as a
-	// fatalError result on that slot so the analysis does not spin forever.
+	// fatalError result on that slot so the analysis does not spin forever. The slot remembers
+	// the submitted work's kind, so the synthetic failure is shaped like its kind (§19.2).
 	if (type == "error")
 	{
 		const std::string workId = env.get("work_id", "").asString();
@@ -306,11 +307,18 @@ void JaspClient::handleMessage(const QByteArray & body)
 		if (sit != _slots.end())
 		{
 			ResultHandler handler = std::move(sit->second.handler);
+			Result result;
+			result.kind		= std::move(sit->second.kind);
+			result.status	= "fatalError";
+			result.message	= env.get("message", "").asString();
 			_slots.erase(sit);
-			Json::Value results(Json::objectValue);
-			results["error"]		= true;
-			results["errorMessage"]	= env.get("message", "").asString();
-			handler(results, "fatalError", Json::Value(Json::nullValue));
+			if (result.kind == "analysis")
+			{	// The analysis UI surfaces failures from the results error tree.
+				result.results					= Json::Value(Json::objectValue);
+				result.results["error"]			= true;
+				result.results["errorMessage"]	= result.message;
+			}
+			handler(result);
 		}
 		return;
 	}
@@ -321,8 +329,8 @@ void JaspClient::handleMessage(const QByteArray & body)
 	const std::string workId	= env.get("work_id", "").asString();
 	const uint64_t	revision	= env.get("revision", 0).asUInt64();
 	const std::string status	= env.get("status", "complete").asString();
+	const std::string kind		= env.get("kind", "").asString();
 	const Json::Value payload	= env.get("payload", Json::nullValue);
-	const Json::Value results	= payload.get("results", Json::nullValue);
 
 	auto it = _slots.find(workId);
 	if (it == _slots.end())
@@ -330,12 +338,31 @@ void JaspClient::handleMessage(const QByteArray & body)
 	if (revision < it->second.revision)
 		return;								// stale: superseded by a newer revision (§23)
 
+	// Switch on kind; fill the kind-specific field group (§19.2 Result payloads by kind).
+	Result result;
+	result.kind		= kind;
+	result.status	= status;
+	if (kind == "analysis")
+	{
+		result.results		= payload.get("results", Json::nullValue);
+		result.resultsDir	= payload.get("results_dir", "").asString();
+	}
+	else if (kind == "data")
+	{
+		result.datasetId	= payload.get("dataset_id", "").asString();
+		result.rows			= payload.get("rows", 0).asUInt64();
+		result.schema		= payload.get("schema", Json::nullValue);
+		result.message		= payload.get("error_message", "").asString();
+	}
+	if (result.message.empty())
+		result.message = env.get("message", "").asString();
+
 	ResultHandler handler = it->second.handler;	// copy: the handler may erase/re-enter
 	const bool terminal = (status == "complete" || status == "fatalError" || status == "validationError");
 	if (terminal)
 		_slots.erase(it);
 
-	handler(results, status, Json::Value(Json::nullValue));	// no top-level `progress` in the alpha schema
+	handler(result);
 }
 
 ModuleCatalog JaspClient::parseCatalog(const Json::Value & modulesJson)

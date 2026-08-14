@@ -34,11 +34,15 @@
 //!
 //! Environment (§8):
 //! * `JASP_ORCH_URL`             control endpoint; scheme selects transport (default `tcp://127.0.0.1:9555`).
-//! * `JASP_ORCH_DIR_ROOT`        orchestrator directory root (default `/tmp/jasp-orchestrator`).
+//! * `JASP_ORCH_DIR_ROOT`        orchestrator directory root (default: `<app data>/JASP/orchestrator`,
+//!   e.g. `~/.local/share/JASP/orchestrator` on Linux — mirrors the frontend's Qt
+//!   `AppLocalDataLocation`).
 //! * `JASP_ORCH_HANG_TIMEOUT_MS` busy hang timeout (default `30000`).
 //! * `JASP_ORCH_ACTIVITY_MIN_MS` suggested `activity` rate-limit advertised to runners (default `1000`).
 //! * `JASP_ORCH_LIBSET`          colon-separated libpaths; enables the runner provisioner (on-demand
 //!   runner spawning). Unset → provisioner disabled (attach-only).
+//! * `JASP_ORCH_DATA_RUNNER`     data-runner binary the provisioner keeps alive as the CSV lane
+//!   (default: the `jasp-data-runner` sibling of the orchestrator executable; `off` disables).
 //! * `JASP_ORCH_RUNNER_SCRIPT`   runner entry script the provisioner spawns (default `refactor_design/runner_jaspbase.R`).
 //! * `JASP_ORCH_RSCRIPT`         R interpreter the provisioner uses (default `Rscript`).
 //! * `JASP_ORCH_SPAWN_TIMEOUT_MS` spawned-runner boot timeout (default `120000`).
@@ -50,7 +54,7 @@ mod provisioner;
 use messages::{Capability, DataOp, Envelope, Message, ModuleInfo, Status, WorkPayload};
 use nng::options::{LocalAddr, Options, RecvBufferSize, SendBufferSize};
 use nng::{Aio, AioResult, Listener, Pipe, PipeEvent, Protocol, Socket};
-use provisioner::{ProvEvent, ProvReq, RunnerProvisioner};
+use provisioner::{LaneKind, LaneSpec, ProvEvent, ProvReq, RunnerProvisioner};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -110,6 +114,24 @@ struct Config {
     /// analysis module parks the work and asks the provisioner for a runner. `None` (the default,
     /// and what every existing test uses) keeps the original attach-only behaviour.
     provisioner: Option<ProvisionerConfig>,
+    /// Data-plane lanes the provisioner keeps alive (pinned, auto-restarted). The router parks
+    /// data work for a format only when its lane is configured here. Empty → no lanes: data
+    /// work fails visibly at dispatch.
+    lane_specs: Vec<LaneSpec>,
+}
+
+/// Resolve the data-runner binary for the CSV lane: `JASP_ORCH_DATA_RUNNER` override
+/// (`off` disables), else the `jasp-data-runner` sibling of the orchestrator executable.
+fn data_lane_binary() -> Option<PathBuf> {
+    if let Some(p) = std::env::var("JASP_ORCH_DATA_RUNNER")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
+        return (p != "off").then(|| PathBuf::from(p));
+    }
+    let exe = std::env::current_exe().ok()?;
+    let sibling = exe.with_file_name(format!("jasp-data-runner{}", std::env::consts::EXE_SUFFIX));
+    sibling.exists().then_some(sibling)
 }
 
 /// Configuration for the runner provisioner (§9.3). Built from the environment only when
@@ -163,6 +185,28 @@ impl ProvisionerConfig {
     }
 }
 
+/// Default orchestrator directory root, mirroring the frontend's Qt `AppLocalDataLocation`
+/// (`AppDirs::appData(false)`, org/app name "JASP"): Linux `~/.local/share/JASP`, macOS
+/// `~/Library/Application Support/JASP`, Windows `%LOCALAPPDATA%\JASP` — the orchestrator
+/// sits under `orchestrator/` inside it (so the startup GC only ever wipes orchestrator-
+/// owned files). `dirs::data_local_dir()` is the Rust equivalent of that Qt location.
+fn default_dir_root() -> String {
+    dirs::data_local_dir()
+        .map(|d| {
+            d.join("JASP")
+                .join("orchestrator")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .unwrap_or_else(|| {
+            // No known data dir (no HOME): last-resort tmp (still env-overridable).
+            std::env::temp_dir()
+                .join("jasp-orchestrator")
+                .to_string_lossy()
+                .into_owned()
+        })
+}
+
 impl Config {
     fn from_env() -> Self {
         let parse = |key: &str, default: u64| -> u64 {
@@ -175,13 +219,22 @@ impl Config {
             control_url: std::env::var("JASP_ORCH_URL")
                 .unwrap_or_else(|_| "tcp://127.0.0.1:9555".into()),
             orchestrator_dir_root: std::env::var("JASP_ORCH_DIR_ROOT")
-                .unwrap_or_else(|_| "/tmp/jasp-orchestrator".into()),
+                .unwrap_or_else(|_| default_dir_root()),
             hang_timeout_ms: parse("JASP_ORCH_HANG_TIMEOUT_MS", 30_000),
             activity_min_ms: parse("JASP_ORCH_ACTIVITY_MIN_MS", 1_000),
             keep_workspaces: std::env::var("JASP_ORCH_KEEP_WORKSPACES")
                 .map(|v| v == "1" || v == "true")
                 .unwrap_or(false),
             provisioner: ProvisionerConfig::from_env(&parse),
+            lane_specs: data_lane_binary()
+                .map(|bin| {
+                    vec![LaneSpec {
+                        kind: LaneKind::RustData,
+                        program: bin,
+                        args: Vec::new(),
+                    }]
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -309,6 +362,27 @@ impl FrontendRuntime {
     }
 }
 
+/// The work/result kind discriminator (§19.1/§19.2) — orchestrator-side bookkeeping where the
+/// full kind-specific payload is not needed (routing records, kind-correct synthetic results).
+/// Not a wire type: on the wire the kind is the tag of the adjacently-tagged payload enums.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkKind {
+    Analysis,
+    Rcode,
+    Data,
+}
+
+impl messages::WorkPayload {
+    /// The kind discriminator of this work (§19.1).
+    fn kind(&self) -> WorkKind {
+        match self {
+            messages::WorkPayload::Analysis(_) => WorkKind::Analysis,
+            messages::WorkPayload::Rcode(_) => WorkKind::Rcode,
+            messages::WorkPayload::Data(_) => WorkKind::Data,
+        }
+    }
+}
+
 /// One in-flight work unit's routing record (§6). Keyed in [`Router::work`] by
 /// `(session_id, work_id)`. `Clone` is cheap (two `Arc` bumps + small vecs).
 #[derive(Clone)]
@@ -316,6 +390,9 @@ struct WorkRoute {
     frontend: Arc<FrontendRuntime>,
     runner: Arc<RunnerRuntime>,
     revision: u64,
+    /// The work's kind — lets eviction fail the work back with a kind-correct result payload
+    /// (§19.2) without holding the full payload (and its opaque options tree).
+    kind: WorkKind,
     /// Cache-file paths resolved from `dataset_ids` at dispatch; each holds a `path_refs`
     /// reference for the route's whole lifetime, released at teardown. Empty for data work
     /// (the lane writes its own cache file).
@@ -366,6 +443,9 @@ enum RouterMsg {
     /// The provisioner could not provide a module (not in the libset, spawn crashed, or never
     /// registered in time) — fail the work parked for it back to the frontend (no-silent-loss).
     ProvisionFailed { module: String, reason: String },
+    /// The provisioner could not provide a lane (spawn failed / never registered) — fail the
+    /// data work parked awaiting it back to the frontend.
+    LaneFailed { lane: LaneKind, reason: String },
     /// Periodic hang scan (from the detector thread).
     Tick,
     /// Hand a strong `Aio` ref to the router so a recv loop stays alive (the trampoline holds only
@@ -434,12 +514,19 @@ fn start_janitor() -> JanitorTx {
 /// enough to disambiguate.
 static BROKER_NONCE: AtomicU64 = AtomicU64::new(0);
 
+/// What a parked work unit is waiting for: an analysis-module runner or a data lane.
+#[derive(Debug, Clone)]
+enum Awaiting {
+    Analysis { module: String, version: String },
+    Lane { lane: LaneKind, format: String },
+}
+
 /// A work unit parked while awaiting a runner that does not yet exist (§9.3). Dispatched by
 /// `try_dispatch_parked` when a matching runner registers, or failed on park-timeout /
-/// `ProvisionFailed`. Keyed in [`Router::parked`] by `(session_id, work_id)` — which also dedups a
-/// frontend that retries an already-parked work.
+/// `ProvisionFailed` / `LaneFailed`. Keyed in [`Router::parked`] by `(session_id, work_id)` —
+/// which also dedups a frontend that retries an already-parked work.
 struct ParkedWork {
-    module: String,
+    awaiting: Awaiting,
     frontend: Arc<FrontendRuntime>,
     env: Envelope,
     work: messages::Work,
@@ -471,9 +558,6 @@ struct DatasetEntry {
     /// What `id` resolves to now: `<session>/datasets/<id>_<revision>.arrow`. Swapped on
     /// edit (new file + map swap; the old file is retired to the janitor once refs drain).
     current_path: PathBuf,
-    /// Column schema reported by the lane (a few KB); known once `Ready`. Opaque to the
-    /// router — carried verbatim into `dataset_ready`.
-    schema: Option<serde_json::Value>,
     /// Bumped per edit; also the cache-file name suffix. The initial open is revision 0.
     revision: u64,
     state: DatasetState,
@@ -563,6 +647,7 @@ impl Router {
                 RouterMsg::ProvisionFailed { module, reason } => {
                     self.fail_parked_module(&module, &reason)
                 }
+                RouterMsg::LaneFailed { lane, reason } => self.fail_parked_lane(lane, &reason),
                 RouterMsg::Tick => {
                     self.scan_hung();
                     self.scan_parked();
@@ -705,7 +790,7 @@ impl Router {
             reg.runner_id, reg.capabilities
         );
         // Reconcile the provisioner (its spawn succeeded) and drain any work that was parked
-        // waiting for a module this runner advertises (§9.3).
+        // waiting for a module/lane this runner advertises (§9.3).
         let modules: Vec<String> = runner
             .capabilities
             .iter()
@@ -714,14 +799,29 @@ impl Router {
                 _ => None,
             })
             .collect();
+        // Lanes advertised by this runner (a `data_open` capability = the Rust data lane here).
+        let lanes: Vec<LaneKind> = if runner.capabilities.iter().any(|c| {
+            matches!(
+                c,
+                Capability::Data {
+                    op: DataOp::Open,
+                    ..
+                }
+            )
+        }) {
+            vec![LaneKind::RustData]
+        } else {
+            Vec::new()
+        };
         if let Some(p) = &self.provisioner
-            && !modules.is_empty()
+            && (!modules.is_empty() || !lanes.is_empty())
         {
             let _ = p.send(ProvReq::RunnerUp {
                 modules: modules.clone(),
+                lanes,
             });
         }
-        self.try_dispatch_parked(&modules);
+        self.try_dispatch_parked(&runner.capabilities);
         // Merge this runner's advertisements into the discovery catalog; push to frontends only
         // if the set of available modules actually changed. Pure in-memory work — the router
         // never touches the filesystem here.
@@ -1093,7 +1193,6 @@ impl Router {
                     id: dataset_id.clone(),
                     session: fe.session_id.clone(),
                     current_path: cache_path.clone(),
-                    schema: None,
                     revision: 0,
                     state: DatasetState::Opening,
                     ingest,
@@ -1121,6 +1220,7 @@ impl Router {
                 frontend: fe,
                 runner: Arc::clone(&runner),
                 revision: w.revision,
+                kind: w.payload.kind(),
                 dataset_paths: resolved.into_iter().map(|(_, p)| p).collect(),
             },
         );
@@ -1141,15 +1241,79 @@ impl Router {
         }
     }
 
-    /// No live runner can serve this work. With a provisioner configured, **park** an analysis work
-    /// unit and request a runner (it is dispatched on registration via `try_dispatch_parked`); the
-    /// frontend is sent a `running` marker so it knows the work is pending, not lost. Without a
-    /// provisioner (or for non-analysis work), keep the original no-silent-loss behaviour: a visible
-    /// error once a runner has existed, else a silent drop.
+    /// No live runner can serve this work. With a provisioner configured, **park** the work
+    /// and request a runner/lane (dispatched on registration via `try_dispatch_parked`); the
+    /// frontend is sent a `running` marker so it knows the work is pending, not lost.
+    ///
+    /// Data work: parked when its format's lane is configured. Otherwise it fails VISIBLY
+    /// regardless of `ever_registered` — a frontend waiting on an open must never be dropped
+    /// silently. Analysis/rcode keep the original behaviour: a visible error once a runner has
+    /// existed, else a silent drop (the startup-time heuristic).
     fn miss_work(&mut self, fe: Arc<FrontendRuntime>, env: Envelope, w: &messages::Work) {
         let prov = self.provisioner.clone();
-        if let (Some(prov), Some((module, version))) = (prov, analysis_module(&w.payload)) {
-            self.park_work(prov, fe, env, w, module.to_string(), version.to_string());
+
+        if let WorkPayload::Data(d) = &w.payload {
+            // Routing table format → lane (a format migrates lanes by configuration alone).
+            let lane = match d.format.as_str() {
+                "csv" => Some(LaneKind::RustData),
+                _ => None,
+            };
+            let configured =
+                lane.is_some_and(|k| self.config.lane_specs.iter().any(|s| s.kind == k));
+            if let (Some(prov), Some(lane), true) = (prov, lane, configured) {
+                self.park_work(
+                    prov,
+                    fe,
+                    env,
+                    w,
+                    Awaiting::Lane {
+                        lane,
+                        format: d.format.clone(),
+                    },
+                );
+            } else {
+                let detail = format!(
+                    "No data lane is available to perform {:?} (format '{}').",
+                    d.op, d.format
+                );
+                eprintln!(
+                    "[orch] no live lane for work_id={} — returning error",
+                    w.work_id
+                );
+                let err = no_runner_result(
+                    &w.work_id,
+                    w.revision,
+                    &fe.session_id,
+                    &detail,
+                    w.payload.kind(),
+                );
+                if let Err(e) = fe.send(err) {
+                    eprintln!(
+                        "[orch] no-lane error to frontend {} failed: {e}",
+                        fe.session_id
+                    );
+                }
+            }
+            return;
+        }
+
+        // Park analysis work only when MODULE provisioning is configured (a libset): a
+        // lanes-only provisioner cannot provide analysis modules, so without a libset fall
+        // through to the legacy error path (the frontend retries until a runner attaches).
+        let can_provision_modules = self.config.provisioner.is_some();
+        if let (Some(prov), Some((module, version)), true) =
+            (prov, analysis_module(&w.payload), can_provision_modules)
+        {
+            self.park_work(
+                prov,
+                fe,
+                env,
+                w,
+                Awaiting::Analysis {
+                    module: module.to_string(),
+                    version: version.to_string(),
+                },
+            );
             return;
         }
         // No provisioner (or not an analysis): original no-silent-loss behaviour.
@@ -1162,16 +1326,19 @@ impl Router {
                     )
                 }
                 WorkPayload::Rcode(_) => "No runner is available to run R code.".to_string(),
-                WorkPayload::Data(d) => format!(
-                    "No data lane is available to perform {:?} (format '{}').",
-                    d.op, d.format
-                ),
+                WorkPayload::Data(_) => unreachable!("data work is handled above"),
             };
             eprintln!(
                 "[orch] no live runner for work_id={} — returning error",
                 w.work_id
             );
-            let err = no_runner_result(&w.work_id, w.revision, &fe.session_id, &detail);
+            let err = no_runner_result(
+                &w.work_id,
+                w.revision,
+                &fe.session_id,
+                &detail,
+                w.payload.kind(),
+            );
             // Frontend send is best-effort: a backpressured frontend is tolerated (its results
             // are dropped); a truly dead frontend is reaped by its channel's pipe_notify.
             if let Err(e) = fe.send(err) {
@@ -1204,12 +1371,16 @@ impl Router {
         fe: Arc<FrontendRuntime>,
         env: Envelope,
         w: &messages::Work,
-        module: String,
-        version: String,
+        awaiting: Awaiting,
     ) {
         let key = (fe.session_id.clone(), w.work_id.clone());
         // Running marker: the work is accepted and pending a runner, not lost (§25.5).
-        if let Err(e) = fe.send(running_result(&w.work_id, w.revision, &fe.session_id)) {
+        if let Err(e) = fe.send(running_result(
+            &w.work_id,
+            w.revision,
+            &fe.session_id,
+            w.payload.kind(),
+        )) {
             eprintln!(
                 "[orch] running-marker to frontend {} failed: {e}",
                 fe.session_id
@@ -1232,31 +1403,58 @@ impl Router {
                 // else: stale/equal retry — already re-acked with the running marker above.
             }
             std::collections::hash_map::Entry::Vacant(slot) => {
+                let what = match &awaiting {
+                    Awaiting::Analysis { module, .. } => format!("module {module}"),
+                    Awaiting::Lane { format, .. } => format!("data lane for '{format}'"),
+                };
                 println!(
-                    "[orch] parking work_id={} revision={} (module {}) awaiting a runner",
-                    w.work_id, w.revision, module
+                    "[orch] parking work_id={} revision={} ({what}) awaiting a runner",
+                    w.work_id, w.revision
                 );
                 slot.insert(ParkedWork {
-                    module: module.clone(),
+                    awaiting: awaiting.clone(),
                     frontend: fe,
                     env,
                     work: w.clone(),
                     parked_ms: now_ms(),
                 });
-                let _ = prov.send(ProvReq::Provision { module, version });
+                match &awaiting {
+                    Awaiting::Analysis { module, version } => {
+                        let _ = prov.send(ProvReq::Provision {
+                            module: module.clone(),
+                            version: version.clone(),
+                        });
+                    }
+                    Awaiting::Lane { lane, .. } => {
+                        let _ = prov.send(ProvReq::EnsureLane { lane: *lane });
+                    }
+                }
             }
         }
     }
 
-    /// Drain parked work that a newly-registered runner can serve (called from `handle_register`).
-    fn try_dispatch_parked(&mut self, modules: &[String]) {
-        if self.parked.is_empty() || modules.is_empty() {
+    /// Drain parked work that a newly-registered runner can serve (called from `handle_register`):
+    /// analysis parks match the advertised modules; data parks match a `data_open` capability
+    /// advertising the format.
+    fn try_dispatch_parked(&mut self, caps: &[Capability]) {
+        if self.parked.is_empty() {
             return;
         }
         let ready: Vec<(String, String)> = self
             .parked
             .iter()
-            .filter(|(_, pw)| modules.contains(&pw.module))
+            .filter(|(_, pw)| match &pw.awaiting {
+                Awaiting::Analysis { module, .. } => caps
+                    .iter()
+                    .any(|c| matches!(c, Capability::Analysis { name, .. } if name == module)),
+                Awaiting::Lane { format, .. } => caps.iter().any(|c| {
+                    matches!(c, Capability::Data { op, formats }
+                        if op == &DataOp::Open
+                        && formats
+                            .as_ref()
+                            .is_some_and(|fs| fs.iter().any(|f| f == format)))
+                }),
+            })
             .map(|(k, _)| k.clone())
             .collect();
         for key in ready {
@@ -1269,9 +1467,13 @@ impl Router {
                 self.parked.insert(key, pw);
                 continue;
             };
+            let what = match &pw.awaiting {
+                Awaiting::Analysis { module, .. } => format!("module {module}"),
+                Awaiting::Lane { format, .. } => format!("data lane '{format}'"),
+            };
             println!(
-                "[orch] dispatching parked work_id={} (module {}) to runner {}",
-                pw.work.work_id, pw.module, runner.runner_id
+                "[orch] dispatching parked work_id={} ({what}) to runner {}",
+                pw.work.work_id, runner.runner_id
             );
             self.dispatch_work(runner, pw.frontend, pw.env, &pw.work);
         }
@@ -1282,7 +1484,9 @@ impl Router {
         let doomed: Vec<(String, String)> = self
             .parked
             .iter()
-            .filter(|(_, pw)| pw.module == module)
+            .filter(|(_, pw)| {
+                matches!(&pw.awaiting, Awaiting::Analysis { module: m, .. } if m == module)
+            })
             .map(|(k, _)| k.clone())
             .collect();
         for key in doomed {
@@ -1296,6 +1500,33 @@ impl Router {
                     pw.work.revision,
                     &key.0,
                     &format!("Could not start a runner for module '{module}': {reason}"),
+                    pw.work.payload.kind(),
+                );
+                let _ = pw.frontend.send(err);
+            }
+        }
+    }
+
+    /// Fail every parked data work awaiting a lane the provisioner could not provide.
+    fn fail_parked_lane(&mut self, lane: LaneKind, reason: &str) {
+        let doomed: Vec<(String, String)> = self
+            .parked
+            .iter()
+            .filter(|(_, pw)| matches!(&pw.awaiting, Awaiting::Lane { lane: l, .. } if *l == lane))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in doomed {
+            if let Some(pw) = self.parked.remove(&key) {
+                eprintln!(
+                    "[orch] cannot provision lane {lane:?} for work_id={}: {reason}",
+                    pw.work.work_id
+                );
+                let err = no_runner_result(
+                    &pw.work.work_id,
+                    pw.work.revision,
+                    &key.0,
+                    &format!("Could not start the data lane: {reason}"),
+                    pw.work.payload.kind(),
                 );
                 let _ = pw.frontend.send(err);
             }
@@ -1317,15 +1548,20 @@ impl Router {
             .collect();
         for key in expired {
             if let Some(pw) = self.parked.remove(&key) {
+                let what = match &pw.awaiting {
+                    Awaiting::Analysis { module, .. } => format!("runner for module '{module}'"),
+                    Awaiting::Lane { format, .. } => format!("data lane for '{format}'"),
+                };
                 eprintln!(
-                    "[orch] parked work_id={} (module {}) timed out after {}ms",
-                    pw.work.work_id, pw.module, self.park_timeout_ms
+                    "[orch] parked work_id={} timed out after {}ms waiting for a {what}",
+                    pw.work.work_id, self.park_timeout_ms
                 );
                 let err = no_runner_result(
                     &pw.work.work_id,
                     pw.work.revision,
                     &key.0,
-                    &format!("Timed out waiting for a runner for module '{}'.", pw.module),
+                    &format!("Timed out waiting for a {what}."),
+                    pw.work.payload.kind(),
                 );
                 let _ = pw.frontend.send(err);
             }
@@ -1342,8 +1578,8 @@ impl Router {
         let key = (session_id.clone(), work_id.clone());
 
         // Data-plane work (a dataset open; later edits): the terminal result completes it —
-        // flip the dataset entry and splice the orchestrator-minted dataset_id into the
-        // forwarded result, so the submitter learns the identity to reference in work.
+        // flip the dataset entry. The orchestrator-minted dataset_id is filled into the typed
+        // Data payload below, so the submitter learns the identity to reference in work.
         // (The router still manages the dataset; the open just rides the work pipeline.)
         let data_dataset = if terminal {
             self.data_works.remove(&key)
@@ -1354,15 +1590,6 @@ impl Router {
             if matches!(status, Status::Complete) {
                 if let Some(entry) = self.datasets.get_mut(dataset_id) {
                     entry.state = DatasetState::Ready;
-                    if let Message::Result(r) = &env.body {
-                        entry.schema = Some(
-                            r.payload
-                                .results
-                                .get("schema")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null),
-                        );
-                    }
                 }
                 println!("[orch] dataset {dataset_id} ready — {session_id}");
             } else {
@@ -1388,15 +1615,31 @@ impl Router {
             return;
         }
         // Frontend send is best-effort (a user session is tolerated, not evicted, on a transient
-        // full buffer). The route is still removed on terminal so the table doesn't leak. A
-        // terminal data-work result carries the spliced dataset_id.
-        let frame = if let Some(dataset_id) = &data_dataset {
-            let mut value = serde_json::to_value(&env).expect("result envelope to value");
-            value["payload"]["results"]["dataset_id"] = json!(dataset_id);
-            frame_bytes(&serde_json::to_vec(&value).expect("re-serialize result"))
-        } else {
-            frame_envelope(&env)
-        };
+        // full buffer). The route is still removed on terminal so the table doesn't leak.
+        //
+        // Fill the orchestrator-owned identity & location fields as TYPED payload assignments
+        // (§19.2 division of labor) — no raw-JSON splices, no writes into the opaque `results`
+        // tree. A terminal data-work result carries the minted `dataset_id`; an analysis result
+        // carries `results_dir` — the revision dir holding its file artifacts (plot PNGs +
+        // plotly JSON), the wire-only bootstrap for asset-path resolution (the on-disk results
+        // JSON keeps relative paths — artifacts are its siblings; the frontend rewrites them
+        // before the webview).
+        let mut env = env;
+        if let Message::Result(r) = &mut env.body {
+            match &mut r.payload {
+                messages::ResultPayload::Data(d) => {
+                    if let Some(dataset_id) = &data_dataset {
+                        d.dataset_id = Some(dataset_id.clone());
+                    }
+                }
+                messages::ResultPayload::Analysis(a) => {
+                    let results_dir = self.config.revision_dir(&session_id, &work_id, revision);
+                    a.results_dir = Some(results_dir.to_string_lossy().into_owned());
+                }
+                messages::ResultPayload::Rcode(_) => {}
+            }
+        }
+        let frame = frame_bytes(&serde_json::to_vec(&env).expect("re-serialize result"));
         if let Err(e) = route.frontend.send(frame) {
             eprintln!(
                 "[orch] result to frontend {} failed ({e}); dropping result",
@@ -1586,20 +1829,32 @@ impl Router {
         if removed.is_none() {
             return;
         }
-        // Tell the provisioner the runner is gone so a later `Provision` may re-spawn (§9.3).
+        // Tell the provisioner the runner is gone: modules may be re-provisioned on a later
+        // `Provision`; lanes are pinned and re-spawned immediately (auto-restart).
         if let Some(p) = &self.provisioner {
-            let modules: Vec<String> = removed
-                .as_ref()
-                .unwrap()
-                .capabilities
+            let caps = &removed.as_ref().unwrap().capabilities;
+            let modules: Vec<String> = caps
                 .iter()
                 .filter_map(|c| match c {
                     Capability::Analysis { name, .. } => Some(name.clone()),
                     _ => None,
                 })
                 .collect();
-            if !modules.is_empty() {
-                let _ = p.send(ProvReq::RunnerGone { modules });
+            let lanes: Vec<LaneKind> = if caps.iter().any(|c| {
+                matches!(
+                    c,
+                    Capability::Data {
+                        op: DataOp::Open,
+                        ..
+                    }
+                )
+            }) {
+                vec![LaneKind::RustData]
+            } else {
+                Vec::new()
+            };
+            if !modules.is_empty() || !lanes.is_empty() {
+                let _ = p.send(ProvReq::RunnerGone { modules, lanes });
             }
         }
         // Drop this runner's advertisements from the discovery catalog; push to frontends only
@@ -1617,11 +1872,12 @@ impl Router {
                     k.clone(),
                     Arc::clone(&r.frontend),
                     r.revision,
+                    r.kind,
                     r.dataset_paths.clone(),
                 )
             })
             .collect::<Vec<_>>();
-        for (key, frontend, revision, _) in &affected {
+        for (key, frontend, revision, kind, _) in &affected {
             // A data work in flight on this lane: its dataset dies with the lane (the
             // frontend gets the generic no-runner failure below, like any work).
             if let Some(dataset_id) = self.data_works.remove(key)
@@ -1635,6 +1891,7 @@ impl Router {
                 *revision,
                 &key.0,
                 "A fatal crash occurred while running the analysis (the runner stopped unexpectedly).",
+                *kind,
             );
             // Best-effort: the frontend may itself be gone/backpressured; its own pipe_notify reaps
             // it if dead.
@@ -1645,7 +1902,7 @@ impl Router {
                 );
             }
         }
-        for (key, _, _, paths) in &affected {
+        for (key, _, _, _, paths) in &affected {
             self.work.remove(key);
             // Teardown: release the evicted work's dataset references.
             self.release_paths(paths);
@@ -1865,20 +2122,21 @@ impl Broker {
         Self::start_inner(config, tx, rx, provisioner)
     }
 
-    /// Start the provisioner thread from an already-completed libset scan (§9.3). The provisioner
-    /// reports outcomes **directly** onto the router's mailbox via the injected `on_event`
-    /// closure — a non-blocking mpsc send it makes from its own thread — so there is no relay
-    /// thread and no second queue between the two. Returns the router's request sender, the park
-    /// timeout, and the libset's discovery metadata (the router's catalog seed). `None` when
-    /// provisioning is disabled.
+    /// Start the provisioner thread from an already-completed libset scan (§9.3) and/or the
+    /// configured data lanes. The provisioner reports outcomes **directly** onto the router's
+    /// mailbox via the injected `on_event` closure — a non-blocking mpsc send it makes from
+    /// its own thread — so there is no relay thread and no second queue between the two.
+    /// Returns the router's request sender, the park timeout, and the libset's discovery
+    /// metadata (the router's catalog seed). `None` when there is neither a libset nor lanes.
     fn spawn_provisioner(
         config: &Config,
         scan: Option<provisioner::LibsetScan>,
         router_tx: mpsc::Sender<RouterMsg>,
     ) -> Option<ProvisionerHandles> {
-        let pcfg = config.provisioner.as_ref()?;
-        let scan = scan?;
-        let modules = scan.modules.clone();
+        if config.provisioner.is_none() && config.lane_specs.is_empty() {
+            return None; // nothing to provision
+        }
+        let modules = scan.as_ref().map(|s| s.modules.clone()).unwrap_or_default();
         let (req_tx, req_rx) = mpsc::channel::<ProvReq>();
         // The entire "provisioner → router" adapter: re-wrap the provisioner's own event type
         // into the router's and enqueue it. Runs on the provisioner thread — safe precisely
@@ -1887,13 +2145,32 @@ impl Broker {
             ProvEvent::ProvisionFailed { module, reason } => {
                 let _ = router_tx.send(RouterMsg::ProvisionFailed { module, reason });
             }
+            ProvEvent::LaneFailed { lane, reason } => {
+                let _ = router_tx.send(RouterMsg::LaneFailed { lane, reason });
+            }
         });
+        let (analysis, spawn_timeout_ms, park_timeout_ms) = match config.provisioner.as_ref() {
+            Some(pc) => (
+                Some(provisioner::AnalysisRunnerSpec {
+                    runner_script: pc.runner_script.clone(),
+                    rscript_bin: pc.rscript_bin.clone(),
+                }),
+                pc.spawn_timeout_ms,
+                pc.park_timeout_ms,
+            ),
+            // Lanes only (no libset): no analysis-runner spec; default the timeouts.
+            None => (None, 120_000, 180_000),
+        };
         let provisioner = RunnerProvisioner::new(
-            scan,
-            pcfg.runner_script.clone(),
-            pcfg.rscript_bin.clone(),
+            scan.unwrap_or(provisioner::LibsetScan {
+                module_lib: HashMap::new(),
+                lib_modules: HashMap::new(),
+                modules: Vec::new(),
+            }),
+            analysis,
+            config.lane_specs.clone(),
             config.control_url.clone(),
-            Duration::from_millis(pcfg.spawn_timeout_ms),
+            Duration::from_millis(spawn_timeout_ms),
             req_rx,
             on_event,
         );
@@ -1901,7 +2178,7 @@ impl Broker {
             .name("orch-provisioner".into())
             .spawn(move || provisioner.run())
             .expect("spawn provisioner thread");
-        Some((req_tx, pcfg.park_timeout_ms, modules))
+        Some((req_tx, park_timeout_ms, modules))
     }
 
     /// Construct the router + broker with an already-built provisioner handle (production builds it
@@ -1925,6 +2202,14 @@ impl Broker {
             Some((req_tx, timeout, modules)) => (Some(req_tx), timeout, modules),
             None => (None, 0, Vec::new()),
         };
+        // Pre-spawn the pinned lanes at boot so the first dataset open pays no spawn latency
+        // (idempotent; if a pre-spawned lane dies before first use, the park + EnsureLane
+        // path covers the next open).
+        if let Some(p) = &prov_tx {
+            for spec in &config.lane_specs {
+                let _ = p.send(ProvReq::EnsureLane { lane: spec.kind });
+            }
+        }
         let router = Router {
             runners: HashMap::new(),
             frontends: HashMap::new(),
@@ -2075,8 +2360,26 @@ fn analysis_module(payload: &WorkPayload) -> Option<(&str, &str)> {
 }
 
 /// Build a `running` result acknowledging a parked work unit — so the frontend knows the work is
-/// accepted and pending a runner, not lost (§25.5), while the provisioner spins one up.
-fn running_result(work_id: &str, revision: u64, session_id: &str) -> Vec<u8> {
+/// accepted and pending a runner, not lost (§25.5), while the provisioner spins one up. The
+/// payload echoes the work's kind — every result carries its `kind` (§19.2), so the frontend
+/// can dispatch even the park marker.
+fn running_result(work_id: &str, revision: u64, session_id: &str, kind: WorkKind) -> Vec<u8> {
+    let payload = match kind {
+        WorkKind::Analysis => messages::ResultPayload::Analysis(messages::AnalysisResult {
+            results: json!({ "title": "provisioning a runner" }),
+            results_dir: None,
+            images: None,
+        }),
+        WorkKind::Data => messages::ResultPayload::Data(messages::DataResult {
+            dataset_id: None,
+            rows: None,
+            schema: None,
+            error_message: None,
+        }),
+        WorkKind::Rcode => {
+            messages::ResultPayload::Rcode(json!({ "title": "provisioning a runner" }))
+        }
+    };
     let env = Envelope {
         v: 1,
         id: format!("orch-running-{work_id}"),
@@ -2087,9 +2390,9 @@ fn running_result(work_id: &str, revision: u64, session_id: &str) -> Vec<u8> {
             work_id: work_id.to_string(),
             revision,
             status: Status::Running,
-            payload: messages::ResultPayload {
-                results: json!({ "title": "provisioning a runner" }),
-            },
+            payload,
+            module_version: None,
+            message: None,
         }),
     };
     frame_envelope(&env)
@@ -2097,8 +2400,37 @@ fn running_result(work_id: &str, revision: u64, session_id: &str) -> Vec<u8> {
 
 /// Build a `fatalError` result for a work unit that no live runner can serve — so dead/evicted
 /// runners surface as a visible error instead of the work vanishing (§25.5). `detail` is the full
-/// user-facing sentence shown as the error message.
-fn no_runner_result(work_id: &str, revision: u64, session_id: &str, detail: &str) -> Vec<u8> {
+/// user-facing sentence shown as the error message. The payload shape follows the work's kind
+/// (§19.2): an analysis failure carries the error tree in `results`; a data failure carries
+/// `error_message` on the Data payload.
+fn no_runner_result(
+    work_id: &str,
+    revision: u64,
+    session_id: &str,
+    detail: &str,
+    kind: WorkKind,
+) -> Vec<u8> {
+    let payload = match kind {
+        WorkKind::Analysis => messages::ResultPayload::Analysis(messages::AnalysisResult {
+            results: json!({
+                "error": true,
+                "errorMessage": detail,
+                "title": "Analysis could not be completed",
+            }),
+            results_dir: None,
+            images: None,
+        }),
+        WorkKind::Data => messages::ResultPayload::Data(messages::DataResult {
+            dataset_id: None,
+            rows: None,
+            schema: None,
+            error_message: Some(detail.to_string()),
+        }),
+        WorkKind::Rcode => messages::ResultPayload::Rcode(json!({
+            "error": true,
+            "errorMessage": detail,
+        })),
+    };
     let env = Envelope {
         v: 1,
         id: format!("orch-norunner-{work_id}"),
@@ -2109,13 +2441,9 @@ fn no_runner_result(work_id: &str, revision: u64, session_id: &str, detail: &str
             work_id: work_id.to_string(),
             revision,
             status: Status::FatalError,
-            payload: messages::ResultPayload {
-                results: json!({
-                    "error": true,
-                    "errorMessage": detail,
-                    "title": "Analysis could not be completed",
-                }),
-            },
+            payload,
+            module_version: None,
+            message: Some(detail.to_string()),
         }),
     };
     frame_envelope(&env)
@@ -2212,7 +2540,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use messages::{AnalysisWork, Register, ResultMsg, ResultPayload, Settings, Work};
+    use messages::{
+        AnalysisResult, AnalysisWork, DataResult, Register, ResultMsg, ResultPayload, Settings,
+        Work,
+    };
     use nng::options::RecvTimeout;
     use serde_json::Value;
     use std::sync::atomic::AtomicU64 as SeqAtomic;
@@ -2234,6 +2565,7 @@ mod tests {
             activity_min_ms: 1_000,
             keep_workspaces: false,
             provisioner: None,
+            lane_specs: Vec::new(),
         }
     }
 
@@ -2415,9 +2747,13 @@ mod tests {
                 work_id: work_id.to_string(),
                 revision,
                 status: Status::Complete,
-                payload: ResultPayload {
+                payload: ResultPayload::Analysis(AnalysisResult {
                     results: json!({"title": "ok"}),
-                },
+                    results_dir: None,
+                    images: None,
+                }),
+                module_version: None,
+                message: None,
             }),
         };
         runner_ch
@@ -2887,6 +3223,7 @@ mod tests {
         control_url: String,
         park_timeout_ms: u64,
         libset_modules: Vec<messages::ModuleInfo>,
+        with_data_lane: bool,
     ) -> (
         Arc<Broker>,
         Arc<Socket>,
@@ -2906,15 +3243,32 @@ mod tests {
                     crate::provisioner::ProvEvent::ProvisionFailed { module, reason } => {
                         let _ = pump.send(RouterMsg::ProvisionFailed { module, reason });
                     }
+                    crate::provisioner::ProvEvent::LaneFailed { lane, reason } => {
+                        let _ = pump.send(RouterMsg::LaneFailed { lane, reason });
+                    }
                 }
             }
         });
-        let broker = Broker::start_inner(
-            test_config(control_url),
-            tx,
-            rx,
-            Some((req_tx, park_timeout_ms, libset_modules)),
-        );
+        let mut cfg = test_config(control_url);
+        // The stub provisioner stands in for a CONFIGURED module provisioner (the router's
+        // park gate keys off `config.provisioner`); model that. The values are placeholders —
+        // the stub intercepts every ProvReq; nothing is ever spawned from them.
+        cfg.provisioner = Some(ProvisionerConfig {
+            libset: Vec::new(),
+            runner_script: PathBuf::new(),
+            rscript_bin: String::new(),
+            spawn_timeout_ms: 0,
+            park_timeout_ms,
+        });
+        if with_data_lane {
+            cfg.lane_specs = vec![crate::provisioner::LaneSpec {
+                kind: crate::provisioner::LaneKind::RustData,
+                program: std::path::PathBuf::from("stub-lane"),
+                args: Vec::new(),
+            }];
+        }
+        let broker =
+            Broker::start_inner(cfg, tx, rx, Some((req_tx, park_timeout_ms, libset_modules)));
         broker.arm_control(Arc::clone(&control)).unwrap();
         (broker, control, req_rx, event_tx)
     }
@@ -2935,7 +3289,7 @@ mod tests {
     fn parked_work_is_dispatched_when_a_runner_registers() {
         let url = format!("inproc://orch-prov-park-{}", unique());
         let (broker, _ctl, req_rx, _event_tx) =
-            start_broker_with_stub_provisioner(url.clone(), 60_000, vec![]);
+            start_broker_with_stub_provisioner(url.clone(), 60_000, vec![], false);
 
         // Frontend sends analysis work for module "M"; no runner exists yet.
         let (fe_ch, session_id) = hello_frontend(&url);
@@ -3009,7 +3363,7 @@ mod tests {
     fn provision_failure_fails_parked_work() {
         let url = format!("inproc://orch-prov-fail-{}", unique());
         let (_broker, _ctl, req_rx, event_tx) =
-            start_broker_with_stub_provisioner(url.clone(), 60_000, vec![]);
+            start_broker_with_stub_provisioner(url.clone(), 60_000, vec![], false);
 
         let (fe_ch, _session_id) = hello_frontend(&url);
         let work = analysis_work("w-fail", "M");
@@ -3055,7 +3409,7 @@ mod tests {
     fn parked_work_is_superseded_by_a_newer_revision() {
         let url = format!("inproc://orch-prov-supersede-{}", unique());
         let (_broker, _ctl, req_rx, _event_tx) =
-            start_broker_with_stub_provisioner(url.clone(), 60_000, vec![]);
+            start_broker_with_stub_provisioner(url.clone(), 60_000, vec![], false);
 
         let (fe_ch, session_id) = hello_frontend(&url);
 
@@ -3344,6 +3698,7 @@ mod tests {
             url.clone(),
             60_000,
             vec![module_info("jaspTTests", "0.1", "file:///lib/jaspTTests/")],
+            false,
         );
         let (fe, _sid) = hello_frontend(&url);
 
@@ -3408,6 +3763,7 @@ mod tests {
             url.clone(),
             60_000,
             vec![module_info("jaspTTests", "0.1", "file:///lib/jaspTTests/")],
+            false,
         );
         let (fe, session_id) = hello_frontend_raw(&url);
         let env = deframe(&fe.recv().expect("initial catalog")[..]).expect("valid modules");
@@ -3521,8 +3877,8 @@ mod tests {
     }
 
     /// Drive an open to `Ready`: submit the data work, let the (mock) lane receive it, and
-    /// answer it with `{schema, rows}`. Returns the dataset_id the orchestrator splices into
-    /// the forwarded result.
+    /// answer it with the Data payload (`{schema, rows}`). Returns the dataset_id the
+    /// orchestrator fills into the forwarded result's Data payload.
     fn open_to_ready(fe: &Socket, lane: &Socket, session: &str) -> String {
         let work_id = format!("w-open-{}", unique());
         let open = data_open_work(&work_id, "/tmp/some.csv", "csv");
@@ -3530,27 +3886,23 @@ mod tests {
             .map_err(|(_, e)| e)
             .unwrap();
         let _ = lane.recv().expect("lane recv data work");
-        lane_complete(
-            lane,
-            session,
-            &work_id,
-            json!({"schema": [{"name": "x"}]}),
-            7,
-        );
+        lane_complete(lane, session, &work_id, json!([{"name": "x"}]), 7);
         match deframe(&fe.recv().expect("open result")[..]).unwrap().body {
             Message::Result(r) => {
                 assert!(matches!(r.status, Status::Complete));
-                assert_eq!(r.payload.results["rows"], 7);
-                r.payload.results["dataset_id"]
-                    .as_str()
-                    .expect("dataset_id spliced into the result")
-                    .to_string()
+                let ResultPayload::Data(d) = &r.payload else {
+                    panic!("expected data result payload")
+                };
+                assert_eq!(d.rows, Some(7));
+                d.dataset_id
+                    .clone()
+                    .expect("dataset_id filled into the Data payload")
             }
             other => panic!("expected result, got {other:?}"),
         }
     }
 
-    /// The mock lane answers a data work with `{schema, rows}` (status Complete).
+    /// The mock lane answers a data work with the Data payload `{schema, rows}` (status Complete).
     fn lane_complete(lane: &Socket, session: &str, work_id: &str, schema: Value, rows: u64) {
         let result = Envelope {
             v: 1,
@@ -3562,9 +3914,14 @@ mod tests {
                 work_id: work_id.to_string(),
                 revision: 0,
                 status: Status::Complete,
-                payload: ResultPayload {
-                    results: json!({ "schema": schema, "rows": rows }),
-                },
+                payload: ResultPayload::Data(DataResult {
+                    dataset_id: None,
+                    rows: Some(rows),
+                    schema: Some(schema),
+                    error_message: None,
+                }),
+                module_version: None,
+                message: None,
             }),
         };
         lane.send(frame_envelope(&result).as_slice())
@@ -3574,8 +3931,8 @@ mod tests {
 
     // 17. A data_open work submitted by the frontend is capability-routed to the lane with
     //     orchestrator-assigned identity: cache_path injected into the payload, an index
-    //     entry minted as Opening; the lane's terminal {schema, rows} result comes back with
-    //     the dataset_id spliced in and the entry Ready.
+    //     entry minted as Opening; the lane's terminal Data-payload result comes back with
+    //     the dataset_id filled in and the entry Ready.
     #[test]
     fn data_open_work_flows_to_lane_and_readies() {
         let url = format!("inproc://orch-ds-open-{}", unique());
@@ -3618,7 +3975,7 @@ mod tests {
         assert_eq!(snap[0].1, "opening");
         let dataset_id = snap[0].0.clone();
 
-        // The lane's terminal {schema, rows} result comes back with the dataset_id spliced in.
+        // The lane's terminal Data-payload result comes back with the dataset_id filled in.
         lane_complete(&lane, &session, "w-open", json!([{"name": "x"}]), 42);
         let res = deframe(&fe.recv().expect("open result")[..]).unwrap();
         assert_eq!(res.session_id.as_deref(), Some(session.as_str()));
@@ -3626,9 +3983,12 @@ mod tests {
             Message::Result(r) => {
                 assert_eq!(r.work_id, "w-open");
                 assert!(matches!(r.status, Status::Complete));
-                assert_eq!(r.payload.results["dataset_id"], json!(dataset_id));
-                assert_eq!(r.payload.results["rows"], 42);
-                assert_eq!(r.payload.results["schema"], json!([{"name": "x"}]));
+                let ResultPayload::Data(d) = &r.payload else {
+                    panic!("expected data result payload")
+                };
+                assert_eq!(d.dataset_id.as_deref(), Some(dataset_id.as_str()));
+                assert_eq!(d.rows, Some(42));
+                assert_eq!(d.schema, Some(json!([{"name": "x"}])));
             }
             other => panic!("expected result, got {other:?}"),
         }
@@ -3780,7 +4140,7 @@ mod tests {
             .unwrap();
         let _ = lane.recv().expect("lane recv data work");
 
-        // The lane reports a fatalError with a user-facing detail.
+        // The lane reports a fatalError with a user-facing detail on the Data payload.
         let result = Envelope {
             v: 1,
             id: "rn-w-open-broken".to_string(),
@@ -3791,12 +4151,14 @@ mod tests {
                 work_id: "w-open-broken".to_string(),
                 revision: 0,
                 status: Status::FatalError,
-                payload: ResultPayload {
-                    results: json!({
-                        "error": true,
-                        "errorMessage": "malformed csv at line 3",
-                    }),
-                },
+                payload: ResultPayload::Data(DataResult {
+                    dataset_id: None,
+                    rows: None,
+                    schema: None,
+                    error_message: Some("malformed csv at line 3".to_string()),
+                }),
+                module_version: None,
+                message: None,
             }),
         };
         lane.send(frame_envelope(&result).as_slice())
@@ -3810,9 +4172,12 @@ mod tests {
             Message::Result(r) => {
                 assert_eq!(r.work_id, "w-open-broken");
                 assert!(matches!(r.status, Status::FatalError));
+                let ResultPayload::Data(d) = &r.payload else {
+                    panic!("expected data result payload")
+                };
                 assert!(
-                    r.payload.results["errorMessage"]
-                        .as_str()
+                    d.error_message
+                        .as_deref()
                         .unwrap()
                         .contains("malformed csv at line 3")
                 );
@@ -3863,5 +4228,136 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    // ── Lane provisioning (data work parks until the lane is up) ────────────
+
+    // 23. A data open arriving before its lane exists is parked (running marker to the
+    //     frontend, EnsureLane to the provisioner) and dispatched when the lane registers.
+    //     The boot pre-spawn of the configured lane is observed first.
+    #[test]
+    fn data_open_parks_until_the_lane_registers() {
+        let url = format!("inproc://orch-ds-park-{}", unique());
+        let (_broker, _ctl, req_rx, _event_tx) =
+            start_broker_with_stub_provisioner(url.clone(), 60_000, vec![], true);
+        // Boot pre-spawn of the configured lane.
+        match req_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("boot EnsureLane")
+        {
+            crate::provisioner::ProvReq::EnsureLane { lane } => {
+                assert!(matches!(lane, crate::provisioner::LaneKind::RustData));
+            }
+            other => panic!("expected EnsureLane, got {other:?}"),
+        }
+
+        let (fe, session) = hello_frontend(&url);
+        let open = data_open_work("w-open-park", "/tmp/some.csv", "csv");
+        fe.send(frame_envelope(&open).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+
+        // Parked: running marker to the frontend, EnsureLane to the provisioner.
+        match deframe(&fe.recv().expect("running marker")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => assert!(matches!(r.status, Status::Running)),
+            other => panic!("expected running result, got {other:?}"),
+        }
+        match req_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("park EnsureLane")
+        {
+            crate::provisioner::ProvReq::EnsureLane { .. } => {}
+            other => panic!("expected EnsureLane, got {other:?}"),
+        }
+
+        // The lane registers → the parked open is dispatched to it.
+        let (lane, _lid) = register_data_lane(&url, &["csv"]);
+        let raw = lane.recv().expect("lane recv parked data work");
+        let work_id = match &deframe(&raw[..]).unwrap().body {
+            Message::Work(w) => w.work_id.clone(),
+            other => panic!("expected work, got {other:?}"),
+        };
+        assert_eq!(work_id, "w-open-park");
+
+        // The lane completes it → terminal result with the dataset_id on the Data payload.
+        lane_complete(&lane, &session, &work_id, json!([]), 3);
+        match deframe(&fe.recv().expect("open result")[..]).unwrap().body {
+            Message::Result(r) => {
+                assert!(matches!(r.status, Status::Complete));
+                let ResultPayload::Data(d) = &r.payload else {
+                    panic!("expected data result payload")
+                };
+                assert!(d.dataset_id.is_some());
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
+    }
+
+    // 24. The provisioner cannot provide the lane → the parked data open fails back to the
+    //     frontend (no silent strand).
+    #[test]
+    fn lane_boot_failure_fails_parked_data_open() {
+        let url = format!("inproc://orch-ds-bootfail-{}", unique());
+        let (_broker, _ctl, req_rx, event_tx) =
+            start_broker_with_stub_provisioner(url.clone(), 60_000, vec![], true);
+        let _ = req_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("boot EnsureLane");
+
+        let (fe, _session) = hello_frontend(&url);
+        let open = data_open_work("w-open-fail", "/tmp/some.csv", "csv");
+        fe.send(frame_envelope(&open).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let _ = fe.recv().expect("running marker");
+        let _ = req_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("park EnsureLane");
+
+        // The provisioner reports the lane cannot be provided.
+        event_tx
+            .send(crate::provisioner::ProvEvent::LaneFailed {
+                lane: crate::provisioner::LaneKind::RustData,
+                reason: "spawn failed".to_string(),
+            })
+            .unwrap();
+
+        match deframe(&fe.recv().expect("failure result")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-open-fail");
+                assert!(matches!(r.status, Status::FatalError));
+            }
+            other => panic!("expected fatalError result, got {other:?}"),
+        }
+    }
+
+    // 25. Data work with no configured lane (and no provisioner) fails VISIBLY even though
+    //     no runner has ever registered — a frontend waiting on an open is never dropped
+    //     silently.
+    #[test]
+    fn data_work_without_a_lane_errors_visibly() {
+        let url = format!("inproc://orch-ds-nolane2-{}", unique());
+        let (_broker, _ctl) = start_broker(url.clone());
+        let (fe, _session) = hello_frontend(&url);
+        let open = data_open_work("w-open-nolane", "/tmp/some.csv", "csv");
+        fe.send(frame_envelope(&open).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        match deframe(&fe.recv().expect("visible error")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-open-nolane");
+                assert!(matches!(r.status, Status::FatalError));
+            }
+            other => panic!("expected fatalError result, got {other:?}"),
+        }
     }
 }

@@ -10,10 +10,12 @@
 //! * **Router → provisioner** ([`ProvReq`], on a dedicated channel):
 //!   - `Provision { module, version }` — some parked work needs a runner for `module`. Idempotent:
 //!     the provisioner ignores it if that module is already spawning or already has a live runner.
-//!   - `RunnerUp { modules }` — the router accepted a registration advertising these modules; clear
+//!   - `EnsureLane { lane }` — ensure a data-plane lane is alive (spawn if not); idempotent. Sent
+//!     at boot (pre-spawn, so the first open pays no spawn latency) and when data work parks.
+//!   - `RunnerUp { modules, lanes }` — the router accepted a registration advertising these; clear
 //!     the in-flight spawn for them (this is the authoritative "the spawn worked" signal).
-//!   - `RunnerGone { modules }` — a runner for these modules was evicted/died; forget it so a later
-//!     `Provision` re-spawns.
+//!   - `RunnerGone { modules, lanes }` — a runner was evicted/died. Modules: forget, so a later
+//!     `Provision` re-spawns. Lanes: re-spawn immediately — lanes are pinned and auto-restarted.
 //! * **Provisioner → router** ([`ProvEvent`], via the `on_event` callback injected at
 //!   construction): the provisioner reports an outcome by *calling* it from its own thread.
 //!   `main.rs` wires the callback onto the router's mailbox — a non-blocking mpsc send — so this
@@ -21,6 +23,8 @@
 //!   - `ProvisionFailed { module, reason }` — the module cannot be provided (not in the libset,
 //!     or the spawn crashed / never registered within the timeout). The router fails the parked
 //!     work.
+//!   - `LaneFailed { lane, reason }` — same for a lane; the router fails the data work parked
+//!     awaiting it.
 //!
 //! # Reconciliation: why registration is the success signal
 //!
@@ -37,15 +41,49 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+/// A pinned data-plane lane the provisioner keeps alive (dataset-manager-design §1: lanes
+/// are pinned, not rotated). Today the Rust data-runner (CSV open; later Arrow-native open
+/// + all writes); later the R utility lane for reader-heavy formats (spss/excel/stata/sas).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LaneKind {
+    /// The Rust data-runner binary (`jasp-data-runner`).
+    RustData,
+}
+
+/// How to spawn a lane: program + arguments. The control endpoint rides as `JASP_ORCH_URL`.
+#[derive(Debug, Clone)]
+pub struct LaneSpec {
+    pub kind: LaneKind,
+    pub program: PathBuf,
+    pub args: Vec<String>,
+}
+
+/// How to spawn an analysis-module runner (R): interpreter + entry script. The libpath rides
+/// as `JASP_RUNNER_LIBDIR`, the control endpoint as an argument.
+#[derive(Debug, Clone)]
+pub struct AnalysisRunnerSpec {
+    pub runner_script: PathBuf,
+    pub rscript_bin: String,
+}
+
 /// Router → provisioner requests.
 #[derive(Debug)]
 pub enum ProvReq {
     /// Parked work needs a runner for `module` (requested `version`). Idempotent.
     Provision { module: String, version: String },
-    /// A runner advertising these modules just registered — its spawn succeeded.
-    RunnerUp { modules: Vec<String> },
-    /// A runner for these modules was evicted or died — allow re-provisioning.
-    RunnerGone { modules: Vec<String> },
+    /// Ensure a lane is alive (spawn if not). Idempotent.
+    EnsureLane { lane: LaneKind },
+    /// A runner advertising these modules/lanes just registered — its spawn succeeded.
+    RunnerUp {
+        modules: Vec<String>,
+        lanes: Vec<LaneKind>,
+    },
+    /// A runner for these modules/lanes was evicted or died. Modules: forget, so a later
+    /// `Provision` re-spawns. Lanes: re-spawn immediately (auto-restart — lanes are pinned).
+    RunnerGone {
+        modules: Vec<String>,
+        lanes: Vec<LaneKind>,
+    },
 }
 
 /// Provisioner → router events, delivered via the injected `on_event` callback.
@@ -53,15 +91,25 @@ pub enum ProvReq {
 pub enum ProvEvent {
     /// `module` cannot be provided; fail its parked work with `reason`.
     ProvisionFailed { module: String, reason: String },
+    /// `lane` cannot be provided (spawn failed, or never registered in time); fail the data
+    /// work parked awaiting it with `reason`.
+    LaneFailed { lane: LaneKind, reason: String },
+}
+
+/// What a tracked spawned process provides.
+#[derive(Debug, Clone)]
+enum Provides {
+    Modules(Vec<String>),
+    Lane(LaneKind),
 }
 
 /// One spawned runner process we are tracking.
 struct Spawned {
     child: Child,
-    /// Modules this runner is expected to advertise (the modules in its libpath).
-    modules: Vec<String>,
+    /// What this process provides: analysis modules or a lane.
+    provides: Provides,
     started: Instant,
-    /// Set true once the router reports `RunnerUp` for one of our modules.
+    /// Set true once the router reports `RunnerUp` for it.
     registered: bool,
 }
 
@@ -71,10 +119,8 @@ pub struct RunnerProvisioner {
     module_lib: HashMap<String, PathBuf>,
     /// libpath → the modules it contains (what a runner bound to it advertises).
     lib_modules: HashMap<PathBuf, Vec<String>>,
-    /// The runner entry script handed to the interpreter.
-    runner_script: PathBuf,
-    /// The R interpreter (e.g. `Rscript`).
-    rscript_bin: String,
+    /// How to spawn analysis runners; `None` when only lanes are configured.
+    analysis: Option<AnalysisRunnerSpec>,
     /// Control endpoint URL the spawned runner dials to register.
     control_url: String,
     /// A spawned runner that has not registered within this window is a boot failure.
@@ -92,6 +138,10 @@ pub struct RunnerProvisioner {
     /// module → pid, for modules that are currently spawning OR have a live runner. The dedup key:
     /// a `Provision` for a module present here is ignored.
     active: HashMap<String, u32>,
+    /// Configured lanes: kind → how to spawn them. Empty → no lanes.
+    lanes: HashMap<LaneKind, LaneSpec>,
+    /// lane → pid, for lanes currently spawning OR live. The `EnsureLane` dedup key.
+    lane_active: HashMap<LaneKind, u32>,
     /// pid → spawned-process record.
     spawned: HashMap<u32, Spawned>,
 }
@@ -99,8 +149,8 @@ pub struct RunnerProvisioner {
 impl RunnerProvisioner {
     pub fn new(
         scan: LibsetScan,
-        runner_script: PathBuf,
-        rscript_bin: String,
+        analysis: Option<AnalysisRunnerSpec>,
+        lanes: Vec<LaneSpec>,
         control_url: String,
         spawn_timeout: Duration,
         req_rx: mpsc::Receiver<ProvReq>,
@@ -113,14 +163,15 @@ impl RunnerProvisioner {
         Self {
             module_lib: scan.module_lib,
             lib_modules: scan.lib_modules,
-            runner_script,
-            rscript_bin,
+            analysis,
+            lanes: lanes.into_iter().map(|s| (s.kind, s)).collect(),
             control_url,
             spawn_timeout,
             tick: Duration::from_millis(250),
             req_rx,
             on_event,
             active: HashMap::new(),
+            lane_active: HashMap::new(),
             spawned: HashMap::new(),
         }
     }
@@ -159,7 +210,8 @@ impl RunnerProvisioner {
     fn handle(&mut self, req: ProvReq) -> bool {
         match req {
             ProvReq::Provision { module, version } => self.provision(module, version),
-            ProvReq::RunnerUp { modules } => {
+            ProvReq::EnsureLane { lane } => self.provision_lane(lane),
+            ProvReq::RunnerUp { modules, lanes } => {
                 for m in modules {
                     if let Some(pid) = self.active.get(&m).copied()
                         && let Some(s) = self.spawned.get_mut(&pid)
@@ -167,8 +219,15 @@ impl RunnerProvisioner {
                         s.registered = true;
                     }
                 }
+                for lane in lanes {
+                    if let Some(pid) = self.lane_active.get(&lane).copied()
+                        && let Some(s) = self.spawned.get_mut(&pid)
+                    {
+                        s.registered = true;
+                    }
+                }
             }
-            ProvReq::RunnerGone { modules } => {
+            ProvReq::RunnerGone { modules, lanes } => {
                 for m in modules {
                     // Forget the module so a future Provision re-spawns. Leave the process record
                     // for the reaper if it is still around (it may already be dead).
@@ -177,8 +236,17 @@ impl RunnerProvisioner {
                     {
                         // If it was registered and is now gone, drop our claim on its other
                         // modules too only when the process is reaped; here we just release `m`.
-                        s.modules.retain(|x| x != &m);
+                        if let Provides::Modules(modules) = &mut s.provides {
+                            modules.retain(|x| x != &m);
+                        }
                     }
+                }
+                // Lanes are pinned: a registered lane that died is re-spawned immediately
+                // (auto-restart). Every respawn is caused by exactly one death of a registered
+                // lane, so this cannot loop on its own.
+                for lane in lanes {
+                    self.lane_active.remove(&lane);
+                    self.provision_lane(lane);
                 }
             }
         }
@@ -203,13 +271,18 @@ impl RunnerProvisioner {
             .cloned()
             .unwrap_or_else(|| vec![module.clone()]);
 
+        let Some(spec) = self.analysis.as_ref() else {
+            self.fail(module, "no analysis-runner configuration".to_string());
+            return;
+        };
+
         println!(
             "[provisioner] spawning runner for module {module} (version {version}) from {}",
             lib.display()
         );
 
-        let child = Command::new(&self.rscript_bin)
-            .arg(&self.runner_script)
+        let child = Command::new(&spec.rscript_bin)
+            .arg(&spec.runner_script)
             .arg(&self.control_url)
             .env("JASP_RUNNER_LIBDIR", &lib)
             .stdout(Stdio::inherit())
@@ -226,7 +299,7 @@ impl RunnerProvisioner {
                     pid,
                     Spawned {
                         child,
-                        modules,
+                        provides: Provides::Modules(modules),
                         started: Instant::now(),
                         registered: false,
                     },
@@ -236,9 +309,50 @@ impl RunnerProvisioner {
         }
     }
 
+    /// Spawn a lane if nothing is already providing it (idempotent).
+    fn provision_lane(&mut self, lane: LaneKind) {
+        if self.lane_active.contains_key(&lane) {
+            return; // already spawning or live
+        }
+        let Some(spec) = self.lanes.get(&lane).cloned() else {
+            self.fail_lane(lane, "lane not configured".to_string());
+            return;
+        };
+
+        println!(
+            "[provisioner] spawning lane {:?} from {}",
+            lane,
+            spec.program.display()
+        );
+
+        let child = Command::new(&spec.program)
+            .args(&spec.args)
+            .env("JASP_ORCH_URL", &self.control_url)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn();
+
+        match child {
+            Ok(child) => {
+                let pid = child.id();
+                self.lane_active.insert(lane, pid);
+                self.spawned.insert(
+                    pid,
+                    Spawned {
+                        child,
+                        provides: Provides::Lane(lane),
+                        started: Instant::now(),
+                        registered: false,
+                    },
+                );
+            }
+            Err(e) => self.fail_lane(lane, format!("failed to spawn lane process: {e}")),
+        }
+    }
+
     /// Reap exited children and time out spawns that never registered.
     fn reap(&mut self) {
-        let mut finished: Vec<(u32, bool, Vec<String>, Option<String>)> = Vec::new();
+        let mut finished: Vec<(u32, Provides, Option<String>)> = Vec::new();
         for (pid, s) in self.spawned.iter_mut() {
             match s.child.try_wait() {
                 Ok(Some(status)) => {
@@ -250,7 +364,7 @@ impl RunnerProvisioner {
                             "runner exited before registering (status {status})"
                         ))
                     };
-                    finished.push((*pid, s.registered, s.modules.clone(), err));
+                    finished.push((*pid, s.provides.clone(), err));
                 }
                 Ok(None) => {
                     // Still running. Boot-timeout applies only before registration.
@@ -258,8 +372,7 @@ impl RunnerProvisioner {
                         let _ = s.child.kill();
                         finished.push((
                             *pid,
-                            false,
-                            s.modules.clone(),
+                            s.provides.clone(),
                             Some(format!(
                                 "runner did not register within {}s",
                                 self.spawn_timeout.as_secs()
@@ -273,14 +386,30 @@ impl RunnerProvisioner {
             }
         }
 
-        for (pid, _registered, modules, err) in finished {
+        for (pid, provides, err) in finished {
             self.spawned.remove(&pid);
-            for m in &modules {
-                self.active.remove(m);
-            }
-            if let Some(reason) = err {
-                for m in modules {
-                    self.fail(m, reason.clone());
+            match provides {
+                Provides::Modules(modules) => {
+                    for m in &modules {
+                        self.active.remove(m);
+                    }
+                    if let Some(reason) = err {
+                        for m in modules {
+                            self.fail(m, reason.clone());
+                        }
+                    }
+                }
+                Provides::Lane(lane) => {
+                    // Clear the live claim only if it still points at this pid (a
+                    // RunnerGone-triggered respawn may already own the slot with a fresh pid).
+                    if self.lane_active.get(&lane) == Some(&pid) {
+                        self.lane_active.remove(&lane);
+                    }
+                    // A registered lane's death is handled by the router's RunnerGone
+                    // (auto-restart); only boot failures are reported here.
+                    if let Some(reason) = err {
+                        self.fail_lane(lane, reason);
+                    }
                 }
             }
         }
@@ -289,6 +418,11 @@ impl RunnerProvisioner {
     fn fail(&self, module: String, reason: String) {
         eprintln!("[provisioner] cannot provision {module}: {reason}");
         (self.on_event)(ProvEvent::ProvisionFailed { module, reason });
+    }
+
+    fn fail_lane(&self, lane: LaneKind, reason: String) {
+        eprintln!("[provisioner] cannot provision lane {lane:?}: {reason}");
+        (self.on_event)(ProvEvent::LaneFailed { lane, reason });
     }
 }
 

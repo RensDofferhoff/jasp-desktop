@@ -33,6 +33,7 @@
 #include "undostack.h"
 
 class DataSetPackageSubNodeModel;
+class DatasetRegistry;
 
 ///
 /// This class is meant as the single bottleneck between the main application and Qt and the data stored in sqlite.
@@ -151,7 +152,8 @@ public:
 				bool				hasAnalyses()						const	{ return _analysesData.size() > 0;				}
 				bool				synchingData()						const	{ return _synchingData;								}
 				std::string			dataFilePath()				const	{ return _dataSet ? _dataSet->dataFilePath() : "";  }
-		const	std::string		&	datasetId()					const	{ return _datasetId;	} ///< NEO: orchestrator-assigned id of the currently open dataset ("" until dataset_ready)
+				std::string				datasetId()					const;	///< NEO: orchestrator-assigned id of the ACTIVE dataset ("" until the open completes)
+				DatasetRegistry		*	registry()					const	{ return _registry;	}	///< NEO: open DataModels + active dataset (data-model-design.md §3.2)
 				bool				dataFileCanHaveLabels()				const;
 				bool				isDatabase()						const	{ return _database != Json::nullValue;				}
 		const	Json::Value		&	databaseJson()						const	{ return _database;								}
@@ -231,7 +233,7 @@ public:
 
 				void						writeDataSetToOStream(std::ostream & out, bool includeComputed);
 
-				int							getColumnIndex(						const std::string & name)			const	{ return !_dataSet ? -1 : _dataSet->getColumnIndex(name); }
+				int							getColumnIndex(						const std::string & name)			const;	///< NEO: active DataModel first, legacy _dataSet fallback
 				int							getColumnIndex(						const QString	  & name)			const	{ return getColumnIndex(name.toStdString()); }
 				Column*						getColumn(							const std::string & name)					{ return _dataSet->column(name); }
 				enum columnType				getColumnType(						size_t				columnIndex)	const;
@@ -401,7 +403,7 @@ private:
 								_jaspVersion;
 
 	bool						_synchingData				= false;
-	std::string					_datasetId;		///< NEO: orchestrator dataset id of the open dataset (main thread only)
+	DatasetRegistry			*	_registry				= nullptr;	///< NEO: owner of the open DataModels + active dataset (main thread only)
 	int							_nextDataOpen			= 0;	///< NEO: work_id counter for data_open submissions
 	std::map<std::string, bool> _columnNameUsedInEasyFilter;
 

@@ -53,6 +53,97 @@ source("jaspRunner/R/data.R")
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
+# ── step timing ───────────────────────────────────────────────────────────────
+# Wall-clock step timing so we can see where each work's time goes. proc.time()'s
+# `elapsed` is monotonic (immune to wall-clock jumps), fine-grained enough here.
+now_s <- function() proc.time()[["elapsed"]]
+log_step <- function(label, t0, note = "") {
+  dt <- now_s() - t0
+  cat(sprintf("[runner]   %-28s %9.3f s%s\n", label, dt,
+              if (nzchar(note)) paste0("   ", note) else ""))
+  invisible(dt)
+}
+
+# ── diagnostics: state round-trip (plot-state bloat investigation) ───────────
+# Provenance line so every log self-describes its exact library builds — A/B
+# runs are only comparable if these match except for the one package under test.
+log_provenance <- function() {
+  pkg_info <- function(pkg) {
+    v   <- tryCatch(as.character(packageVersion(pkg)), error = function(e) return("?"))
+    lib <- tryCatch(dirname(system.file(package = pkg)), error = function(e) return("?"))
+    sha <- tryCatch({
+      d <- read.dcf(system.file("DESCRIPTION", package = pkg))
+      if ("RemoteSha" %in% colnames(d)) substr(d[1, "RemoteSha"], 1, 7) else ""
+    }, error = function(e) "")
+    sprintf("%s %s%s [%s]", pkg, v, if (nzchar(sha)) paste0("/", sha) else "", lib)
+  }
+  cat(sprintf("[runner] provenance: R %s | %s | %s | %s | %s\n",
+              as.character(getRversion()), pkg_info("jaspBase"),
+              pkg_info("ggplot2"), pkg_info("jaspGraphs"), pkg_info("qs2")))
+}
+
+# Split the runJaspResults blind block into: state load / state save / finish
+# tail (collect objects + complete(): json + rds + seal + send). Wraps the
+# jaspBase internals in place; pure diagnostics, behavior unchanged.
+# SUPERSEDED: this logging now lives in jaspBase itself (JASP_RESULTS_TIMING,
+# see jaspBase/R/common.R). REMOVE this shim once the libpath jaspBase is
+# rebuilt, and set JASP_RESULTS_TIMING=1 instead (do NOT run both: double logs).
+install_state_timers <- function() {
+  ns <- asNamespace("jaspBase")
+  state_file_mb <- function() {
+    loc <- tryCatch(jaspBase:::.fromRCPP(".requestStateFileNameNative"), error = function(e) NULL)
+    if (is.null(loc)) return("")
+    sz <- tryCatch(file.info(loc$relativePath)$size, error = function(e) NA)
+    if (is.na(sz)) "" else sprintf("%.1f MB file", sz / 1e6)
+  }
+  wrap <- function(name, label, with_size = FALSE) {
+    orig <- get(name, envir = ns)
+    wrapper <- function(...) {
+      t0 <- now_s()
+      out <- orig(...)
+      log_step(label, t0, if (with_size) state_file_mb() else "")
+      out
+    }
+    tryCatch(assignInNamespace(name, wrapper, ns = "jaspBase"),
+             error = function(e) cat(sprintf("[runner] WARN: could not instrument %s: %s\n",
+                                             name, conditionMessage(e))))
+  }
+  wrap(".retrieveState",    "state load",  with_size = TRUE)
+  wrap(".saveState",        "state save",  with_size = TRUE)
+  wrap("finishJaspResults", "finish tail")
+}
+
+# ── decision: do NOT persist live plot objects in the state ──────────────────
+# The behavior lives in jaspBase (finishJaspResults, jaspBase/R/common.R): when
+# JASP_STATE_NO_FIGURES is set, the `figures` part of jaspState.RData (the LIVE
+# ggplot objects — under ggplot2 4.x/S7 ~100-300 MB serialized each) is dropped.
+# They are a cache, not data: PNGs, plotly JSON files, and the results JSON
+# (option-dependencies, editOptions, resizedByUser dims, png paths) persist
+# without them; a re-run rebuilds exactly the invalidated plots and reuses the
+# rest from the results JSON. The runner only sets the gate (and logs it).
+# JASP_STATE_KEEP_FIGURES=1 restores the old behavior for A/B runs.
+setup_figures_drop <- function() {
+  if (nzchar(Sys.getenv("JASP_STATE_KEEP_FIGURES", ""))) {
+    Sys.setenv(JASP_STATE_NO_FIGURES = "")
+    cat("[runner] figures drop: DISABLED (JASP_STATE_KEEP_FIGURES set)\n")
+  } else {
+    Sys.setenv(JASP_STATE_NO_FIGURES = "1")
+    cat("[runner] figures drop: live plot objects will NOT be persisted in jaspState.RData\n")
+  }
+}
+
+# ── decision: do NOT forge the write seal ────────────────────────────────────
+# The seal (jaspResultsFinishedWriting.txt) guards a SHARED, in-place state file
+# against mid-write crashes; NEO's immutable per-revision dirs have no such
+# hazard, and a missing seal made jaspBase SILENTLY skip state+results reuse
+# (the HANDOVER-next4 failure mode). jaspBase's constructor now bypasses the
+# gate when JASP_RESULTS_NO_SEAL is set. No-op until the libpath jaspBase is
+# rebuilt with that change; the copy-on-seal below stays harmless either way.
+setup_seal_bypass <- function() {
+  Sys.setenv(JASP_RESULTS_NO_SEAL = "1")
+  cat("[runner] seal bypass: state/results trusted without the write-seal file\n")
+}
+
 # ── framing / nng helpers (§18.1) ─────────────────────────────────────────────
 
 pack_envelope <- function(json_text) {
@@ -249,6 +340,8 @@ scan_modules <- function(libdir) {
 # reused in place. But the unmodified C++ still uses the seal as the gate, so we
 # set its location. Everything in this block exists solely to drive jaspBase's
 # unmodified recompute path; none of it is needed for our model's correctness.
+# (The seal fakery itself disappears once the libpath jaspBase is rebuilt with
+# the JASP_RESULTS_NO_SEAL gate — see setup_seal_bypass; the rest stays.)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Point jaspBase's write-seal gate (lastWriteWorked) at this work's output dir.
@@ -302,8 +395,10 @@ run_analysis <- function(work) {
   # mirroring jaspBase's engine). Only the framework was loaded at startup; analysis modules load
   # here, on demand, the first time a work unit targets them.
   if (!isNamespaceLoaded(module)) {
+    t_mod <- now_s()
     suppressMessages(library(module, character.only = TRUE))
-    cat(sprintf("[runner] lazy-loaded module %s %s\n", module, as.character(packageVersion(module))))
+    cat(sprintf("[runner] lazy-loaded module %s %s in %.3f s\n",
+                module, as.character(packageVersion(module)), now_s() - t_mod))
   }
 
   # 1. dataset — Arrow/Feather cache file (§8), ABSOLUTE path injected by the orchestrator (§19.3).
@@ -315,13 +410,14 @@ run_analysis <- function(work) {
     if (is.character(p) && length(p) == 1 && nzchar(p) && file.exists(p)) { data_path <- p; break }
   }
   if (is.null(data_path)) stop("no readable dataset path in work$dataset_paths")
+  t_data <- now_s()
   .state$dataset <- tryCatch({
     sch <- arrow::read_feather(data_path, as_data_frame = FALSE)$schema
     read_jasp_data(data_path, .spec_from_schema(sch))
   }, error = function(e) { cat(sprintf("[runner] Arrow read error: %s\n", conditionMessage(e))); NULL })
   if (is.null(.state$dataset)) stop("could not read dataset")
-  cat(sprintf("[runner] dataset: %s (%d rows, %d cols)\n",
-              data_path, nrow(.state$dataset), ncol(.state$dataset)))
+  log_step("dataset read", t_data,
+           sprintf("%s (%d rows, %d cols)", data_path, nrow(.state$dataset), ncol(.state$dataset)))
 
   # 2. scratchpad — per-work and absolute (§19.3). Reclaim the process cwd for this work:
   # jaspBase's initEnvironment() setwd's to a startup tempdir once, so without this the cwd would
@@ -337,8 +433,27 @@ run_analysis <- function(work) {
   # base's images so recomputed plots don't clobber reused ones (both use jasp-<N>.<ext> naming).
   jaspbase_set_seal_location(.state$outputDir)
   jaspbase_set_save_location(.state$outputDir)
+  t_seed <- now_s()
   seeded <- jaspbase_seed_from_base(work$base_results_dir, .state$outputDir)
   .state$tempCounter <- if (seeded) jaspbase_max_temp_index(.state$outputDir) else 0L
+  # Seeding copies the base revision's state (jaspState.RData) + seal + images —
+  # with a bloated state file this copy is a real cost, so it gets its own timing.
+  # Report what was copied (right after the copy, outputDir holds exactly the seeded
+  # files): the seeded jasp-* artifact count is the baseline that tells us later
+  # whether plots were reused from state or re-rendered.
+  seeded_artifacts <- 0L
+  if (seeded) {
+    fi <- file.info(file.path(.state$outputDir,
+                              list.files(.state$outputDir, all.files = TRUE, no.. = TRUE)))
+    seeded_artifacts <- sum(grepl("^jasp-[0-9]+\\.", basename(rownames(fi))))
+    state_sz <- fi[basename(rownames(fi)) == "jaspState.RData", "size"]
+    log_step("copy-on-seed", t_seed, sprintf(
+      "from %s: %d files, %.1f MB (state %.1f MB, %d jasp-* artifacts)",
+      work$base_results_dir, nrow(fi), sum(fi$size) / 1e6,
+      if (length(state_sz)) state_sz / 1e6 else 0, seeded_artifacts))
+  } else {
+    log_step("copy-on-seed", t_seed, "no base (fresh run)")
+  }
 
   # 3. per-work value natives (invariant work unit carries its own settings)
   .ppi             <<- settings$ppi %||% 96
@@ -351,9 +466,11 @@ run_analysis <- function(work) {
   optionsJson    <- toJSON(.processOptions(payload$options %||% list()),
                            auto_unbox = TRUE, null = "null", digits = NA)
   functionCall   <- paste0(module, "::", analysis, "Internal")
-  cat(sprintf("[runner] running %s (preloadData=%s)\n", functionCall, preloadData))
+  cat(sprintf("[runner] running %s (work_id=%s revision=%s preloadData=%s)\n",
+              functionCall, work$work_id %||% "?", work$revision %||% "?", preloadData))
   if (VERBOSE) cat(sprintf("[runner] optionsJson (processed): %s\n", optionsJson))
 
+  t_run <- now_s()
   jr <- jaspBase::runJaspResults(
     name         = analysis,
     title        = analysis,
@@ -362,24 +479,49 @@ run_analysis <- function(work) {
     stateKey     = "{}",
     functionCall = functionCall,
     preloadData  = preloadData)
+  log_step("runJaspResults", t_run)
+  # What the run left behind. jaspState.RData size matters twice: it is the payload of
+  # every later copy-on-seed, and it's what bloated to 200+ MB before figures drop
+  # (with it, expect only the `other` state: sub-MB — the gate lives in jaspBase's
+  # finishJaspResults, set by setup_figures_drop). And jasp-* artifacts appearing
+  # ON TOP of the seeded ones mean plots were re-rendered instead of reused (reuse keys
+  # off the results JSON + dependency pruning, not the live plot object).
+  fi <- file.info(file.path(.state$outputDir,
+                            list.files(.state$outputDir, all.files = TRUE, no.. = TRUE)))
+  state_sz <- fi[basename(rownames(fi)) == "jaspState.RData", "size"]
+  artifacts <- sum(grepl("^jasp-[0-9]+\\.", basename(rownames(fi))))
+  cat(sprintf("[runner]   artifacts: state %.1f MB, dir %.1f MB / %d files, jasp-* %d -> %d\n",
+              if (length(state_sz)) state_sz / 1e6 else 0, sum(fi$size) / 1e6, nrow(fi),
+              seeded_artifacts, artifacts))
 
   # 5. native serialization (live web form: .meta + top-level nodes)
+  t_ser <- now_s()
   jaspObject  <- jr$.__enclos_env__$private$jaspObject
   resultsJson <- jaspObject$getResults()
   parsed      <- fromJSON(resultsJson, simplifyVector = FALSE)
   results     <- parsed$results
+  log_step("serialize results", t_ser, sprintf("%d bytes JSON", nchar(resultsJson)))
 
   status <- tryCatch(jr$status, error = function(e) NULL)
   if (is.null(status) || !nzchar(status))
     status <- if (isTRUE(results$error)) "fatalError" else "complete"
 
-  list(results = results, status = status)
+  # Provenance (§19.4): the version of the module that actually produced this result.
+  module_version <- tryCatch(as.character(packageVersion(module)), error = function(e) NULL)
+
+  list(results = results, status = status, module_version = module_version)
 }
 
 # ── main: dial, register, loop ────────────────────────────────────────────────
 
 main <- function(control_url = ORCH_URL) {
+  t_load <- now_s()
   load_runner_modules()
+  log_step("startup: load jaspBase", t_load)
+  log_provenance()
+  install_state_timers()
+  setup_figures_drop()
+  setup_seal_bypass()
 
   cat(sprintf("[runner] dialling orchestrator control endpoint at %s\n", control_url))
 
@@ -390,6 +532,7 @@ main <- function(control_url = ORCH_URL) {
   # assets (Description.qml, qml/, icons/, help/) from, feeding the orchestrator's module catalog —
   # and read the `register_ack` carrying the orchestrator-assigned runner_id and a dedicated PAIR
   # data-channel URL.
+  t_reg <- now_s()
   modules <- scan_modules(LIBDIR)
   if (length(modules) == 0) {
     cat(sprintf("[runner] WARNING: no JASP modules found in %s; advertising fallback %s@%s\n",
@@ -426,6 +569,7 @@ main <- function(control_url = ORCH_URL) {
   if (is.null(channel_url) || !nzchar(channel_url)) stop("[runner] register_ack missing channel_url")
   cat(sprintf("[runner] registered as %s; dialling data channel %s\n", ack$runner_id, channel_url))
   close(req)  # the control connection is transient (one request→reply)
+  log_step("startup: register handshake", t_reg, sprintf("%d module(s)", length(modules)))
 
   # ── Data channel (PAIR v1): all work/result traffic flows here ──────────────
   sock <- socket("poly", dial = channel_url)
@@ -445,8 +589,10 @@ main <- function(control_url = ORCH_URL) {
     if (is.null(work)) next
     if ((work$type %||% "") != "work") { cat(sprintf("[runner] ignoring type=%s\n", work$type)); next }
 
-    cat(sprintf("[runner] <- work work_id=%s revision=%s analysis=%s\n",
-                work$work_id, work$revision, work$payload$analysis %||% "?"))
+    cat(sprintf("[runner] <- work work_id=%s revision=%s base_revision=%s analysis=%s\n",
+                work$work_id, work$revision, work$base_revision %||% "-",
+                work$payload$analysis %||% "?"))
+    t_work <- now_s()
 
     out <- tryCatch(run_analysis(work), error = function(e) {
       cat(sprintf("[runner] analysis error: %s\n", conditionMessage(e)))
@@ -464,12 +610,20 @@ main <- function(control_url = ORCH_URL) {
       work_id    = work$work_id,
       revision   = work$revision,
       status     = out$status,
+      # Adjacently-tagged kind+payload (§19.2 Result payloads by kind): an analysis result
+      # carries the opaque jaspResults tree in payload$results; the orchestrator fills
+      # results_dir when it forwards. module_version = the producer's provenance (§19.4):
+      # what actually ran, else what the work asked for.
+      kind       = "analysis",
+      module_version = out$module_version %||% work$payload$module_version,
       payload    = list(results = out$results)
     )
     reply_raw <- pack_envelope(toJSON(result_msg, auto_unbox = TRUE, null = "null", na = "null"))
     send(sock, reply_raw, mode = "raw", block = 3000L)
     cat(sprintf("[runner] -> result work_id=%s status=%s (%d bytes)\n",
                 work$work_id, out$status, length(reply_raw)))
+    log_step(sprintf("work %s total", work$work_id), t_work,
+             sprintf("status=%s", out$status))
   }
 }
 

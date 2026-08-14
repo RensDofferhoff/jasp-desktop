@@ -46,8 +46,9 @@ on.exit(close(ch), add = TRUE)
 # ── 2b. Open the dataset: submit a data_open WORK — the lane converts, the terminal result ──
 # carries the dataset_id. An open IS a work (kind "data", op "data_open"): the orchestrator
 # mints the dataset_id and assigns the cache path at dispatch, and the lane's terminal result
-# comes back with {dataset_id, schema, rows} spliced in. Retries while the data lane has not
-# registered yet (transient "No data lane" fatalError).
+# comes back as a kind:"data" result — {dataset_id, schema, rows} on the typed Data payload
+# (§19.2). Retries while the data lane has not registered yet (transient "No data lane"
+# fatalError).
 csv_path <- normalizePath("test_data/debug.csv")
 dataset_id <- NULL
 for (attempt in 1:50) {
@@ -69,10 +70,11 @@ for (attempt in 1:50) {
     r <- fromJSON(unframe(open_raw), simplifyVector = FALSE)
     if (identical(r$type, "modules")) next                                  # catalog push
     if (!identical(r$type, "result") || !identical(r$work_id, work_id)) next
-    msg <- if (is.null(r$payload$results$errorMessage)) "" else r$payload$results$errorMessage
+    if (identical(r$status, "running")) next                 # park marker: lane is booting
+    msg <- if (is.null(r$payload$error_message)) "" else r$payload$error_message
     if (identical(r$status, "complete")) {
-      dataset_id <- r$payload$results$dataset_id
-      cat(sprintf("[frontend] dataset ready: id=%s rows=%s\n", dataset_id, r$payload$results$rows))
+      dataset_id <- r$payload$dataset_id
+      cat(sprintf("[frontend] dataset ready: id=%s rows=%s\n", dataset_id, r$payload$rows))
       done <- TRUE
       break
     }
@@ -118,30 +120,46 @@ work <- list(
 )
 work_raw <- pack(toJSON(work, auto_unbox = TRUE, null = "null"))
 
-# ── 4. Submit (retry until a runner routes it), then wait for the result ──────
-# While the jaspbase runner is still loading jaspBase, the orchestrator answers with a
-# transient "No runner is available" fatalError — retry that specifically; any other
-# result ends the loop.
+# ── 4. Submit, then wait for the terminal result ─────────────────────────────
+# The jaspbase runner is provisioned on demand: the orchestrator PARKS the work and spawns
+# the runner, sending `running` park markers until the runner registers and the parked work
+# is dispatched. So submit once, then keep receiving, skipping `running` markers (parked)
+# and `modules` frames, until a terminal result arrives. A "No runner is available"
+# fatalError (only when provisioning is disabled) triggers a re-submit.
 result <- NULL
-for (attempt in 1:60) {
-  send(ch, work_raw, mode = "raw", block = 3000L)
-  res <- recv(ch, mode = "raw", block = 3000L)
-  if (!is_err(res) && length(res) > 0) {
-    r <- fromJSON(unframe(res), simplifyVector = FALSE)
-    if (identical(r$type, "result")) {
-      msg <- if (is.null(r$payload$results$errorMessage)) "" else r$payload$results$errorMessage
-      if (identical(r$status, "fatalError") && grepl("No runner is available", msg)) {
-        cat(sprintf("[frontend] attempt %d: %s retrying...\n", attempt, msg))
-        Sys.sleep(1)
-        next
-      }
-      result <- r
-      break
-    }
-    cat(sprintf("[frontend] skipping type=%s frame (not a result)\n", r$type))
+parked <- FALSE
+attempt <- 0
+while (is.null(result) && attempt < 60) {
+  attempt <- attempt + 1
+  if (!parked) {
+    send(ch, work_raw, mode = "raw", block = 3000L)
   }
-  cat(sprintf("[frontend] attempt %d: no result yet (runner not ready?), retrying...\n", attempt))
+  res <- recv(ch, mode = "raw", block = 5000L)
+  if (is_err(res) || length(res) == 0) {
+    cat(sprintf("[frontend] attempt %d: no frame yet, retrying...\n", attempt))
+    next
+  }
+  r <- fromJSON(unframe(res), simplifyVector = FALSE)
+  if (identical(r$type, "modules")) next                       # catalog push
+  if (!identical(r$type, "result")) {
+    cat(sprintf("[frontend] skipping type=%s frame (not a result)\n", r$type))
+    next
+  }
+  if (identical(r$status, "running")) {
+    if (!parked) cat("[frontend] work parked — orchestrator is provisioning the runner...\n")
+    parked <- TRUE
+    next
+  }
+  msg <- if (is.null(r$payload$results$errorMessage)) "" else r$payload$results$errorMessage
+  if (identical(r$status, "fatalError") && grepl("No runner is available", msg)) {
+    cat(sprintf("[frontend] attempt %d: %s retrying...\n", attempt, msg))
+    parked <- FALSE
+    Sys.sleep(1)
+    next
+  }
+  result <- r
 }
+if (!is.null(result) && identical(result$status, "running")) result <- NULL
 
 if (is.null(result)) { cat("[frontend] FAIL: no result received\n"); quit(status = 1) }
 

@@ -37,12 +37,46 @@ ColumnsModel::ColumnsModel(DataSetTableModel *tableModel)
 	connect(_tableModel,				&DataSetTableModel::columnsInserted,		info, &VariableInfo::rowCountChanged		);
 	connect(_tableModel,				&DataSetTableModel::columnsRemoved,			info, &VariableInfo::rowCountChanged		);
 	connect(MainWindow::singleton(),	&MainWindow::dataAvailableChanged,			info, &VariableInfo::dataAvailableChanged	);
+
+	// NEO (data-model-design.md §3.4): serve the active lane dataset's schema instead of the
+	// legacy table, and re-target whenever the registry's active dataset changes.
+	if (DataSetPackage::pkg() && DataSetPackage::pkg()->registry())
+	{
+		connect(DataSetPackage::pkg()->registry(), &DatasetRegistry::activeChanged, this,
+				[this](const QString &) { bindNeoData(DataSetPackage::pkg()->registry()->active()); });
+		bindNeoData(DataSetPackage::pkg()->registry()->active());
+	}
 }
 
 ColumnsModel::~ColumnsModel()
 { 
 	if(_singleton == this) 
 		_singleton = nullptr;
+}
+
+void ColumnsModel::bindNeoData(DataModel * model)
+{
+	if (_neoData == model)
+		return;
+
+	beginResetModel();
+
+	if (_neoData)
+		disconnect(_neoData, nullptr, this, nullptr);
+
+	_neoData = model;
+
+	if (_neoData)
+		connect(_neoData, &DataModel::schemaChanged, this, [this]()
+		{
+			beginResetModel();
+			endResetModel();
+			emit dataSetChanged();
+		});
+
+	endResetModel();	// the ctor connects modelReset -> VariableInfo::rowCountChanged
+
+	emit dataSetChanged();
 }
 
 QString ColumnsModel::getColumnIcon(int colType) const
@@ -113,9 +147,26 @@ QString ColumnsModel::getColumnTransformedToolTip(const QString &name, columnTyp
 
 QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 {
-	QString				colName		=									 _tableModel->headerData(index.row(), Qt::Horizontal, int(DataSetPackage::specialRoles::name				)).toString();
-	columnType			colType		= static_cast<columnType>			(_tableModel->headerData(index.row(), Qt::Horizontal, int(DataSetPackage::specialRoles::columnType			)).toInt());
-	computedColumnType	codeType	= static_cast<computedColumnType>	(_tableModel->headerData(index.row(), Qt::Horizontal, int(DataSetPackage::specialRoles::computedColumnType	)).toInt());
+	QString				colName;
+	columnType			colType;
+	computedColumnType	codeType;
+
+	if (_neoData)
+	{
+		const ColumnInfo * col = _neoData->columnAt(size_t(index.row()));
+		if (!col)
+			return QVariant();
+
+		colName		= tq(col->name);
+		colType		= col->type;
+		codeType	= col->codeType;
+	}
+	else
+	{
+		colName		=									 _tableModel->headerData(index.row(), Qt::Horizontal, int(DataSetPackage::specialRoles::name				)).toString();
+		colType		= static_cast<columnType>			(_tableModel->headerData(index.row(), Qt::Horizontal, int(DataSetPackage::specialRoles::columnType			)).toInt());
+		codeType	= static_cast<computedColumnType>	(_tableModel->headerData(index.row(), Qt::Horizontal, int(DataSetPackage::specialRoles::computedColumnType	)).toInt());
+	}
 
 	switch(role)
 	{
@@ -139,7 +190,7 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 
 int ColumnsModel::rowCount(const QModelIndex &) const
 {
-	return _tableModel->columnCount();
+	return _neoData ? int(_neoData->columnCount()) : _tableModel->columnCount();
 }
 
 int ColumnsModel::columnCount(const QModelIndex &) const
@@ -160,6 +211,44 @@ QVariant ColumnsModel::provideInfo(VariableInfo::InfoType info, const QString& c
 
 		if (colIndex < 0)
 			return QVariant();
+
+		// NEO lane dataset (data-model-design.md §3.4): schema info comes from the DataModel.
+		// Value-flavoured info has no frontend source until data_view lands — return empty.
+		if (colModel->_neoData)
+		{
+			const DataModel		* neo = colModel->_neoData;
+			const ColumnInfo	* col = neo->columnAt(size_t(colIndex));
+
+			if (!col)
+				return QVariant();
+
+			switch(info)
+			{
+			case VariableInfo::VariableType:		return int(col->type);
+			case VariableInfo::NameRole:			return ColumnsModel::NameRole;
+			case VariableInfo::VariableNames:		return getColumnNames();
+			case VariableInfo::DataAvailable:		return MainWindow::singleton()->dataAvailable();
+			case VariableInfo::DataSetRowCount:	return qulonglong(neo->rows());
+			case VariableInfo::Labels:
+			{
+				QStringList levels;
+				for (const std::string & level : col->levels)
+					levels.append(tq(level));
+				return levels;
+			}
+			case VariableInfo::TotalLevels:			return qulonglong(col->distinctCount);	// distinct_count is the single source of truth for counts — wire levels are a capped UI prefix (design doc §2, decision 15)
+			case VariableInfo::TotalNumericValues:
+				if (col->type == columnType::scale)
+					return qulonglong(col->distinctCount);	// scale: every value is numeric — the same number legacy's O(N log N) nonFilteredNumericsCount scan produced, without any scan
+				// Categoricals (e.g. jaspReliability SEM gates minNumericLevels:2 on nominal/
+				// ordinal items): the lane computes the distinct NUMERIC level count locale-aware
+				// (numeric_levels) — the frontend never parses wire values (design doc §2).
+				return col->numericLevels;
+			case VariableInfo::ColumnDescription:	return tq(col->description);
+			case VariableInfo::DataSetPointer:		return QVariant::fromValue<void*>(nullptr);	// deliberately no raw handout (design decision 8)
+			default:								return QVariant();	// values/previews: nothing in the frontend until data_view
+			}
+		}
 
 		QModelIndex qColIndex	= index(colIndex, 0),
 					tableCIndex	= _tableModel->index(0, colIndex),
@@ -208,10 +297,12 @@ bool ColumnsModel::absorbInfo(VariableInfo::InfoType info, const QString &colNam
 	if (!colModel)
 		return false;
 
+	if (colModel->_neoData)
+		return false;	// NEO: no frontend cell writes until data_edit lands (data-model-design.md §3.4)
+
 	try
 	{
 		int colIndex = colModel->getColumnIndex(fq(colName));
-
 		if (colIndex < 0)
 			return false;
 
