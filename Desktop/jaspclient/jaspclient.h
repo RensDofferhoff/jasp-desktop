@@ -60,10 +60,10 @@ public:
 	/// returns when it is real.
 	struct Result
 	{
-		std::string kind;		///< "analysis" | "data" ("rcode" reserved)
+		std::string kind;		///< "analysis_r_classic_jaspbase" | "data" ("rcode" reserved)
 		std::string status;		///< §22 status string
 
-		// kind:"analysis" — the jaspResults tree + its asset bootstrap.
+		// kind:"analysis_r_classic_jaspbase" — the jaspResults tree + its asset bootstrap.
 		Json::Value results;	///< the opaque jaspResults tree; on failure the error tree {error, errorMessage, title}
 		std::string resultsDir;	///< orchestrator's per-revision artifact dir; wire-only, never persisted
 

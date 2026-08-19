@@ -31,7 +31,7 @@ control-plane state.
 
 A **work unit** is a complete, self-contained description of one thing to compute. It carries
 everything needed to execute it — the dataset reference, the options, the output settings,
-the evaluation environment — and a `kind` that says what it is (`analysis`, `rcode`, a
+the evaluation environment — and a `kind` that says what it is (`analysis_r_classic_jaspbase`, `rcode`, a
 computed column, a filter, …). An analysis is simply the most common *kind* of work unit; it
 is not a special case wired through the protocol, it is one value of a discriminator.
 
@@ -187,7 +187,7 @@ stream of **results** `{work_id, kind, status, payload, …}`. It has **zero** k
 - whether a runner crashed and was replaced;
 - whether the work is an analysis, raw R, a computed column, or a filter.
 
-All of that is the orchestrator's problem. An analysis is just `kind:"analysis"`.
+All of that is the orchestrator's problem. An analysis is just `kind:"analysis_r_classic_jaspbase"`.
 
 ## 4. The invariant work unit
 
@@ -222,7 +222,7 @@ Every work unit has, in common:
 | Field | Meaning |
 |---|---|
 | `work_id` | Stable identity of this logical unit of work. For an analysis it is the analysis instance id; for raw R it is whatever id the requester chose. The same `work_id` across re-submissions means “the same work, updated.” |
-| `kind` | What sort of work: `"analysis"`, `"rcode"`, and (later) `"computed_column"`, `"filter"`, … The discriminator that makes an analysis *one kind of work* rather than a special case. |
+| `kind` | What sort of work: `"analysis_r_classic_jaspbase"`, `"rcode"`, and (later) `"computed_column"`, `"filter"`, … The discriminator that makes an analysis *one kind of work* rather than a special case. |
 | `revision` | Monotonic integer per `work_id`, **supplied by the frontend** (bumped on each re-submission; the orchestrator neither assigns nor originates it). Newer wins; older is stale and discarded by the orchestrator (§23). |
 | `dataset_ids` *(frontend form)* / `dataset_paths` *(runner form)* | The data — an **ordered array** of dataset references (usually one). The frontend names datasets by id; the orchestrator resolves each id to a concrete read-only path for the runner (one-to-one, order-preserving). Paths never cross the frontend boundary. An array so a future kind can reference multiple datasets without a protocol change. |
 | `output_dir` | Writable directory for the work unit's file artifacts — **one self-contained dir per revision** (`results_<revision>/`, §4.7). The runner writes there and references artifacts by relative path; a new revision seeds recompute by copying a finished base revision's dir (copy-on-seed, §19.1 `base_revision`), never by sharing a mutable scratch. The runner has no filesystem policy of its own. |
@@ -230,7 +230,7 @@ Every work unit has, in common:
 
 …and then the **`payload`** body, whose schema is fixed per `kind`:
 
-- `kind:"analysis"` → `payload = { module, module_version, analysis, options, settings }` —
+- `kind:"analysis_r_classic_jaspbase"` → `payload = { module, module_version, analysis, options, settings }` —
   module name + version, the analysis name within the module, the analysis `options` (opaque to
   the orchestrator), and the output `settings`.
 - `kind:"rcode"` → `payload = { code, env, settings? }` — raw R source, the evaluation env
@@ -662,10 +662,10 @@ impractical.
 
 **A runner loads one *or more* modules' library sets, and only runs work for the modules it
 advertises.** It is “typed” at startup to its advertised module set — each as an
-`analysis` capability `{kind:"analysis", name, version}`, so routes are keyed by name **and**
+`analysis_r_classic_jaspbase` capability `{kind:"analysis_r_classic_jaspbase", name, version}`, so routes are keyed by name **and**
 version (a dev runner's WIP version and the installed release version can coexist; see
 `register.capabilities`, `work.module`/`module_version`). A runner may advertise several
-`analysis` capabilities and/or an `rcode` capability.
+`analysis_r_classic_jaspbase` capabilities and/or an `rcode` capability.
 
 ```mermaid
 stateDiagram-v2
@@ -1460,7 +1460,7 @@ only the **routing key** for its kind — never the full request payload (a runn
 Anova can run it with *any* options, so it advertises `{name, version}`, not an
 `AnalysisWork`):
 
-- **`analysis`** — `{kind:"analysis", name, version}`. **Version-matched** routing: "who can
+- **`analysis_r_classic_jaspbase`** — `{kind:"analysis_r_classic_jaspbase", name, version}`. **Version-matched** routing: "who can
   run *M* at version *V*?" (§9.4).
 - **`rcode`** — `{kind:"rcode"}`. **Unconstrained** for now (empty routing key); a future
   `r_version` constraint may be added.
@@ -1517,7 +1517,7 @@ existing dataset and preserves the `revision` invalidation invariant (§23).
   "v": 1, "type": "register", "id": "…",
   "runner_id": "dev-laptop-jdoe-4471",                  // hint for pinning
   "capabilities": [
-    { "kind": "analysis", "name": "jaspMyModule", "version": "0.2.0-WIP" }
+    { "kind": "analysis_r_classic_jaspbase", "name": "jaspMyModule", "version": "0.2.0-WIP" }
   ],
   "priority": 100,                                      // higher = preferred (§9.4)
   "module_root": "/home/dev/jaspMyModule/inst",
@@ -1537,7 +1537,7 @@ existing dataset and preserves the `revision` invalidation invariant (§23).
 > ids are not trusted.
 
 The orchestrator keeps one routing registry keyed by capability `kind`, with a per-kind
-routing key: `analysis → (module, version)`, `data → (op, format?)` (format applies only to
+routing key: `analysis_r_classic_jaspbase → (module, version)`, `data → (op, format?)` (format applies only to
 `data_open`; the other ops key on `op` alone), `rcode →` unconstrained. All are O(1) lookups
 keyed by pipe — one "what can this runner do" list, structurally honest about version-matched
 vs op/format-matched routing. A format nobody advertises fails fast with a clear
@@ -1579,7 +1579,7 @@ installed runner (release version) coexist.
 Attached runners are *pinned*: never LRU-evicted, never recycled by invocation count. They
 leave the table only when they disconnect or are deregistered.
 
-**Data-plane routing.** Data work routes on `data` capabilities, not `analysis` (§9.3):
+**Data-plane routing.** Data work routes on `data` capabilities, not `analysis_r_classic_jaspbase` (§9.3):
 
 - `data_open` resolves by **format**: the broker reads the dataset's format (from
   `dataset_open.format_hint`, or sniffed) and picks the runner advertising `data_open` for
@@ -1939,7 +1939,7 @@ Design principles, in priority order:
 
 The message catalog (§19) is built from one verb in each direction: the frontend **submits
 `work`** and **receives `result`**; the runner **receives `work`** and **emits `result`**. An
-analysis is `kind:"analysis"` — one value of a discriminator, not a special-cased message.
+analysis is `kind:"analysis_r_classic_jaspbase"` — one value of a discriminator, not a special-cased message.
 Everything the old protocol expressed as a distinct message (run, options-changed,
 settings-changed, re-run) collapses into “submit a work unit with a higher `revision`.” The
 rest of the catalog is data plane (`dataset_*`, `data_*`), capability (`list_modules`,
@@ -1953,7 +1953,7 @@ rest of the catalog is data plane (`dataset_*`, `data_*`), capability (`list_mod
 |---|---|
 | Encoding | JSON is UTF-8. Field names are `snake_case`. |
 | IDs | `id`, `work_id`, `dataset_id` are UUIDv4 strings unless noted. Orchestrator-assigned ids use sequential forms: `runner_id` = `r-N`, `session_id` = `s-N` (§19.5). |
-| Modules | A module is identified by a **descriptor `{name, version}`** — a `name` string plus a semver `version` string. Advertised as an `analysis` capability in `register.capabilities` (§19.5); a `work` targets one via `module` + `module_version` (§19.3); the producing version is echoed in `result` provenance. |
+| Modules | A module is identified by a **descriptor `{name, version}`** — a `name` string plus a semver `version` string. Advertised as an `analysis_r_classic_jaspbase` capability in `register.capabilities` (§19.5); a `work` targets one via `module` + `module_version` (§19.3); the producing version is echoed in `result` provenance. |
 | Correlation | Every request carries `id`; the matching response echoes it in `reply_to` (or `work_id` for streamed `result`s that reference their work unit). |
 | Timestamps | Unix epoch milliseconds, field `ts` (optional, orchestrator-stamped). |
 | Revision | `revision` is a monotonically increasing integer per `work_id`, **supplied by the frontend** (bumped on each re-submission); the orchestrator validates monotonicity and uses it for stale-result rejection (§23). |
@@ -2161,7 +2161,7 @@ per-message tables.
 
 **The catalog is organized around the work unit.** The frontend and the runner speak the
 *same* two operational messages — `work` and `result` — keyed by a stable `work_id` and
-discriminated by `kind`. An analysis is `kind:"analysis"`, one value among (present and
+discriminated by `kind`. An analysis is `kind:"analysis_r_classic_jaspbase"`, one value among (present and
 future) kinds. Both messages carry their kind-specific body in a nested `payload`, opaque to
 the orchestrator. The orchestrator forwards `work` frontend→runner — resolving the level-zero
 `dataset_ids`→`dataset_paths` and allocating `output_dir`, forwarding `payload` verbatim — and
@@ -2201,8 +2201,8 @@ Level-zero fields (the orchestrator reads and acts on these):
 
 | Field | Type | Req | Description |
 |---|---|---|---|
-| `work_id` | string | ✓ | Stable id of this logical work unit. For `kind:"analysis"` it is the analysis instance id. Same id = same logical work, updated. |
-| `kind` | string | ✓ | `"analysis"` (run a module analysis) · `"rcode"` (evaluate raw R) · future: `"computed_column"`, `"filter"`, … Discriminates the `payload` schema. |
+| `work_id` | string | ✓ | Stable id of this logical work unit. For `kind:"analysis_r_classic_jaspbase"` it is the analysis instance id. Same id = same logical work, updated. |
+| `kind` | string | ✓ | `"analysis_r_classic_jaspbase"` (run a module analysis) · `"rcode"` (evaluate raw R) · future: `"computed_column"`, `"filter"`, … Discriminates the `payload` schema. |
 | `revision` | int | ✓ | Monotonic integer per `work_id`, **supplied by the frontend** and bumped on each re-submission (the frontend's own iteration count). The orchestrator validates monotonicity and forwards it unchanged (§19.3, §23). |
 | `base_revision` | int | ◑ | Revision to **seed incremental recompute from** — the last result the frontend is iterating off. The orchestrator resolves it to a concrete `base_results_dir` (§19.3); the runner copies that finished revision's dir into its own before running (copy-on-seed, §4.7). Absent → full recompute (no seed). Frontend-owned like `revision`; per-revision isolation means concurrent/out-of-order revisions never share a mutable scratch. |
 | `dataset_ids` | string[] | ◑ | Ordered array of datasets the work runs against (usually one element). The orchestrator resolves each id → a `dataset_path` for the runner (§19.3), one-to-one and order-preserving. Plural so a future kind can reference multiple datasets without a protocol change. |
@@ -2213,7 +2213,7 @@ The frontend **owns** the `revision`: it bumps it on every re-submission of a `w
 The **`payload`** is opaque to the orchestrator and forwarded verbatim to the runner; its schema
 is fixed per `kind`:
 
-- `kind:"analysis"` → `{ module, module_version, analysis, options, settings }`
+- `kind:"analysis_r_classic_jaspbase"` → `{ module, module_version, analysis, options, settings }`
   - `module` — module **name**, e.g. `"jaspDescriptives"`.
   - `module_version` — target **version** (semver); omitted → highest available version of `module`.
   - `analysis` — analysis name within the module.
@@ -2227,7 +2227,7 @@ is fixed per `kind`:
 Analysis example:
 
 ```json
-{ "v":1, "type":"work", "id":"…", "work_id":"a17", "kind":"analysis", "revision":3,
+{ "v":1, "type":"work", "id":"…", "work_id":"a17", "kind":"analysis_r_classic_jaspbase", "revision":3,
   "dataset_ids":["d1e2…"], "base_revision":2,
   "payload":{ "module":"jaspDescriptives", "module_version":"1.2.0", "analysis":"Descriptives",
     "options":{ … }, "settings":{"numDecimals":3, "ppi":300} } }
@@ -2353,7 +2353,7 @@ attached-runner modules. No required fields (optionally a `session_id`).
 Streamed output of a work unit — the generalized replacement for `analysis_result`. One work
 unit produces *many* of these as it runs. This is the **same message the runner sends**
 (§19.4); the orchestrator forwards it to the frontend that requested the work, looked up via
-`work_id → session_id`. An analysis result is just a `result` with `kind:"analysis"`.
+`work_id → session_id`. An analysis result is just a `result` with `kind:"analysis_r_classic_jaspbase"`.
 
 | Field | Type | Req | Description |
 |---|---|---|---|
@@ -2371,7 +2371,7 @@ output, a computed-column confirmation, or anything added later — the frontend
 `kind`. Images are referenced by path relative to the work unit's `output_dir`, never inlined.
 
 ```json
-{ "v":1, "type":"result", "id":"…", "work_id":"a17", "kind":"analysis", "revision":3,
+{ "v":1, "type":"result", "id":"…", "work_id":"a17", "kind":"analysis_r_classic_jaspbase", "revision":3,
   "status":"changed",
   "payload":{
     "results":{"title":"Descriptives","tables":[ … ]},
@@ -2385,7 +2385,7 @@ adjacently tagged `{"kind": …, "payload": {…}}`. One work kind, one result s
 labor: **producers fill content; the orchestrator fills identity & location** — as typed fields
 on the payload, never by surgery on an opaque tree.
 
-##### `kind:"analysis"`
+##### `kind:"analysis_r_classic_jaspbase"`
 
 | Field | Type | Filled by | Description |
 |---|---|---|---|
@@ -2429,7 +2429,7 @@ notification IS this terminal result.
 - `orchestrator/src/messages.rs`: `ResultPayload` becomes the adjacently-tagged enum above
   (`AnalysisResult` / `DataResult` / `RcodeResult`); `messages.schema.json` regenerated
   (`--schema`).
-- Orchestrator `route_result`: fills `results_dir` (analysis) and `dataset_id` (data) as
+- Orchestrator `route_result`: fills `results_dir` (analysis_r_classic_jaspbase) and `dataset_id` (data) as
   typed field assignments; no raw-JSON splices, no writes into the opaque `results` tree.
 - R runner (`runner_jaspbase.R`): emits `kind` + the shaped payload (+ `module_version`
   provenance from §19.4).
@@ -2585,17 +2585,17 @@ queued cancels and replaces it (when `revision` is newer). See the reconciliatio
 | Field | Type | Req | Description |
 |---|---|---|---|
 | `work_id` | string | ✓ | Reconciliation key. Same id = same logical work. |
-| `kind` | string | ✓ | `"analysis"` · `"rcode"` · `"data"`. Discriminates the `payload` schema. `"data"` work is synthesized by the orchestrator (not forwarded from the frontend) and routed to the appropriate data-plane lane — by **format** for `data_open`, by **service** for edits (§5.4, §9.4). |
+| `kind` | string | ✓ | `"analysis_r_classic_jaspbase"` · `"rcode"` · `"data"`. Discriminates the `payload` schema. `"data"` work is synthesized by the orchestrator (not forwarded from the frontend) and routed to the appropriate data-plane lane — by **format** for `data_open`, by **service** for edits (§5.4, §9.4). |
 | `revision` | int | ✓ | Monotonic per `work_id`, **supplied by the frontend** and forwarded verbatim by the orchestrator; newer wins, older ignored (§23). |
 | `dataset_paths` | string[] | ◑ | Ordered array of Feather cache files to mmap (§24) — **read-only inputs**. Resolved by the orchestrator from the frontend's `dataset_ids`, one-to-one and order-preserving (`dataset_paths[i]` ↔ `dataset_ids[i]`). |
 | `output_dir` | string | ◑ | **Writable output** directory **for this revision**: the runner writes file artifacts (plots/images, jaspResults recompute state, `results.json`) here and references them by **path relative to `output_dir`**. Per-revision and self-contained — `<work_root>/<work_id>/results_<revision>/` (§4.7) — so concurrent/out-of-order revisions never share a mutable scratch. Named by the orchestrator, **created and seeded by the runner**, reclaimed by the orchestrator on `work_close`; the runner must not write outside it. |
 | `base_results_dir` | string | – | Present when the frontend supplied a `base_revision` (§19.1): the **finished base revision's dir** (`<work_root>/<work_id>/results_<base_revision>/`). The runner copies it into `output_dir` before running (copy-on-seed) so incremental recompute reuses the base's state/images and relative image paths resolve. Absent → full recompute (the runner creates an empty `output_dir`). Read-only input; the base revision is immutable. |
-| `payload` | object | ◑ | The kind-specific computation. For `analysis`/`rcode`: forwarded **verbatim** from the frontend's `work` (§19.1); the orchestrator does not interpret it. Schema discriminated by `kind`: `analysis` → `{module, module_version, analysis, options, settings}`; `rcode` → `{code, env, settings?}` (the runner sets `.libPaths()` from `payload.env`); `data` → `{op, cache_path, …op-specific fields}` — synthesized by the orchestrator and consumed by a data-plane lane (§5.4). For `op:data_open` the op-specific fields are `{format, source}` (the resolved routing format and the source path/URI); for `op:data_edit` they are the `data_edit` op fields (§19.1). |
+| `payload` | object | ◑ | The kind-specific computation. For `analysis_r_classic_jaspbase`/`rcode`: forwarded **verbatim** from the frontend's `work` (§19.1); the orchestrator does not interpret it. Schema discriminated by `kind`: `analysis_r_classic_jaspbase` → `{module, module_version, analysis, options, settings}`; `rcode` → `{code, env, settings?}` (the runner sets `.libPaths()` from `payload.env`); `data` → `{op, cache_path, …op-specific fields}` — synthesized by the orchestrator and consumed by a data-plane lane (§5.4). For `op:data_open` the op-specific fields are `{format, source}` (the resolved routing format and the source path/URI); for `op:data_edit` they are the `data_edit` op fields (§19.1). |
 
 Analysis example:
 
 ```json
-{ "v":1, "type":"work", "id":"…", "work_id":"a17", "kind":"analysis", "revision":3,
+{ "v":1, "type":"work", "id":"…", "work_id":"a17", "kind":"analysis_r_classic_jaspbase", "revision":3,
   "dataset_paths":["/cache/d1e2….feather"], "output_dir":"/work/a17/results_3",
   "base_results_dir":"/work/a17/results_2",
   "payload":{ "module":"jaspDescriptives", "module_version":"1.2.0", "analysis":"Descriptives",
@@ -2743,7 +2743,7 @@ tenancy scope every message carries. Clients read it from there.
 #### `register`  (Runner → Orchestrator)
 Self-advertisement. Used by **all** runners; attached runners use it to offer capabilities and
 a dev QML root (§9). The advertisement is a **single unified `capabilities` list**, each entry
-tagged by `kind` and mirroring the work `kind` enum one-to-one (§9.3): `analysis` →
+tagged by `kind` and mirroring the work `kind` enum one-to-one (§9.3): `analysis_r_classic_jaspbase` →
 `{name, version}`; `rcode` → `{}` (unconstrained for now); `data` → `{op, formats?}` where
 `op` ∈ `data_open`/`data_edit`/`data_close`/`data_update` and `formats` is meaningful **only**
 for `data_open`. Hardware/runtime lives in `environment`, not `capabilities`.
@@ -2753,14 +2753,14 @@ for `data_open`. Hardware/runtime lives in `environment`, not `capabilities`.
 | `runner_id` | string | – | Optional **hint** id (e.g. a dev-machine label for pinning). The orchestrator is the authority: it assigns the canonical `runner_id` and returns it in `register_ack` (§9.3). |
 | `capabilities` | object[] | ✓ | The capabilities this runner offers — one entry per work `kind` it can satisfy, internally tagged by `kind` (§9.3). The full set of work the runner is warm for. |
 | `priority` | int | – | Higher = preferred when multiple runners can satisfy the same work (default `0`). |
-| `module_root` | string | – | Filesystem root for advertised `analysis` capabilities' QML/inst (§9). |
+| `module_root` | string | – | Filesystem root for advertised `analysis_r_classic_jaspbase` capabilities' QML/inst (§9). |
 | `environment` | object | – | Hardware/runtime `{r_version, gpu, high_memory, …}` for resource-matched routing (§9.5). Qualifies *how* a capability runs, not *what* is offered. |
 | `transport` | string | – | How the runner is reachable (`ipc`, `tcp`, …). |
 | `auth_token` | string | ◑ | Required on non-local transports (§27). |
 
 ```json
 { "v":1, "type":"register", "id":"…", "runner_id":"dev-laptop-jdoe-4471",
-  "capabilities":[{"kind":"analysis","name":"jaspMyModule","version":"0.2.0-WIP"}],
+  "capabilities":[{"kind":"analysis_r_classic_jaspbase","name":"jaspMyModule","version":"0.2.0-WIP"}],
   "priority":100, "module_root":"/home/dev/jaspMyModule/inst",
   "environment":{"r_version":"4.5.1","gpu":false}, "transport":"ipc" }
 ```
@@ -2882,7 +2882,7 @@ sequenceDiagram
     FE->>OR: dataset_open {path, format_hint}
     OR->>CA: read source, write Feather V2 (LZ4)
     OR->>FE: dataset_ready {dataset_id, rows, schema}
-    FE->>OR: work {work_id, kind:"analysis", revision, dataset_ids, payload}
+    FE->>OR: work {work_id, kind:"analysis_r_classic_jaspbase", revision, dataset_ids, payload}
     OR->>OR: resolve dataset_ids -> dataset_paths;<br/>allocate output_dir; pick warm, capable runner (§25)
     OR->>RU: work {…same unit…, dataset_paths, output_dir}
     RU->>CA: mmap Feather (zero-copy)
@@ -2937,11 +2937,11 @@ sequenceDiagram
     participant OR as Orchestrator
     participant FE as Frontend
 
-    DEV->>OR: register {capabilities:[{kind:"analysis",name:"jaspMyModule",version:"0.2.0-WIP"}], priority:100, module_root}
+    DEV->>OR: register {capabilities:[{kind:"analysis_r_classic_jaspbase",name:"jaspMyModule",version:"0.2.0-WIP"}], priority:100, module_root}
     OR->>DEV: register_ack {ok, runner_id:"r-3", channel_url}
     OR->>FE: form_reload {module:"jaspMyModule", qml_root:module_root}
     FE->>FE: reload QML from qml_root
-    FE->>OR: work {kind:"analysis", payload:{module:"jaspMyModule", …}}
+    FE->>OR: work {kind:"analysis_r_classic_jaspbase", payload:{module:"jaspMyModule", …}}
     OR->>DEV: work {…}   (dev runner preferred by routing)
     DEV->>OR: result {…}
     OR->>FE: result {…}
@@ -3257,7 +3257,7 @@ The base precedence for a work unit targeting module *M* at version *V* is in §
   **most recent registration wins**; otherwise any. (Minor; revisit if shared/remote pools
   become real.)
 - **Multi-capability runners.** A runner may advertise **multiple capabilities** (e.g.
-  several `analysis` entries, each `{name, version}`); it is eligible for any of them and is
+  several `analysis_r_classic_jaspbase` entries, each `{name, version}`); it is eligible for any of them and is
   **evicted / warmed as a single unit** (the whole advertised set together).
 - **Raw-R routing.** Work with `kind:"rcode"` is routed to a runner advertising an `rcode`
   capability — in practice a dedicated **utility runner**, since arbitrary per-request

@@ -96,8 +96,8 @@ pub struct Work {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", content = "payload")]
 pub enum WorkPayload {
-    #[serde(rename = "analysis")]
-    Analysis(AnalysisWork),
+    #[serde(rename = "analysis_r_classic_jaspbase")]
+    AnalysisRClassicJaspbase(AnalysisWork),
     #[serde(rename = "rcode")]
     Rcode(RcodeWork),
     /// Synthesized data-plane work the orchestrator routes to a data lane (§5.4): a
@@ -138,6 +138,16 @@ pub struct AnalysisWork {
     pub analysis: String,
     /// Opaque analysis options — the orchestrator never interprets them.
     pub options: Value,
+    /// Preload the used columns before the run (from the module's `AnalysisEntry`;
+    /// missing -> true, compat). Opaque to the orchestrator — the R runner uses it to choose
+    /// between a pruned aliased preload frame and lazy on-demand reads
+    /// (HANDOVER-runner-data-pruning.md §3.1).
+    #[serde(
+        rename = "preloadData",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preload_data: Option<bool>,
     pub settings: Settings,
 }
 
@@ -182,8 +192,8 @@ pub struct ResultMsg {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", content = "payload")]
 pub enum ResultPayload {
-    #[serde(rename = "analysis")]
-    Analysis(AnalysisResult),
+    #[serde(rename = "analysis_r_classic_jaspbase")]
+    AnalysisRClassicJaspbase(AnalysisResult),
     /// Terminal result of a dataset-open work — replaces the removed `dataset_ready` message:
     /// the ready notification IS this result.
     #[serde(rename = "data")]
@@ -193,7 +203,7 @@ pub enum ResultPayload {
     Rcode(Value),
 }
 
-/// The `kind:"analysis"` result payload (§19.2).
+/// The `kind:"analysis_r_classic_jaspbase"` result payload (§19.2).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AnalysisResult {
     /// The jaspResults tree — **opaque to the orchestrator**: forwarded verbatim, never
@@ -363,7 +373,8 @@ pub enum Capability {
     /// assets from (Description.qml, qml/, icons/, help/). A runner that computes a module but
     /// does not vouch for its assets omits it — it is still routed to, but left out of the
     /// module catalog handed to frontends.
-    Analysis {
+    #[serde(rename = "analysis_r_classic_jaspbase")]
+    AnalysisRClassicJaspbase {
         name: String,
         version: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]

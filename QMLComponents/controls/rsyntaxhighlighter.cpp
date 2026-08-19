@@ -19,6 +19,9 @@
 #include "rsyntaxhighlighter.h"
 #include "r_functionwhitelist.h"
 
+#include <QSet>
+#include <algorithm>
+
 RSyntaxHighlighter::RSyntaxHighlighter(QTextDocument *parent)
 	: QSyntaxHighlighter(parent), VariableInfoConsumer(), _textDocument(parent)
 {
@@ -103,13 +106,44 @@ void RSyntaxHighlighter::highlightBlock(const QString &text)
 	for (const HighlightingRule & rule : _highlightingRules)
 		applyRule(text, rule);
 	
-	//Do columns
-	QStringList			names = requestInfo(VariableInfo::InfoType::VariableNames).toStringList();
-	
-	for(const QString & name : names)
-		applyRule(text, QRegularExpression(QString(R"(%1(\.(scale|ordinal|nominal))?)").arg(name)), _columnFormat);
+	//Do columns — ONE cached combined regex for all column names, rebuilt only when the
+	//names change (rebuildColumnsRule). The old code compiled+ran one regex per column per
+	//block: O(columns) compilations per highlight pass — a UI freeze at 10k columns.
+	if (_columnsRuleDirty)
+		rebuildColumnsRule();
+	if (_columnsRule.isValid())
+		applyRule(text, _columnsRule, _columnFormat);
 	
 	applyRule(text, _commentRule);
+}
+
+void RSyntaxHighlighter::rebuildColumnsRule()
+{
+	_columnsRule		= QRegularExpression();	// invalid -> skipped by highlightBlock
+	_columnsRuleDirty	= false;
+
+	QStringList names = requestInfo(VariableInfo::InfoType::VariableNames).toStringList();
+	if (names.isEmpty())
+		return;
+
+	// Dedupe, drop empties, longest first. QRegularExpression alternation is ORDERED (first
+	// alternative wins at a position, unlike the old per-name loop where later rules
+	// overpainted earlier ones) — putting longer names first preserves the old look when one
+	// column name contains another.
+	QSet<QString> unique(names.begin(), names.end());
+	unique.remove(QString());
+	if (unique.isEmpty())
+		return;
+	QStringList sorted(unique.begin(), unique.end());
+	std::sort(sorted.begin(), sorted.end(), [](const QString& a, const QString& b) { return a.size() > b.size(); });
+
+	QStringList escaped;
+	escaped.reserve(sorted.size());
+	for (const QString& name : sorted)
+		escaped << QRegularExpression::escape(name);	// also fixes the old raw-injection bug for names with regex metacharacters
+
+	_columnsRule = QRegularExpression("(?:" + escaped.join('|') + ")(?:\\.(?:scale|ordinal|nominal))?");
+	_columnsRule.optimize();
 }
 
 void RSyntaxHighlighter::setStringsFormat(const QString &text, QChar c)

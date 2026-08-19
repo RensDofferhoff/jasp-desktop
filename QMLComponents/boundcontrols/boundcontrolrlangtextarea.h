@@ -41,15 +41,15 @@ protected:
 	RLangType								_langType				= RLangType::Lavaan;
 	const char *							_checkSyntaxRFunctionName();
 	void									_setBoundValues(bool setModel = true);
+	/// NEO (§3.7): extract column references from the text against the DataModel names —
+	/// detection only, no encoding/rewriting (aliasing is the runner's job, §2.1).
+	void									_extractUsedColumnNames(const std::string & text);
 
 	RSyntaxHighlighter*						_rLangHighlighter		= nullptr;
 
 	stringset								_noPrefixUsedColumnNames;
 	std::map<std::string, stringset>		_prefixedUsedColumnNames;
-	QString									_textEncoded;
 	const stringset							_allowedVarPrefixes = {"data."};
-	
-	QString									_previouslyUsedTextEncoded;
 
 
 };

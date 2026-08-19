@@ -39,7 +39,9 @@ class VariableInfo : public QObject
 {
 	Q_OBJECT
 public:
-	enum InfoType { VariableType, VariableNames, DataSetRowCount, Labels, DoubleValues, NameRole, DataSetValue, DataSetValues, MaxWidth, SignalsBlocked, DataAvailable, TotalNumericValues, TotalLevels, PreviewScale, PreviewOrdinal, PreviewNominal, DataSetPointer, ColumnDescription };
+	enum InfoType { VariableType, VariableNames, DataSetRowCount, Labels, DoubleValues, NameRole, DataSetValue, DataSetValues, MaxWidth, SignalsBlocked, DataAvailable, TotalNumericValues, TotalLevels, PreviewScale, PreviewOrdinal, PreviewNominal, DataSetPointer, ColumnDescription,
+					DataSetTerms	///< wide-data fast path: the full (name, type) Terms of the active dataset, cached by the provider
+				  };
 	enum IconType { DefaultIconType, DisabledIconType, InactiveIconType, TransformedIconType };
 
 public:

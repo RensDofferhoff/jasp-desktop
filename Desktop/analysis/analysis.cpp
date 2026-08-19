@@ -323,7 +323,7 @@ Json::Value Analysis::createWorkJson()
 	work["type"]		= "work";
 	work["id"]			= "work-" + std::to_string(id()) + "-" + std::to_string(revision());
 	work["work_id"]		= workId();	// stable analysis instance id (§19.1); revision travels separately
-	work["kind"]		= "analysis";
+	work["kind"]		= "analysis_r_classic_jaspbase";
 	work["revision"]	= revision();
 	// NEO: seed incremental recompute from the last COMPLETED revision (copy-on-seed).
 	// Omitted on the first run (nothing completed yet). The orchestrator resolves it to the
@@ -338,6 +338,9 @@ Json::Value Analysis::createWorkJson()
 	payload["module_version"]	= moduleVersion().asString();
 	payload["analysis"]			= name();
 	payload["options"]			= boundValues();
+	// NEO pruning (HANDOVER-runner-data-pruning.md §3.1): from the module's AnalysisEntry;
+	// the runner defaults missing -> true (compat). Reports have no module data -> true.
+	payload["preloadData"]		= _moduleData ? _moduleData->preloadData() : true;
 
 	Json::Value settings(Json::objectValue);
 	settings["ppi"]			= 96;

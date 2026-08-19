@@ -6,6 +6,7 @@
 #include "variableinfo.h"
 #include "datamodel.h"
 #include "datasetregistry.h"
+#include "models/terms.h"
 
 /// 
 /// Model used by the filter-drag-n-drop to give all the columns and their datatypes
@@ -31,7 +32,8 @@ public:
 				QHash<int, QByteArray>		roleNames()																			const	override;
 				int							getColumnIndex(const std::string & col)												const	{ return _neoData ? _neoData->columnIndex(col) : _tableModel->getColumnIndex(col);	}
 				void							bindNeoData(DataModel * model);	///< NEO: serve the active lane dataset's schema instead of the legacy table (data-model-design.md §3.4)
-				QStringList					getColumnNames()																	const;
+				QStringList					getColumnNames()																						const;
+				const Terms &					dataSetTerms()																							const;	///< wide-data: cached (name, type) Terms of the active dataset, rebuilt only when the columns change
 	Q_INVOKABLE	int							getColumnType(const QString & name)													const;
 				QString						getColumnTransformedToolTip(const QString & name, columnType transformedTo)			const;
 	Q_INVOKABLE	QString						getColumnTransformedToolTip(const QString & name, int transformedTo)				const;
@@ -65,6 +67,12 @@ private:
 	DataSetTableModel		* _tableModel	= nullptr;
 	DataModel				* _neoData		= nullptr;	///< NEO active dataset (schema from the lane); when set, it is the source of truth
 	static ColumnsModel		* _singleton;
+
+	// Wide-data cache (2026-08-16): the dataset's Terms built once per column-set change and
+	// handed out via VariableInfo::DataSetTerms — replaces k per-name requestInfo roundtrips
+	// per sourceTermsReset pass. Mutable: provideInfo() is const.
+	mutable Terms				_dataSetTermsCache;
+	mutable bool				_dataSetTermsValid = false;
 };
 
 

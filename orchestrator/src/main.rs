@@ -367,7 +367,7 @@ impl FrontendRuntime {
 /// Not a wire type: on the wire the kind is the tag of the adjacently-tagged payload enums.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkKind {
-    Analysis,
+    AnalysisRClassicJaspbase,
     Rcode,
     Data,
 }
@@ -376,7 +376,9 @@ impl messages::WorkPayload {
     /// The kind discriminator of this work (§19.1).
     fn kind(&self) -> WorkKind {
         match self {
-            messages::WorkPayload::Analysis(_) => WorkKind::Analysis,
+            messages::WorkPayload::AnalysisRClassicJaspbase(_) => {
+                WorkKind::AnalysisRClassicJaspbase
+            }
             messages::WorkPayload::Rcode(_) => WorkKind::Rcode,
             messages::WorkPayload::Data(_) => WorkKind::Data,
         }
@@ -517,7 +519,7 @@ static BROKER_NONCE: AtomicU64 = AtomicU64::new(0);
 /// What a parked work unit is waiting for: an analysis-module runner or a data lane.
 #[derive(Debug, Clone)]
 enum Awaiting {
-    Analysis { module: String, version: String },
+    AnalysisRClassicJaspbase { module: String, version: String },
     Lane { lane: LaneKind, format: String },
 }
 
@@ -795,7 +797,7 @@ impl Router {
             .capabilities
             .iter()
             .filter_map(|c| match c {
-                Capability::Analysis { name, .. } => Some(name.clone()),
+                Capability::AnalysisRClassicJaspbase { name, .. } => Some(name.clone()),
                 _ => None,
             })
             .collect();
@@ -1309,7 +1311,7 @@ impl Router {
                 fe,
                 env,
                 w,
-                Awaiting::Analysis {
+                Awaiting::AnalysisRClassicJaspbase {
                     module: module.to_string(),
                     version: version.to_string(),
                 },
@@ -1319,7 +1321,7 @@ impl Router {
         // No provisioner (or not an analysis): original no-silent-loss behaviour.
         if self.ever_registered {
             let detail = match &w.payload {
-                WorkPayload::Analysis(a) => {
+                WorkPayload::AnalysisRClassicJaspbase(a) => {
                     format!(
                         "No runner is available to run analyses from module '{}'.",
                         a.module
@@ -1404,7 +1406,7 @@ impl Router {
             }
             std::collections::hash_map::Entry::Vacant(slot) => {
                 let what = match &awaiting {
-                    Awaiting::Analysis { module, .. } => format!("module {module}"),
+                    Awaiting::AnalysisRClassicJaspbase { module, .. } => format!("module {module}"),
                     Awaiting::Lane { format, .. } => format!("data lane for '{format}'"),
                 };
                 println!(
@@ -1419,7 +1421,7 @@ impl Router {
                     parked_ms: now_ms(),
                 });
                 match &awaiting {
-                    Awaiting::Analysis { module, version } => {
+                    Awaiting::AnalysisRClassicJaspbase { module, version } => {
                         let _ = prov.send(ProvReq::Provision {
                             module: module.clone(),
                             version: version.clone(),
@@ -1444,9 +1446,9 @@ impl Router {
             .parked
             .iter()
             .filter(|(_, pw)| match &pw.awaiting {
-                Awaiting::Analysis { module, .. } => caps
+                Awaiting::AnalysisRClassicJaspbase { module, .. } => caps
                     .iter()
-                    .any(|c| matches!(c, Capability::Analysis { name, .. } if name == module)),
+                    .any(|c| matches!(c, Capability::AnalysisRClassicJaspbase { name, .. } if name == module)),
                 Awaiting::Lane { format, .. } => caps.iter().any(|c| {
                     matches!(c, Capability::Data { op, formats }
                         if op == &DataOp::Open
@@ -1468,7 +1470,7 @@ impl Router {
                 continue;
             };
             let what = match &pw.awaiting {
-                Awaiting::Analysis { module, .. } => format!("module {module}"),
+                Awaiting::AnalysisRClassicJaspbase { module, .. } => format!("module {module}"),
                 Awaiting::Lane { format, .. } => format!("data lane '{format}'"),
             };
             println!(
@@ -1485,7 +1487,7 @@ impl Router {
             .parked
             .iter()
             .filter(|(_, pw)| {
-                matches!(&pw.awaiting, Awaiting::Analysis { module: m, .. } if m == module)
+                matches!(&pw.awaiting, Awaiting::AnalysisRClassicJaspbase { module: m, .. } if m == module)
             })
             .map(|(k, _)| k.clone())
             .collect();
@@ -1549,7 +1551,9 @@ impl Router {
         for key in expired {
             if let Some(pw) = self.parked.remove(&key) {
                 let what = match &pw.awaiting {
-                    Awaiting::Analysis { module, .. } => format!("runner for module '{module}'"),
+                    Awaiting::AnalysisRClassicJaspbase { module, .. } => {
+                        format!("runner for module '{module}'")
+                    }
                     Awaiting::Lane { format, .. } => format!("data lane for '{format}'"),
                 };
                 eprintln!(
@@ -1632,7 +1636,7 @@ impl Router {
                         d.dataset_id = Some(dataset_id.clone());
                     }
                 }
-                messages::ResultPayload::Analysis(a) => {
+                messages::ResultPayload::AnalysisRClassicJaspbase(a) => {
                     let results_dir = self.config.revision_dir(&session_id, &work_id, revision);
                     a.results_dir = Some(results_dir.to_string_lossy().into_owned());
                 }
@@ -1836,7 +1840,7 @@ impl Router {
             let modules: Vec<String> = caps
                 .iter()
                 .filter_map(|c| match c {
-                    Capability::Analysis { name, .. } => Some(name.clone()),
+                    Capability::AnalysisRClassicJaspbase { name, .. } => Some(name.clone()),
                     _ => None,
                 })
                 .collect();
@@ -2002,7 +2006,7 @@ impl Router {
                 rt.capabilities.iter().filter_map(move |c| match c {
                     // Advertisements without a base_uri route work but are not discoverable
                     // (the frontend could not load assets from them).
-                    Capability::Analysis {
+                    Capability::AnalysisRClassicJaspbase {
                         name,
                         version,
                         base_uri: Some(base_uri),
@@ -2321,10 +2325,9 @@ fn select_runner(
     payload: &WorkPayload,
 ) -> Option<Arc<RunnerRuntime>> {
     let can_serve = |rt: &RunnerRuntime| match payload {
-        WorkPayload::Analysis(a) => rt
-            .capabilities
-            .iter()
-            .any(|c| matches!(c, Capability::Analysis { name, .. } if name == &a.module)),
+        WorkPayload::AnalysisRClassicJaspbase(a) => rt.capabilities.iter().any(
+            |c| matches!(c, Capability::AnalysisRClassicJaspbase { name, .. } if name == &a.module),
+        ),
         WorkPayload::Rcode(_) => rt
             .capabilities
             .iter()
@@ -2353,7 +2356,9 @@ fn select_runner(
 /// The `(module, module_version)` an analysis work unit targets, or `None` for non-analysis work.
 fn analysis_module(payload: &WorkPayload) -> Option<(&str, &str)> {
     match payload {
-        WorkPayload::Analysis(a) => Some((a.module.as_str(), a.module_version.as_str())),
+        WorkPayload::AnalysisRClassicJaspbase(a) => {
+            Some((a.module.as_str(), a.module_version.as_str()))
+        }
         WorkPayload::Rcode(_) => None,
         WorkPayload::Data(_) => None,
     }
@@ -2365,11 +2370,13 @@ fn analysis_module(payload: &WorkPayload) -> Option<(&str, &str)> {
 /// can dispatch even the park marker.
 fn running_result(work_id: &str, revision: u64, session_id: &str, kind: WorkKind) -> Vec<u8> {
     let payload = match kind {
-        WorkKind::Analysis => messages::ResultPayload::Analysis(messages::AnalysisResult {
-            results: json!({ "title": "provisioning a runner" }),
-            results_dir: None,
-            images: None,
-        }),
+        WorkKind::AnalysisRClassicJaspbase => {
+            messages::ResultPayload::AnalysisRClassicJaspbase(messages::AnalysisResult {
+                results: json!({ "title": "provisioning a runner" }),
+                results_dir: None,
+                images: None,
+            })
+        }
         WorkKind::Data => messages::ResultPayload::Data(messages::DataResult {
             dataset_id: None,
             rows: None,
@@ -2411,15 +2418,17 @@ fn no_runner_result(
     kind: WorkKind,
 ) -> Vec<u8> {
     let payload = match kind {
-        WorkKind::Analysis => messages::ResultPayload::Analysis(messages::AnalysisResult {
-            results: json!({
-                "error": true,
-                "errorMessage": detail,
-                "title": "Analysis could not be completed",
-            }),
-            results_dir: None,
-            images: None,
-        }),
+        WorkKind::AnalysisRClassicJaspbase => {
+            messages::ResultPayload::AnalysisRClassicJaspbase(messages::AnalysisResult {
+                results: json!({
+                    "error": true,
+                    "errorMessage": detail,
+                    "title": "Analysis could not be completed",
+                }),
+                results_dir: None,
+                images: None,
+            })
+        }
         WorkKind::Data => messages::ResultPayload::Data(messages::DataResult {
             dataset_id: None,
             rows: None,
@@ -2607,11 +2616,12 @@ mod tests {
             revision,
             base_revision,
             dataset_ids: Vec::new(),
-            payload: WorkPayload::Analysis(AnalysisWork {
+            payload: WorkPayload::AnalysisRClassicJaspbase(AnalysisWork {
                 module: module.to_string(),
                 module_version: "0.1".to_string(),
                 analysis: "A".to_string(),
                 options: Value::Null,
+                preload_data: None,
                 settings: Settings {
                     ppi: 96,
                     num_decimals: 3,
@@ -2647,7 +2657,7 @@ mod tests {
         req.dial(control_url).unwrap();
         let reg = envelope(Message::Register(Register {
             runner_id: None,
-            capabilities: vec![Capability::Analysis {
+            capabilities: vec![Capability::AnalysisRClassicJaspbase {
                 name: module.to_string(),
                 version: "0.1".to_string(),
                 base_uri,
@@ -2747,7 +2757,7 @@ mod tests {
                 work_id: work_id.to_string(),
                 revision,
                 status: Status::Complete,
-                payload: ResultPayload::Analysis(AnalysisResult {
+                payload: ResultPayload::AnalysisRClassicJaspbase(AnalysisResult {
                     results: json!({"title": "ok"}),
                     results_dir: None,
                     images: None,
@@ -4014,11 +4024,12 @@ mod tests {
             revision: 0,
             base_revision: None,
             dataset_ids: vec![dataset_id.clone()],
-            payload: WorkPayload::Analysis(AnalysisWork {
+            payload: WorkPayload::AnalysisRClassicJaspbase(AnalysisWork {
                 module: "jaspTTests".to_string(),
                 module_version: "0.1".to_string(),
                 analysis: "A".to_string(),
                 options: Value::Null,
+                preload_data: None,
                 settings: Settings {
                     ppi: 96,
                     num_decimals: 3,
@@ -4065,11 +4076,12 @@ mod tests {
             revision: 0,
             base_revision: None,
             dataset_ids: vec!["ds-nope".to_string()],
-            payload: WorkPayload::Analysis(AnalysisWork {
+            payload: WorkPayload::AnalysisRClassicJaspbase(AnalysisWork {
                 module: "jaspTTests".to_string(),
                 module_version: "0.1".to_string(),
                 analysis: "A".to_string(),
                 options: Value::Null,
+                preload_data: None,
                 settings: Settings {
                     ppi: 96,
                     num_decimals: 3,

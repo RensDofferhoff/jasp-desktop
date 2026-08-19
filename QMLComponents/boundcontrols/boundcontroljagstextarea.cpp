@@ -18,7 +18,65 @@
 
 #include "boundcontroljagstextarea.h"
 #include "controls/textareabase.h"
-#include "columnencoder.h"
+#include "variableinfo.h"
+#include "stringutils.h"
+#include <algorithm>
+#include <cctype>
+#include <vector>
+
+namespace
+{
+	// R/JAGS identifier chars for token-boundary purposes (legacy encodeRScript: [\.A-Za-z0-9_]).
+	bool isRNameChar(char c)
+	{
+		return isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_';
+	}
+
+	// Free-token column-reference extraction — detection semantics of legacy
+	// ColumnEncoder::encodeRScript (columnencoder.cpp:440-507), NO rewriting: raw UTF-8 names
+	// cross the wire, the runner aliases (HANDOVER-runner-data-pruning.md §2.1/§3.7). Same
+	// helper as boundcontrolrlangtextarea.cpp (kept local to both to avoid a new shared
+	// header for this pass).
+	stringset findFreeColumnRefs(const std::string & text, stringvec names, std::vector<bool> & consumed)
+	{
+		stringset found;
+
+		std::vector<bool>	inString(text.size(), false);
+		bool				inside = false;
+		char				delim = 0;
+		for (size_t i = 0; i < text.size(); i++)
+		{
+			char c = text[i];
+			if (!inside && (c == '"' || c == '\''))	{ inside = true; delim = c; inString[i] = true; }
+			else if (inside)							{ inString[i] = true; if (c == delim) inside = false; }
+		}
+
+		std::sort(names.begin(), names.end(),
+			[](const std::string & l, const std::string & r) { return l.size() > r.size(); });
+
+		for (const std::string & name : names)
+		{
+			if (name.empty()) continue;
+			size_t pos = 0;
+			while ((pos = text.find(name, pos)) != std::string::npos)
+			{
+				size_t	end		= pos + name.size();
+				bool	freePos	= (pos == 0 || !isRNameChar(text[pos - 1])) &&
+								  (end >= text.size() || !isRNameChar(text[end])) &&
+								  !inString[pos] && !consumed[pos];
+				if (freePos)
+				{
+					found.insert(name);
+					for (size_t k = pos; k < end; k++) consumed[k] = true;
+					pos = end;
+				}
+				else
+					pos++;
+			}
+		}
+		return found;
+	}
+}
 
 void BoundControlJAGSTextArea::bindTo(const Json::Value &value)
 {
@@ -61,12 +119,22 @@ void BoundControlJAGSTextArea::checkSyntax()
 
 	// google: jags_user_manual (4.3.0) for documentation on JAGS symbols
 
-	// get the column names of the data set
+	// NEO (§3.7): extraction against the DataModel names, no encoding. Raw UTF-8 names cross
+	// the wire; the runner aliases them statelessly (§2.2) and rewrites the model text (§3.2).
 	_usedColumnNames.clear();
-	_textEncoded = tq(ColumnEncoder::columnEncoder()->encodeRScript(stringUtils::stripRComments(fq(text)), &_usedColumnNames));
+	std::string stripped = stringUtils::stripRComments(fq(text));
+
+	VariableInfoProvider * provider = VariableInfo::info() ? VariableInfo::info()->provider() : nullptr;
+	stringvec columnNames;
+	if (provider)
+		for (const QString & name : provider->provideInfo(VariableInfo::VariableNames).toStringList())
+			columnNames.push_back(fq(name));
+
+	std::vector<bool> consumed(stripped.size(), false);
+	_usedColumnNames = findFreeColumnRefs(stripped, columnNames, consumed);
 
 	QRegularExpression relationSymbol = QRegularExpression("<-|=|~");
-	QStringList textByLine = _textEncoded.split(QRegularExpression(";|\n"));
+	QStringList textByLine = tq(stripped).split(QRegularExpression(";|\n"));
 	_usedParameters.clear();
 
 	for (QString & line : textByLine)
@@ -89,7 +157,10 @@ void BoundControlJAGSTextArea::checkSyntax()
 			if (paramName.contains("["))
                 paramName = paramName.left(paramName.indexOf("["));
 
-			if (paramName != "" && !ColumnEncoder::columnEncoder()->shouldDecode(fq(paramName)))
+			// NEO: a parameter is an LHS name that is NOT a dataset column (legacy excluded
+			// encoded column tokens via shouldDecode; with raw names the exclusion is simply
+			// "is it a referenced column").
+			if (paramName != "" && _usedColumnNames.count(fq(paramName)) == 0)
 				_usedParameters.insert(paramName);
 
 		}
@@ -98,10 +169,10 @@ void BoundControlJAGSTextArea::checkSyntax()
 	Json::Value boundValue(Json::objectValue);
 
 	boundValue["modelOriginal"] = text.toStdString();
-	boundValue["model"] = _textEncoded.toStdString();
+	boundValue["model"] = stripped;		// raw text, comments stripped; the runner rewrites (§3.2)
 	Json::Value columns(Json::arrayValue);
 	for (const std::string& column : _usedColumnNames)
-		columns.append(ColumnEncoder::columnEncoder()->encode(column));
+		columns.append(column);		// raw names; the runner aliases (§3.7)
 	boundValue["columns"] = columns;
 	Json::Value parameters(Json::arrayValue);
 	for (const QString& parameter : _usedParameters)

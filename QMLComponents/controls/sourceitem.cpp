@@ -579,12 +579,12 @@ Terms SourceItem::_readAllTerms()
 	}
 	else if (_isDataSetVariables)
 	{
-		QStringList variableNames = requestInfo(VariableInfo::VariableNames).toStringList();
-		for (const QString& name : variableNames)
-		{
-			Term term(name, columnType(requestInfo(VariableInfo::VariableType, name).toInt()));
-			terms.add(term);
-		}
+		// Wide-data fast path (2026-08-16): the provider caches the dataset's Terms (rebuilt
+		// only when the columns change) — one request + one copy instead of k+1 per-name
+		// requestInfo roundtrips plus k Terms::add map inserts per pass (supersedes the
+		// O(k)-lookups note from 2026-08-15; HANDOVER-runner-data-pruning.md §9 bulk API).
+		terms.add(requestInfo(VariableInfo::DataSetTerms).value<Terms>());
+
 		if (!_sourceFilter.empty())
 			// If the 'use' parameter of the source property asks for the levels, or to filter some types
 			// of the variables of this 'native' model (probably the columnsModel),

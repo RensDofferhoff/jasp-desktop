@@ -19,9 +19,70 @@
 #include "boundcontrolrlangtextarea.h"
 #include "controls/textareabase.h"
 #include "log.h"
-#include "columnencoder.h"
+#include "variableinfo.h"
+#include "stringutils.h"
 #include "analysisform.h"
 #include <QQuickTextDocument>
+#include <algorithm>
+#include <cctype>
+#include <vector>
+
+namespace
+{
+	// R identifier chars for token-boundary purposes (legacy encodeRScript: [\.A-Za-z0-9_]).
+	bool isRNameChar(char c)
+	{
+		return isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_';
+	}
+
+	// Free-token extraction with the DETECTION semantics of legacy
+	// ColumnEncoder::encodeRScript (columnencoder.cpp:440-507): a name matches only with a
+	// non-name char (or text edge) on both sides, occurrences inside string literals are
+	// skipped (escapes not considered, same as legacy), and longer names consume their
+	// ranges first so partial names cannot shadow them. Extraction only — NEO does NOT
+	// rewrite text in the frontend; aliasing happens in the runner
+	// (HANDOVER-runner-data-pruning.md §2.1/§3.2/§3.7). `consumed` marks ranges already
+	// claimed by an earlier (longer / prefixed) pass.
+	stringset findFreeColumnRefs(const std::string & text, stringvec names, std::vector<bool> & consumed)
+	{
+		stringset found;
+
+		std::vector<bool>	inString(text.size(), false);
+		bool				inside = false;
+		char				delim = 0;
+		for (size_t i = 0; i < text.size(); i++)
+		{
+			char c = text[i];
+			if (!inside && (c == '"' || c == '\''))	{ inside = true; delim = c; inString[i] = true; }
+			else if (inside)							{ inString[i] = true; if (c == delim) inside = false; }
+		}
+
+		std::sort(names.begin(), names.end(),
+			[](const std::string & l, const std::string & r) { return l.size() > r.size(); });
+
+		for (const std::string & name : names)
+		{
+			if (name.empty()) continue;
+			size_t pos = 0;
+			while ((pos = text.find(name, pos)) != std::string::npos)
+			{
+				size_t	end		= pos + name.size();
+				bool	freePos	= (pos == 0 || !isRNameChar(text[pos - 1])) &&
+								  (end >= text.size() || !isRNameChar(text[end])) &&
+								  !inString[pos] && !consumed[pos];
+				if (freePos)
+				{
+					found.insert(name);
+					for (size_t k = pos; k < end; k++) consumed[k] = true;
+					pos = end;
+				}
+				else
+					pos++;
+			}
+		}
+		return found;
+	}
+}
 
 BoundControlRlangTextArea::BoundControlRlangTextArea(TextAreaBase *textArea, RLangType type)
 	: BoundControlTextArea(textArea), _langType(type)
@@ -40,8 +101,6 @@ BoundControlRlangTextArea::BoundControlRlangTextArea(TextAreaBase *textArea, RLa
 
 void BoundControlRlangTextArea::bindTo(const Json::Value &value)
 {
-	_previouslyUsedTextEncoded	= "";
-	
 	if (value.type() != Json::objectValue)	return;
 	BoundControlBase::bindTo(value);
 
@@ -80,80 +139,58 @@ void BoundControlRlangTextArea::checkSyntax()
 {
 	QString text = _textArea->text();
 
-	// get the column names of the data set
+	// NEO (§3.7): EXTRACTION only, against the DataModel names — no encoding, no rewriting.
+	// Raw UTF-8 names cross the wire; the runner aliases them statelessly (§2.2) and rewrites
+	// the model text (§3.2 step 6).
+	_extractUsedColumnNames(stringUtils::stripRComments(fq(text)));
+
+	// Live syntax validation (legacy ran jaspSem:::checkLavaanModel / checkCSemModel /
+	// jaspMetaAnalysis::checkMetaModel here via runRScript, :207-216 of the old code) needs
+	// the reserved `module_call` kind (§6 — spec'd, not built in this pass; §7 model-
+	// exception debt). Until then validation happens at analysis run time: lavaan errors
+	// surface in the results. UX regression, not correctness.
+	_setBoundValues();
+}
+
+void BoundControlRlangTextArea::_extractUsedColumnNames(const std::string & text)
+{
 	_prefixedUsedColumnNames.clear();
-	_textEncoded = tq(ColumnEncoder::columnEncoder()->encodeRScript(stringUtils::stripRComments(fq(text)), _prefixedUsedColumnNames, _allowedVarPrefixes));
+	_noPrefixUsedColumnNames.clear();
 
-	if(_prefixedUsedColumnNames.find("") != _prefixedUsedColumnNames.end()) 
+	VariableInfoProvider * provider = VariableInfo::info() ? VariableInfo::info()->provider() : nullptr;
+	if (!provider)
 	{
-		_noPrefixUsedColumnNames = stringset(_prefixedUsedColumnNames[""]);
-		_prefixedUsedColumnNames.erase(_prefixedUsedColumnNames.find("")); //just for clarity remove the noPrefix "" items
-	}
-	else
-		Log::log() << "Warning: no non prefixed entries returned from column encoder?";
-
-
-	if (!_textArea->initialized() || _langType == RLangType::RCode)
-	{
-		// Do not run the engine to check the script if the control in not yet initialized
-		_setBoundValues();
+		Log::log() << "BoundControlRlangTextArea: no variable-info provider, skipping column extraction" << std::endl;
 		return;
 	}
 
-	// Create R code string
-	QString encodedColNames = "c(";
-	bool firstCol = true;
+	stringvec columnNames;
+	for (const QString & name : provider->provideInfo(VariableInfo::VariableNames).toStringList())
+		columnNames.push_back(fq(name));
+	if (columnNames.empty()) return;
 
-	for (const std::string& column : _noPrefixUsedColumnNames)
+	std::vector<bool> consumed(text.size(), false);
+
+	// Prefixed references first (legacy allowedVarPrefixes, e.g. "data." for JAGS-flavoured
+	// syntax): "prefix + name" with a free boundary on both sides; longest prefixes first so
+	// shorter ones cannot shadow them.
+	stringvec prefixes(_allowedVarPrefixes.begin(), _allowedVarPrefixes.end());
+	std::sort(prefixes.begin(), prefixes.end(),
+		[](const std::string & l, const std::string & r) { return l.size() > r.size(); });
+	for (const std::string & prefix : prefixes)
 	{
-		if (!firstCol) encodedColNames.append(", ");
-		encodedColNames.append("'" + tq(ColumnEncoder::columnEncoder()->encode(column)) + "'");
-		firstCol = false;
+		if (prefix.empty()) continue;
+		stringvec prefixedNames;
+		for (const std::string & name : columnNames) prefixedNames.push_back(prefix + name);
+		stringset hits = findFreeColumnRefs(text, prefixedNames, consumed);
+		if (hits.empty()) continue;
+		stringset cols;
+		for (const std::string & hit : hits) cols.insert(hit.substr(prefix.size()));
+		_prefixedUsedColumnNames[prefix] = cols;
 	}
 
-	for(auto& prefixSet : _prefixedUsedColumnNames)
-		for (const std::string& column : prefixSet.second)
-		{
-			if (!firstCol) encodedColNames.append(", ");
-			encodedColNames.append("'" + tq(prefixSet.first) + tq(ColumnEncoder::columnEncoder()->encode(column)) + "'");
-			firstCol = false;
-		}
-
-	if (_langType == RLangType::MetaSem)
-	{
-		stringset sourceVariables;
-		Terms sourceColumns = _textArea->model()->getSourceTerms();
-		QString separator = _textArea->variableSeparator();
-
-		for (const Term& term : sourceColumns)
-		{
-			QStringList variables = term.label().split(separator);
-			for (const QString& variable : variables)
-				sourceVariables.insert(fq(variable));
-		}
-
-		for (const std::string& variable : sourceVariables)
-		{
-			if (!firstCol) encodedColNames.append(", ");
-			encodedColNames.append("'" + variable + "'");
-			firstCol = false;
-		}
-	}
-
-	encodedColNames.append(")");
-
-	if(_textEncoded.length() > 0) {
-		QString checkCode = QString("%1('%2', %3)")
-			.arg(tq(_checkSyntaxRFunctionName()))
-			.arg(_textEncoded)
-			.arg(encodedColNames);
-		
-		if(_previouslyUsedTextEncoded != checkCode)
-			_textArea->runRScript(checkCode, false);
-		
-		_previouslyUsedTextEncoded = checkCode;
-	}
-
+	// Unprefixed references on the remaining text.
+	_noPrefixUsedColumnNames = findFreeColumnRefs(text, columnNames, consumed);
 }
 
 QString BoundControlRlangTextArea::rScriptDoneHandler(const QString & result)
@@ -171,8 +208,12 @@ void BoundControlRlangTextArea::_setBoundValues(bool setModel)
 
 	std::string text = _textArea->text().toStdString();
 
+	// NEO (§3.7): the wire carries RAW text in both twins. `model` stays — modules consume
+	// options$model (legacy: the frontend pre-encoded it; NEO: the runner rewrites it in
+	// place with aliases, §3.2 step 6). `columns`/`prefixedColumns` carry raw names too;
+	// the runner aliases them per the parallel types (§3.7 dispositions).
 	boundValue["modelOriginal"] = text;
-	boundValue["model"]			= _textEncoded.toStdString();
+	boundValue["model"]			= text;
 
 	Json::Value columns(Json::arrayValue),
 				value(Json::arrayValue);
@@ -181,7 +222,7 @@ void BoundControlRlangTextArea::_setBoundValues(bool setModel)
 	for (const std::string& column : _noPrefixUsedColumnNames)
 	{
 		terms.add(Term(column, _textArea->getVariableType(tq(column))));
-		columns.append(ColumnEncoder::columnEncoder()->encode(column));
+		columns.append(column);
 		value.append(column);
 	}
 
@@ -196,7 +237,7 @@ void BoundControlRlangTextArea::_setBoundValues(bool setModel)
 	for(auto& prefixSet : _prefixedUsedColumnNames) {
 		prefixedColumns[prefixSet.first] = Json::Value(Json::arrayValue);
 		for (const std::string& column : prefixSet.second) {
-			prefixedColumns[prefixSet.first].append(ColumnEncoder::columnEncoder()->encode(column));
+			prefixedColumns[prefixSet.first].append(column);
 		}
 	}
 	boundValue["prefixedColumns"] = prefixedColumns;

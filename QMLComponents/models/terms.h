@@ -24,6 +24,7 @@
 
 #include <QString>
 #include <QList>
+#include <QMetaType>
 
 #include "term.h"
 #include "controls/jaspcontrol.h"
@@ -137,5 +138,9 @@ private:
 	std::map<QString, int>	_valueMap;
 
 };
+
+// The VariableInfo provider hands the cached dataset Terms through a QVariant (wide-data
+// fast path, 2026-08-16) — QVariant needs the metatype declaration for that.
+Q_DECLARE_METATYPE(Terms)
 
 #endif // TERMS_H

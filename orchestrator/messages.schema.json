@@ -18,7 +18,7 @@
             "kind": {
               "type": "string",
               "enum": [
-                "analysis"
+                "analysis_r_classic_jaspbase"
               ]
             },
             "payload": {
@@ -116,7 +116,7 @@
             "kind": {
               "type": "string",
               "enum": [
-                "analysis"
+                "analysis_r_classic_jaspbase"
               ]
             },
             "payload": {
@@ -574,7 +574,7 @@
   },
   "definitions": {
     "AnalysisResult": {
-      "description": "The `kind:\"analysis\"` result payload (§19.2).",
+      "description": "The `kind:\"analysis_r_classic_jaspbase\"` result payload (§19.2).",
       "type": "object",
       "required": [
         "results"
@@ -624,6 +624,13 @@
         "options": {
           "description": "Opaque analysis options — the orchestrator never interprets them."
         },
+        "preloadData": {
+          "description": "Preload the used columns before the run (from the module's `AnalysisEntry`; missing -> true, compat). Opaque to the orchestrator — the R runner uses it to choose between a pruned aliased preload frame and lazy on-demand reads (HANDOVER-runner-data-pruning.md §3.1).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "settings": {
           "$ref": "#/definitions/Settings"
         }
@@ -650,7 +657,7 @@
             "kind": {
               "type": "string",
               "enum": [
-                "analysis"
+                "analysis_r_classic_jaspbase"
               ]
             },
             "name": {

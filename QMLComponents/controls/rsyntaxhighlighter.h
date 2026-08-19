@@ -48,10 +48,11 @@ public:
 	
 	
 protected slots:
-	void		handleNamesChanged(QMap<QString, QString> changedNames)	{ rehighlight(); }
+	void		handleNamesChanged(QMap<QString, QString> changedNames)	{ _columnsRuleDirty = true; rehighlight(); }
 	void		handleRowCountChanged()									{ rehighlight(); }
 
 private:
+	void					rebuildColumnsRule();
 
 	
 	QTextDocument			*	_textDocument = nullptr;
@@ -67,6 +68,13 @@ private:
 								_numberFormat,
 								_columnFormat;
 	HighlightingRule			_commentRule;
+
+	// Column names as ONE combined regex, rebuilt only when the dataset's column names change
+	// (wide-data fix, 2026-08-15): highlightBlock previously compiled and ran one
+	// QRegularExpression PER COLUMN NAME PER BLOCK — 10k columns meant 10k compilations and
+	// matches per highlight pass, freezing the UI on every text-binding update.
+	QRegularExpression			_columnsRule;
+	bool						_columnsRuleDirty = true;
 };
 
 class RSyntaxHighlighterQuick : public QQuickItem

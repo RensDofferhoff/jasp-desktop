@@ -185,77 +185,692 @@ send_activity <- function(sock) {
 # globals reassigned before each run (the work unit is invariant — it carries its own ppi).
 
 .state <- new.env(parent = emptyenv())
-.state$dataset     <- NULL          # current work's data.frame
+.state$dataset     <- NULL          # current work's preloaded aliased frame (preloadData=true)
 .state$outputDir   <- tempdir()     # current work's scratchpad (== work$output_dir)
 .state$tempCounter <- 0L
+# Pruning/encoding state (HANDOVER-runner-data-pruning.md §3.2), reset at every work start:
+.state$dataPath    <- NULL                     # absolute Feather path (orchestrator-injected)
+.state$schema      <- NULL                     # arrow Schema object (lazy type source)
+.state$schemaNames <- character(0)             # eager (one vectorized call), full width — names only
+.state$schemaIdx   <- new.env(parent = emptyenv())  # name -> 0-based field index (O(1) type lookup)
+.state$typeCache   <- new.env(parent = emptyenv())  # name -> type, resolved on first use
+.state$aliasCache  <- new.env(parent = emptyenv())  # name -> schema-type alias, on demand
+.state$cols        <- new.env(parent = emptyenv())  # per-work source-vector cache, raw name -> vector
 
-# Derive a read_jasp_data() columns_spec from an Arrow schema: dictionary-encoded columns are
-# categorical (ordinal iff the Arrow `ordered` flag is set), everything else is scale. Mirrors the
-# §8.3 type map. No type GUESSING — Arrow carries the real types, so the old character->factor
-# `.typeDataset` coercion is gone. (The full design gets the schema from the orchestrator's
-# `dataset_ready`, §19.2; the alpha reads it off the Feather file.)
-.spec_from_schema <- function(sch) {
-  lapply(sch$names, function(nm) {
-    typ <- sch$GetFieldByName(nm)$type
-    list(name = nm,
-         as   = if (inherits(typ, "DictionaryType")) {
-                  if (isTRUE(typ$ordered)) "ordinal" else "nominal"
-                } else "scale")
-  })
+# Schema-only read — FOOTER ONLY, zero data materialized.
+# NB: arrow::read_feather(path, as_data_frame = FALSE)$schema is a trap: it materializes the
+# ENTIRE file in C++ memory first just to expose $schema (measured 2026-08-15: a 94 MB
+# feather took RSS from 110 MB to 1.74 GB; on terror_tall that is ~2 GB of pure waste per
+# work — the "2.2 GB base" mystery). RecordBatchFileReader opens the IPC/Feather container
+# and exposes the schema without touching batches (+9 MB measured).
+read_feather_schema <- function(path) {
+  rf <- arrow::ReadableFile$create(path)
+  on.exit(try(rf$close(), silent = TRUE))
+  arrow::RecordBatchFileReader$create(rf)$schema
 }
 
-# Unwrap the frontend's option form into what an analysis expects. boundValues() sends variable
-# options as {value, types} objects plus a top-level `.meta` (shouldEncode flags); the old C++
-# ColumnEncoder unwrapped these and encoded column names before R ever saw them. The runner has
-# no C++ encoder, so we unwrap here. Column-name ENCODING is the identity for simple names
-# (the alpha's x/y/group); real datasets with special-char names need encodeColNames later (TODO).
-.processOptions <- function(options) {
-  for (nm in setdiff(names(options), ".meta")) {
-    opt <- options[[nm]]
-    if (is.list(opt) && !is.null(opt[["value"]]))
-      options[[nm]] <- opt[["value"]]
+# ── lazy schema access (wide-file fix, 2026-08-15) ────────────────────────────
+# Types are resolved O(used), not O(all): work start extracts only the NAMES (one
+# vectorized call) plus a name->index map (list2env, C speed). A type is extracted on
+# first use via Schema$field(i) — O(1) direct index — and cached. GetFieldByName is
+# NEVER used: it linear-scans the field list per call (O(k) each, O(k^2) over all
+# columns; measured 5.7 s at 10k columns). all.columns/header paths legitimately touch
+# all types but pay O(k) once, not O(k^2).
+schema_type_of <- function(nm) {
+  if (!is.character(nm) || length(nm) != 1L || !nzchar(nm)) return(NULL)
+  ty <- .state$typeCache[[nm]]
+  if (!is.null(ty)) return(ty)
+  i <- .state$schemaIdx[[nm]]
+  if (is.null(i)) return(NULL)
+  typ <- .state$schema$field(i)$type          # 0-based index (verified)
+  ty <- if (inherits(typ, "DictionaryType")) {
+          if (isTRUE(typ$ordered)) "ordinal" else "nominal"
+        } else "scale"
+  assign(nm, ty, envir = .state$typeCache)
+  ty
+}
+
+schema_all_types <- function() {
+  nms <- .state$schemaNames
+  tys <- vapply(seq_along(nms), function(i) {
+    typ <- .state$schema$field(i - 1L)$type
+    if (inherits(typ, "DictionaryType")) {
+      if (isTRUE(typ$ordered)) "ordinal" else "nominal"
+    } else "scale"
+  }, character(1L), USE.NAMES = FALSE)
+  names(tys) <- nms
+  for (i in seq_along(nms)) if (is.null(.state$typeCache[[nms[i]]]))
+    assign(nms[i], tys[i], envir = .state$typeCache)
+  tys
+}
+
+# Lazy schema-type alias for a name (alias_map of old, but only for names ever asked).
+schema_alias_of <- function(nm) {
+  if (!is.character(nm) || length(nm) != 1L || !nzchar(nm)) return(NULL)
+  a <- .state$aliasCache[[nm]]
+  if (!is.null(a)) return(a)
+  ty <- schema_type_of(nm)
+  if (is.null(ty)) return(NULL)
+  a <- alias_encode(nm, ty)
+  assign(nm, a, envir = .state$aliasCache)
+  a
+}
+
+# ── stateless column-name aliases (HANDOVER-runner-data-pruning.md §2.2) ─────
+#
+# Everything inside R sees aliases; raw UTF-8 names live only outside (lane, wire,
+# frontend, logs). Pure stateless functions — encode/decode ARE the scheme: no map,
+# no counter, no per-dataset state, decodable in isolation from any artifact.
+# decode NEVER throws (legacy's strict-throw killed real analyses, jasp-issues #3495).
+#
+#   alias = "jasp_enc_hex_" + lowercase-hex(utf8(name)) + "_" + type
+#
+# The prefix is distinctive, greppable, and SELF-DESCRIBING: the codec segment ("hex") says
+# how the payload decodes — a future codec swap mints "jasp_enc_b32_" aliases that this
+# decoder simply treats as non-aliases (starts_with fails -> pass-through, never throws).
+# Hex keeps aliases ASCII, identifier-safe by
+# construction, and decodable with base R in any future runtime. The type suffix is
+# ALWAYS present — single- and dual-role columns have identical shape, nothing
+# special-cases.
+
+ALIAS_PREFIX <- "jasp_enc_hex_"
+ALIAS_TYPES  <- c("scale", "ordinal", "nominal")
+
+# Scalar. name: single UTF-8 string; type: one of ALIAS_TYPES.
+alias_encode <- function(name, type) {
+  stopifnot(is.character(name), length(name) == 1L, type %in% ALIAS_TYPES)
+  bytes <- charToRaw(enc2utf8(name))
+  paste0(ALIAS_PREFIX, paste0(as.character(bytes), collapse = ""), "_", type)
+}
+
+# Scalar -> list(name, type) or NULL. Never throws; malformed -> NULL.
+alias_decode <- function(alias) {
+  if (!is.character(alias) || length(alias) != 1L || is.na(alias)) return(NULL)
+  if (!startsWith(alias, ALIAS_PREFIX)) return(NULL)
+  parts <- strsplit(substring(alias, nchar(ALIAS_PREFIX) + 1L), "_", fixed = TRUE)[[1L]]
+  if (length(parts) != 2L || !(parts[2L] %in% ALIAS_TYPES)) return(NULL)
+  hex <- parts[1L]
+  if (!grepl("^([0-9a-f]{2})+$", hex)) return(NULL)
+  bytes <- as.raw(strtoi(substring(hex, seq.int(1L, nchar(hex), 2L),
+                                        seq.int(2L, nchar(hex), 2L)), 16L))
+  name <- rawToChar(bytes)
+  Encoding(name) <- "UTF-8"
+  if (!validUTF8(name)) return(NULL)
+  list(name = name, type = parts[2L])
+}
+
+# Vectorised strict helpers. Non-aliases / unknowns pass through UNCHANGED (a module may
+# legitimately pass raw names; the natives serve those too).
+alias_decode_names <- function(x) {
+  if (is.null(x)) return(NULL)
+  vapply(unname(as.character(x)), function(a) {
+    d <- alias_decode(a); if (is.null(d)) a else d$name
+  }, character(1L), USE.NAMES = FALSE)
+}
+
+# Strict display decode (§2.2): schema-gated, never throws. `schema` may be a named type
+# vector (fixtures) or a plain names vector (runner).
+alias_decode_strict <- function(x, schema) {
+  schema_names <- if (!is.null(names(schema))) names(schema) else schema
+  if (!is.character(x) || length(x) != 1L || is.na(x)) return(x)
+  d <- alias_decode(x)
+  if (is.null(d) || !(d$name %in% schema_names)) return(x)
+  d$name
+}
+
+# Lax display decode (§2.2): single pass over free text; at each "jasp_enc_hex_" with an
+# identifier boundary before it (no [A-Za-z0-9._] immediately preceding — the prefix
+# contains "_", so a naive substring scan would match inside longer identifiers):
+# greedy-match identifier chars, trim one char at a time until (decode succeeds AND name
+# is a schema column); substitute; NEVER rescan substituted output (no chaining).
+alias_decode_lax <- function(text, schema) {
+  schema_names <- if (!is.null(names(schema))) names(schema) else schema
+  if (!is.character(text) || length(text) != 1L || is.na(text)) return(text)
+  if (!grepl(ALIAS_PREFIX, text, fixed = TRUE)) return(text)
+  is_name_char <- function(ch) grepl("[A-Za-z0-9._]", ch)
+  n <- nchar(text); plen <- nchar(ALIAS_PREFIX)
+  chunks <- character(0); i <- 1L
+  while (i <= n) {
+    if (i + plen - 1L <= n && substr(text, i, i + plen - 1L) == ALIAS_PREFIX &&
+        (i == 1L || !is_name_char(substr(text, i - 1L, i - 1L)))) {
+      j <- i + plen
+      while (j <= n && is_name_char(substr(text, j, j))) j <- j + 1L
+      end <- j - 1L
+      replaced <- FALSE
+      while (end >= i + plen) {
+        d <- alias_decode(substr(text, i, end))
+        if (!is.null(d) && d$name %in% schema_names) {
+          chunks <- c(chunks, d$name)
+          i <- end + 1L
+          replaced <- TRUE
+          break
+        }
+        end <- end - 1L
+      }
+      if (replaced) next
+    }
+    chunks <- c(chunks, substr(text, i, i))
+    i <- i + 1L
   }
-  options[[".meta"]] <- NULL
-  options
+  paste0(chunks, collapse = "")
 }
 
-# Full dataset, typed. Called by runJaspResults when preloadData=TRUE (the engine path for
-# jaspTTests). Also the fallback for any analysis that reads the whole frame. The frame is already
-# correctly typed by read_jasp_data() (Arrow dictionaries -> factors, float64 -> numeric), so it is
-# returned as-is.
+# Successor of the engine's decodeJsonSafeHtml: lax-decode every string (and object KEY,
+# legacy replaceAll renamed keys too) in a parsed JSON tree. .state$schemaNames is the gate.
+# NOTE: JSON nulls arrive as R NULLs; `node[[i]] <- NULL` would DELETE the element (shrinking
+# the list mid-iteration -> subscript out of bounds), so NULL members are skipped untouched
+# (jaspBase tables always carry them: footnotes' cols/rows).
+lax_decode_tree <- function(node) {
+  if (is.character(node))
+    return(vapply(node, function(s) alias_decode_lax(s, .state$schemaNames),
+                  character(1L), USE.NAMES = FALSE))
+  if (is.list(node)) {
+    if (!is.null(names(node)))
+      names(node) <- vapply(names(node),
+                            function(s) alias_decode_lax(s, .state$schemaNames),
+                            character(1L), USE.NAMES = FALSE)
+    for (i in seq_along(node))
+      if (!is.null(node[[i]])) node[[i]] <- lax_decode_tree(node[[i]])
+  }
+  node
+}
+
+# ── rewrite_syntax: raw schema names -> aliases inside R-code text (§3.2 step 6) ──
+#
+# Engine modeled 1:1 on legacy ColumnEncoder::encodeRScript (columnencoder.cpp:440-507):
+#   * name chars [A-Za-z0-9._]; a match needs a non-name char (or text edge) BEFORE and
+#     AFTER — so a column "E" never shreds the identifier TRUE;
+#   * occurrences inside string literals ('…' / "…") are skipped (escapes not considered,
+#     same as legacy);
+#   * a name followed by optional whitespace + "(" is a FUNCTION call -> left alone
+#     (legacy's guard for columns named like `rep` or `if`);
+#   * longest names first, so partial names don't shred longer ones;
+#   * substituted aliases cannot rematch: every alias char is a name char, so any raw name
+#     landing inside an inserted alias fails the boundary test.
+
+.substitute_free_occurrences <- function(text, nm, alias_of) {
+  n <- nchar(text); m <- nchar(nm)
+  if (m == 0L || n < m) return(text)
+  is_name_char <- function(ch) grepl("[A-Za-z0-9._]", ch)
+  starts <- gregexpr(nm, text, fixed = TRUE)[[1L]]
+  if (starts[1L] == -1L) return(text)
+  # string-literal mask (legacy ignores escape chars too)
+  chars <- strsplit(text, "")[[1L]]
+  in_str <- logical(n); inside <- FALSE; delim <- ""
+  for (k in seq_len(n)) {
+    ch <- chars[k]
+    if (!inside && (ch == "\"" || ch == "'")) { inside <- TRUE; delim <- ch; in_str[k] <- TRUE }
+    else if (inside) { in_str[k] <- TRUE; if (ch == delim) inside <- FALSE }
+  }
+  hits <- integer(0)
+  for (s in as.integer(starts)) {
+    e <- s + m - 1L
+    if (in_str[s]) next
+    start_free <- s == 1L || !is_name_char(substr(text, s - 1L, s - 1L))
+    end_free <- TRUE
+    if (e < n) {
+      nxt <- substr(text, e + 1L, e + 1L)
+      if (is_name_char(nxt)) end_free <- FALSE
+      else {
+        k <- e + 1L   # function-call guard: whitespace* + "(" after the name
+        while (k <= n && substr(text, k, k) %in% c(" ", "\t", "\n")) k <- k + 1L
+        if (k <= n && substr(text, k, k) == "(") end_free <- FALSE
+      }
+    }
+    if (start_free && end_free) hits <- c(hits, s)
+  }
+  if (!length(hits)) return(text)
+  al <- alias_of(nm)   # lazy: only names with a FREE occurrence pay for aliasing
+  if (is.null(al)) return(text)
+  out <- character(0); pos <- 1L
+  for (s in hits) {
+    e <- s + m - 1L
+    out <- c(out, substr(text, pos, s - 1L), al)
+    pos <- e + 1L
+  }
+  out <- c(out, substr(text, pos, n))
+  paste0(out, collapse = "")
+}
+
+# Dual mode: rewrite_syntax(text, alias_map named vector) [fixtures] or
+# rewrite_syntax(text, schema_names, alias_of resolver) [runner]. Names are scanned
+# longest-first; alias_of is called ONLY for names that actually occur free in the text,
+# so wide schemas cost a C-speed name scan, not k alias constructions.
+rewrite_syntax <- function(text, schema_names, alias_of = NULL) {
+  if (!is.character(text) || length(text) != 1L || is.na(text) || !nzchar(text)) return(text)
+  if (is.null(alias_of)) {
+    am <- schema_names
+    if (length(am) == 0L) return(text)
+    schema_names <- names(am)
+    alias_of <- function(nm) {
+      i <- match(nm, names(am))
+      if (is.na(i)) NULL else unname(am[i])
+    }
+  }
+  if (length(schema_names) == 0L) return(text)
+  for (nm in schema_names[order(nchar(schema_names), decreasing = TRUE)])
+    text <- .substitute_free_occurrences(text, nm, alias_of)
+  text
+}
+
+# ── the options walk (§3.2 steps 1-2) ─────────────────────────────────────────
+#
+# One recursion over the catalog, mirrored 1:1 from legacy columnencoder.cpp
+# (_addTypeToColumnNamesInOptionsRecursively :784-826, _convertPreloadingDataOption
+# :673-782, meta-driven pass :843-897). Input: the wire options (jsonlite list,
+# simplifyVector=FALSE) incl. `.meta`; the schema name->type map. Output:
+#   options  — rewritten: variable slots -> alias of the pair THAT SLOT asked for;
+#              `<key>.types` siblings ALWAYS emitted (readDataSetByVariableTypes
+#              hard-errors without them, common.R:320-329); model text rewritten;
+#              `.meta` dropped (modules never saw it).
+#   pairs    — data.frame(name, type), unique, first-appearance order.
+
+walk_and_rewrite_options <- function(options, schema_types) {
+  # schema_types: EAGER named vector name->type (fixtures) OR LAZY accessor
+  # list(names, idx, type_of) (runner). The walk only needs membership, per-name types, and
+  # schema-type aliases — the lazy shape keeps wide-file work starts O(used), not O(all).
+  is_obj <- function(x) is.list(x) && !is.null(names(x))
+  if (is.character(schema_types)) {
+    nms <- names(schema_types)
+    idx <- list2env(as.list(setNames(seq_along(nms), nms)), parent = emptyenv())
+    type_of <- function(nm) {
+      t <- schema_types[nm]              # [ ] not [[ ]]: missing name -> NA, not an error
+      if (length(t) == 1L && !is.na(t)) unname(t) else NULL
+    }
+  } else {
+    nms <- schema_types$names; idx <- schema_types$idx; type_of <- schema_types$type_of
+  }
+  has_col <- function(nm)
+    is.character(nm) && length(nm) == 1L && nzchar(nm) && !is.null(idx[[nm]])
+  alias_env <- new.env(parent = emptyenv())
+  alias_of <- function(nm) {             # alias under the SCHEMA type, resolved on demand
+    a <- alias_env[[nm]]
+    if (!is.null(a)) return(a)
+    ty <- type_of(nm)
+    if (is.null(ty)) return(NULL)
+    a <- alias_encode(nm, ty)
+    assign(nm, a, envir = alias_env)
+    a
+  }
+
+  pair_aliases <- character(0)          # aliases are injective -> dedup keys, order kept
+  pair_seen <- new.env(parent = emptyenv())
+  add_pair <- function(name, type) {
+    if (!is.character(name) || length(name) != 1L || !nzchar(name)) return()
+    if (!(type %in% ALIAS_TYPES)) return()
+    a <- alias_encode(name, type)
+    if (is.null(pair_seen[[a]])) { pair_seen[[a]] <- TRUE; pair_aliases <<- c(pair_aliases, a) }
+  }
+
+  # types entry -> usable type string ("" = none). Scalar broadcasts; arrays index (legacy
+  # :716/:750). "unknown"/invalid -> schema fallback (:720-724); still none -> "".
+  type_for <- function(t_entry, j) {
+    t <- ""
+    if (is.character(t_entry)) {
+      t <- if (length(t_entry) == 1L) t_entry
+           else if (length(t_entry) >= j) t_entry[j] else ""
+    } else if (is.list(t_entry)) {
+      t <- if (length(t_entry) >= j && is.character(t_entry[[j]]) && length(t_entry[[j]]) == 1L)
+             t_entry[[j]] else ""
+    }
+    if (length(t) == 1L && t %in% ALIAS_TYPES) return(t)
+    ""
+  }
+  rewrite_name <- function(name, t_entry, j) {
+    if (!is.character(name) || length(name) != 1L || !nzchar(name)) return(name)
+    ty <- type_for(t_entry, j)
+    if (!nzchar(ty)) {
+      sty <- type_of(name)
+      ty <- if (is.null(sty)) "" else sty
+    }
+    if (!nzchar(ty)) return(name)       # typeless: passes through (legacy)
+    add_pair(name, ty)
+    alias_encode(name, ty)
+  }
+
+  # One {value, types, ...} node -> rewritten node (legacy _convertPreloadingDataOption).
+  convert_variable_node <- function(node) {
+    option_key <- node[["optionKey"]]
+    option_key <- if (is.character(option_key) && length(option_key) == 1L) option_key else ""
+    keep_original <- nzchar(option_key) && length(node) > 3L   # SEM model-node shape
+
+    value_list <- node[["value"]]
+    type_list  <- node[["types"]]
+    single_value <- is.character(value_list)
+    if (single_value) value_list <- as.list(value_list)
+    if (is.character(type_list)) type_list <- as.list(type_list)
+    if (!is.list(value_list)) return(node)      # unrecognised shape: leave alone
+    if (!is.list(type_list)) type_list <- list()
+
+    # one element: string (variable) or string array (interaction); for optionKey rows the
+    # name lives under the row's option_key member (itself string or interaction array).
+    # t_entry is the element's OWN types entry (type_list[[i]] — legacy :710); a scalar
+    # type broadcasts over interaction components, an array indexes per component (:750).
+    type_at <- function(i) if (length(type_list) >= i) type_list[[i]] else NULL
+    rewrite_elem <- function(v, t_entry) {
+      if (is.character(v) && length(v) == 1L)
+        return(rewrite_name(v, t_entry, 1L))
+      if (is.list(v) && length(v) > 0L &&
+          all(vapply(v, function(x) is.character(x) && length(x) == 1L, logical(1L))))
+        return(lapply(seq_along(v), function(j) rewrite_name(v[[j]], t_entry, j)))
+      v
+    }
+
+    if (keep_original) {
+      new_node <- node
+      new_vals <- lapply(seq_along(value_list), function(i)
+        rewrite_elem(value_list[[i]], type_at(i)))
+      new_node[[option_key]] <- new_vals
+      # Model-node dispositions (§3.7): model rewritten in place; columns aliased per the
+      # parallel types; prefixedColumns aliased by SCHEMA type; modelOriginal untouched.
+      if (is.character(node[["modelOriginal"]])) {
+        if (is.character(new_node[["model"]]) && length(new_node[["model"]]) == 1L)
+          new_node[["model"]] <- rewrite_syntax(new_node[["model"]], nms, alias_of)
+        cols <- new_node[["columns"]]
+        if (is.list(cols)) {
+          for (k in seq_along(cols)) {
+            cn <- cols[[k]]
+            if (is.character(cn) && length(cn) == 1L && has_col(cn)) {
+              ty <- type_for(if (length(type_list) >= k) type_list[[k]] else NULL, 1L)
+              if (!nzchar(ty)) ty <- type_of(cn)
+              add_pair(cn, ty)
+              cols[[k]] <- alias_encode(cn, ty)
+            }
+          }
+          new_node[["columns"]] <- cols
+        }
+        pc <- new_node[["prefixedColumns"]]
+        if (is_obj(pc)) {
+          for (pfx in names(pc)) {
+            entries <- pc[[pfx]]
+            if (is.list(entries)) {
+              for (k in seq_along(entries)) {
+                cn <- entries[[k]]
+                if (is.character(cn) && length(cn) == 1L && has_col(cn)) {
+                  add_pair(cn, type_of(cn))
+                  entries[[k]] <- alias_of(cn)
+                }
+              }
+              pc[[pfx]] <- entries
+            }
+          }
+          new_node[["prefixedColumns"]] <- pc
+        }
+      }
+      return(new_node)
+    }
+
+    if (nzchar(option_key)) {
+      # rowComponent objects: rewrite the name under option_key, keep sibling members
+      return(lapply(seq_along(value_list), function(i) {
+        elem <- value_list[[i]]
+        if (is_obj(elem) && !is.null(elem[[option_key]])) {
+          elem[[option_key]] <- rewrite_elem(elem[[option_key]], type_at(i))
+          elem
+        } else rewrite_elem(elem, type_at(i))
+      }))
+    }
+
+    new_vals <- lapply(seq_along(value_list), function(i)
+      rewrite_elem(value_list[[i]], type_at(i)))
+    if (single_value && length(new_vals) == 1L && !is.list(new_vals[[1L]])) new_vals[[1L]]
+    else new_vals
+  }
+
+  # Structural walk: convert variable nodes, emit .types siblings, collect bare strings
+  # (== schema column -> pair at schema type; rewrite is the meta pass's job — legacy).
+  walk_object <- function(obj) {
+    extras <- list()
+    for (i in seq_along(obj)) {
+      member <- obj[[i]]
+      if (is_obj(member) && !is.null(member[["value"]]) && !is.null(member[["types"]])) {
+        extras[[paste0(names(obj)[i], ".types")]] <- member[["types"]]   # ALWAYS (legacy :780/:796)
+        obj[[i]] <- convert_variable_node(member)
+      } else {
+        obj[[i]] <- walk_any(member)
+      }
+    }
+    for (nm in names(extras)) obj[[nm]] <- extras[[nm]]
+    obj
+  }
+  walk_any <- function(x) {
+    if (is_obj(x)) return(walk_object(x))
+    if (is.list(x)) return(lapply(x, walk_any))
+    if (is.character(x) && length(x) == 1L && has_col(x))
+      add_pair(x, type_of(x))
+    x
+  }
+
+  # Meta-driven rewrite (legacy _encodeColumnNamesinOptions :843-897): walk options and
+  # .meta in parallel (object members by name; array+array per-index; object meta over an
+  # array broadcasts). shouldEncode -> strict replacement of schema-column strings by
+  # alias(name, SCHEMA type); isRCode -> rewrite_syntax. `.types` siblings are skipped.
+  strict_rewrite <- function(x) {
+    if (is.character(x)) {
+      out <- vapply(x, function(s)
+        if (has_col(s)) { add_pair(s, type_of(s)); alias_of(s) } else s,
+        character(1L), USE.NAMES = FALSE)
+      if (length(out) == 1L) out else as.list(out)
+    } else if (is_obj(x)) {
+      for (nm in names(x)) x[[nm]] <- strict_rewrite(x[[nm]])
+      x
+    } else if (is.list(x)) lapply(x, strict_rewrite)
+    else x
+  }
+  rcode_rewrite <- function(x) {
+    if (is.character(x) && length(x) == 1L) return(rewrite_syntax(x, nms, alias_of))
+    if (is_obj(x)) { for (nm in names(x)) x[[nm]] <- rcode_rewrite(x[[nm]]); return(x) }
+    if (is.list(x)) return(lapply(x, rcode_rewrite))
+    x
+  }
+  rewrite_by_meta <- function(opt, meta) {
+    if (!is.list(meta)) return(opt)
+    if (isTRUE(meta[["shouldEncode"]])) return(strict_rewrite(opt))
+    if (isTRUE(meta[["isRCode"]]))      return(rcode_rewrite(opt))
+    if (is_obj(meta)) {
+      if (is_obj(opt)) {
+        for (nm in names(opt)) {
+          if (nm == ".meta" || nm == "types" || grepl("\\.types$", nm)) next
+          if (!is.null(meta[[nm]])) opt[[nm]] <- rewrite_by_meta(opt[[nm]], meta[[nm]])
+        }
+        return(opt)
+      }
+      if (is.list(opt)) return(lapply(opt, function(el) rewrite_by_meta(el, meta)))
+      return(opt)
+    }
+    # unnamed-list meta = JSON array: per-index
+    if (is.list(opt) && !is_obj(opt)) {
+      for (i in seq_len(min(length(opt), length(meta))))
+        opt[[i]] <- rewrite_by_meta(opt[[i]], meta[[i]])
+    }
+    opt
+  }
+
+  # .meta encodeThis (FactorLevelListBase factors+levels, factorlevellistbase.cpp:108-117)
+  # — collect recursively anywhere in .meta (legacy collectExtraEncodingsFromMetaJson).
+  collect_encode_this <- function(meta) {
+    if (!is.list(meta)) return()
+    et <- meta[["encodeThis"]]
+    if (!is.null(et)) {
+      if (is.character(et)) et <- as.list(et)
+      if (is.list(et)) for (e in et)
+        if (is.character(e) && length(e) == 1L && has_col(e))
+          add_pair(e, type_of(e))
+    }
+    for (i in seq_along(meta)) collect_encode_this(meta[[i]])
+  }
+
+  meta <- if (is_obj(options)) options[[".meta"]] else NULL
+  if (is_obj(options)) options <- walk_object(options)
+  collect_encode_this(meta)
+  options <- rewrite_by_meta(options, meta)
+  if (is_obj(options)) options[[".meta"]] <- NULL
+
+  pairs <- if (length(pair_aliases)) {
+    decoded <- lapply(pair_aliases, alias_decode)
+    data.frame(name = vapply(decoded, function(d) d$name, character(1L)),
+               type = vapply(decoded, function(d) d$type, character(1L)),
+               stringsAsFactors = FALSE)
+  } else data.frame(name = character(0), type = character(0), stringsAsFactors = FALSE)
+
+  list(options = options, pairs = pairs)
+}
+
+# ── frame assembly + cache (§3.2 steps 3-4) ───────────────────────────────────
+
+# Per-column coercion semantics IDENTICAL to jaspRunner/R/data.R:74-99 (labels are already
+# applied at read time; source vectors are schema-typed: factor for Arrow dictionaries,
+# numeric otherwise). Dual-role views (§3.5) are just this applied twice to one source.
+coerce_col <- function(vals, as_type) {
+  if (is.factor(vals)) {
+    if (as_type == "scale")
+      return(as.numeric(levels(vals))[as.integer(vals)])   # VALUES, not codes
+    if (as_type == "ordinal" && !is.ordered(vals))
+      class(vals) <- c("ordered", "factor")
+    return(vals)
+  }
+  switch(as_type,
+    scale   = vals,
+    nominal = factor(vals),                    # R sorts numeric levels numerically
+    ordinal = ordered(factor(vals)),
+    vals)
+}
+
+.frame_from_cols <- function(cols) {
+  if (!length(cols)) return(data.frame())
+  structure(cols, class = "data.frame", row.names = c(NA_integer_, length(cols[[1L]])))
+}
+
+# Cache-backed schema-typed source read: one batched C++ col_select per miss-set
+# (read_jasp_data prunes at the C++ level, jaspRunner/R/data.R:38-103). Unknown names
+# throw (legacy rbridge parity — loud beats silent).
+load_cols <- function(nms) {
+  nms <- unique(nms[nzchar(nms)])
+  if (!length(nms)) return(invisible(NULL))
+  unknown <- setdiff(nms, .state$schemaNames)
+  if (length(unknown))
+    stop(sprintf("unknown column(s) requested: %s", paste(unknown, collapse = ", ")))
+  missing <- nms[vapply(nms, function(n) is.null(.state$cols[[n]]), logical(1L))]
+  if (length(missing)) {
+    spec <- lapply(missing, function(n) list(name = n, as = schema_type_of(n) %||% "scale"))
+    df <- read_jasp_data(.state$dataPath, spec)
+    for (n in missing) assign(n, df[[n]], envir = .state$cols)
+  }
+  invisible(NULL)
+}
+
+# ── data natives (§3.3; args positional from .fromRCPP, common.R:387) ─────────
+
+# Preload path (runJaspResults, common.R:109-110): the aliased pair frame (preload=true).
 .readDataSetRequestedNative <- function() {
   if (is.null(.state$dataset)) return(data.frame())
   .state$dataset
 }
 
-# Column-wise read (for analyses that read on demand). Args are positional from .fromRCPP:
-# (columns, columns.as.numeric, columns.as.ordinal, columns.as.factor, all.columns).
+# On-demand path (common.R:376-391): alias args decoded -> raw names -> cache-backed
+# col_select -> coerce per the as.* args. Colnames ECHO what the module asked for (alias
+# or raw), so module indexing by its own option strings always works. exclude.na.listwise
+# is wrapper-side (common.R:388) — untouched.
 .readDatasetToEndNative <- function(columns = NULL, columns.as.numeric = NULL,
                                     columns.as.ordinal = NULL, columns.as.factor = NULL,
                                     all.columns = FALSE) {
-  df <- .state$dataset
-  if (is.null(df)) return(data.frame())
-  if (isTRUE(all.columns)) {
-    wanted <- names(df)
-  } else {
-    wanted <- unique(unlist(c(columns, columns.as.numeric, columns.as.ordinal, columns.as.factor)))
-    wanted <- wanted[!vapply(wanted, is.null, logical(1))]
+  if (isTRUE(all.columns)) {                   # the 5 free-syntax sites: full frame,
+    nms <- .state$schemaNames                  # aliased by SCHEMA types (§3.3)
+    tys <- schema_all_types()
+    load_cols(nms)
+    out <- list()
+    for (nm in nms) {
+      ty <- tys[[nm]]
+      out[[alias_encode(nm, ty)]] <- coerce_col(.state$cols[[nm]], ty)
+    }
+    return(.frame_from_cols(out))
   }
-  wanted <- intersect(wanted, names(df))
-  if (length(wanted) == 0) return(data.frame())
-  out <- df[, wanted, drop = FALSE]
-  for (col in intersect(columns.as.numeric, names(out))) out[[col]] <- as.numeric(as.character(out[[col]]))
-  for (col in intersect(columns.as.ordinal, names(out))) out[[col]] <- factor(out[[col]], ordered = TRUE)
-  for (col in intersect(columns.as.factor,  names(out))) out[[col]] <- factor(out[[col]])
-  out
+  out <- list()
+  serve <- function(requested, as) {
+    if (is.null(requested)) return()
+    for (s in unname(as.character(requested))) {
+      if (is.na(s) || !nzchar(s)) next
+      d <- alias_decode(s)
+      raw <- if (is.null(d)) s else d$name
+      if (!(raw %in% .state$schemaNames))
+        stop(sprintf(".readDatasetToEndNative: unknown column '%s'", raw))
+      ty <- as
+      if (is.null(ty)) ty <- schema_type_of(raw) %||% "scale"
+      load_cols(raw)
+      out[[s]] <<- coerce_col(.state$cols[[raw]], ty)
+    }
+  }
+  serve(columns,              NULL)
+  serve(columns.as.numeric,   "scale")
+  serve(columns.as.ordinal,   "ordinal")
+  serve(columns.as.factor,    "nominal")
+  .frame_from_cols(out)
 }
 
-# Header read — analyses use it to learn column names/types without the full data. Returning
-# the (typed) requested columns is a superset that satisfies those callers.
+# Header path (common.R:405-418): names + types only — schema footer, ZERO rows, aliased
+# (the module lives in alias space). Zero callers today (audited); contract completeness.
 .readDataSetHeaderNative <- function(columns = NULL, columns.as.numeric = NULL,
                                      columns.as.ordinal = NULL, columns.as.factor = NULL,
                                      all.columns = FALSE) {
-  .readDatasetToEndNative(columns, columns.as.numeric, columns.as.ordinal, columns.as.factor, all.columns)
+  empty_col <- function(ty) switch(ty,
+    scale = numeric(0), nominal = factor(character()),
+    ordinal = ordered(factor(character())), character(0))
+  if (isTRUE(all.columns)) {
+    nms <- .state$schemaNames
+    tys <- schema_all_types()
+    out <- lapply(nms, function(nm) empty_col(tys[[nm]]))
+    names(out) <- vapply(nms, function(nm) alias_encode(nm, tys[[nm]]),
+                         character(1L), USE.NAMES = FALSE)
+    return(.frame_from_cols(out))
+  }
+  requested <- unname(unlist(c(columns, columns.as.numeric,
+                               columns.as.ordinal, columns.as.factor)))
+  out <- list()
+  for (s in requested) {
+    if (is.null(s) || is.na(s) || !nzchar(s)) next
+    d <- alias_decode(s)
+    raw <- if (is.null(d)) s else d$name
+    if (!(raw %in% .state$schemaNames)) next
+    ty <- if (!is.null(d)) d$type else (schema_type_of(raw) %||% "scale")
+    out[[s]] <- empty_col(ty)
+  }
+  .frame_from_cols(out)
+}
+
+# Contract completeness ONLY: `.readFullDatasetToEnd` is NOT in jaspBase's .fromRCPP
+# collection (Engine/jaspBase/R/common.R:628-637) — stop("Unknown RCPP object") fires
+# before any globalenv lookup, so this is unreachable as jaspBase stands (zero module
+# callers anyway). Defined so the native set is complete; HANDOVER §3.3.
+.readFullDatasetToEnd <- function() {
+  .readDatasetToEndNative(all.columns = TRUE)
+}
+
+# ── coder natives (§3.3) — served to jaspBase's encodeColNames/decodeColNames
+# resolution via .findFun (writeImage.R:316-353). Until now these resolved to the
+# identity dummy (writeImage.R:328-329); defining them in globalenv ends the silent
+# identity mode. Schema-gated, NEVER throws (§2.2).
+
+.encodeColNamesStrict <- function(x) {
+  if (is.null(x)) return(x)
+  vapply(unname(as.character(x)), function(nm) {
+    ty <- schema_type_of(nm)
+    if (!is.null(ty)) alias_encode(nm, ty) else nm
+  }, character(1L), USE.NAMES = FALSE)
+}
+.encodeColNamesLax <- function(x) {
+  if (is.null(x)) return(x)
+  vapply(unname(as.character(x)), function(s) rewrite_syntax(s, .state$schemaNames, schema_alias_of),
+         character(1L), USE.NAMES = FALSE)
+}
+.decodeColNamesStrict <- function(x) {
+  if (is.null(x)) return(x)
+  vapply(unname(as.character(x)), function(s) alias_decode_strict(s, .state$schemaNames),
+         character(1L), USE.NAMES = FALSE)
+}
+.decodeColNamesLax <- function(x) {
+  if (is.null(x)) return(x)
+  vapply(unname(as.character(x)), function(s) alias_decode_lax(s, .state$schemaNames),
+         character(1L), USE.NAMES = FALSE)
 }
 
 # Temp / state natives — resolve inside the per-work scratchpad (.state$outputDir ==
@@ -401,23 +1016,70 @@ run_analysis <- function(work) {
                 module, as.character(packageVersion(module)), now_s() - t_mod))
   }
 
-  # 1. dataset — Arrow/Feather cache file (§8), ABSOLUTE path injected by the orchestrator (§19.3).
-  # Read through jaspRunner's unified path with a schema-derived spec: Arrow carries the real
-  # types, so jaspBase gets a properly typed frame (factor grouping vars, numeric measurements).
+  # 1. Dataset schema + options walk + pruning (HANDOVER-runner-data-pruning.md §3.2).
+  # Only the Arrow FOOTER is read up front. The options walk (legacy case catalog,
+  # columnencoder.cpp:673-826) derives the used (name, type) pairs and rewrites the option
+  # values raw->alias — everything jaspBase/modules see from here on is aliases; raw UTF-8
+  # names never enter R. preloadData=false reads NOTHING until a native asks.
   ds_paths <- work$dataset_paths %||% list()
   data_path <- NULL
   for (p in ds_paths) {
     if (is.character(p) && length(p) == 1 && nzchar(p) && file.exists(p)) { data_path <- p; break }
   }
   if (is.null(data_path)) stop("no readable dataset path in work$dataset_paths")
+
+  preloadData <- payload$preloadData %||% TRUE
+
+  t_schema <- now_s()
+  schema <- tryCatch(read_feather_schema(data_path),
+                     error = function(e) { cat(sprintf("[runner] schema read error: %s\n", conditionMessage(e))); NULL })
+  if (is.null(schema)) stop("could not read dataset schema")
+  .state$dataPath    <- data_path
+  .state$schema      <- schema
+  .state$schemaNames <- schema$names            # vectorized: full width, names only (ms)
+  # name -> 0-based field index; Schema$field(i) is O(1) (GetFieldByName is an O(k) scan).
+  # Types are NOT extracted here — schema_type_of resolves them lazily per used column.
+  .state$schemaIdx   <- list2env(as.list(setNames(seq_along(.state$schemaNames) - 1L,
+                                                  .state$schemaNames)), parent = emptyenv())
+  .state$typeCache   <- new.env(parent = emptyenv())
+  .state$aliasCache  <- new.env(parent = emptyenv())
+  .state$cols        <- new.env(parent = emptyenv())
+  log_step("schema read", t_schema,
+           sprintf("%s (%d cols)", data_path, length(.state$schemaNames)))
+
+  t_walk <- now_s()
+  raw_options <- payload$options %||% list()
+  if (VERBOSE) cat(sprintf("[runner] raw options (pre-walk): %s\n",
+                           toJSON(raw_options, auto_unbox = TRUE, null = "null", digits = NA)))
+  walked <- walk_and_rewrite_options(raw_options,
+    list(names = .state$schemaNames, idx = .state$schemaIdx, type_of = schema_type_of))
+  options <- walked$options
+  pairs   <- walked$pairs
+  log_step("options walk", t_walk, sprintf("%d pair(s)", nrow(pairs)))
+  if (preloadData && nrow(pairs) == 0L)
+    cat(paste0(
+      "[runner] WARN: preloadData=true but the options walk derived NO (name, type) pairs.\n",
+      "[runner]        The preload frame is empty; a module indexing the dataset will fail.\n",
+      "[runner]        Fine for analyses with no variable bindings; if unexpected, re-run with\n",
+      "[runner]        JASP_RUNNER_VISIBLE=1 and inspect the raw-options dump above the walk.\n"))
+
   t_data <- now_s()
-  .state$dataset <- tryCatch({
-    sch <- arrow::read_feather(data_path, as_data_frame = FALSE)$schema
-    read_jasp_data(data_path, .spec_from_schema(sch))
-  }, error = function(e) { cat(sprintf("[runner] Arrow read error: %s\n", conditionMessage(e))); NULL })
-  if (is.null(.state$dataset)) stop("could not read dataset")
-  log_step("dataset read", t_data,
-           sprintf("%s (%d rows, %d cols)", data_path, nrow(.state$dataset), ncol(.state$dataset)))
+  if (preloadData && nrow(pairs) > 0L) {
+    load_cols(unique(pairs$name))
+    cols <- list()
+    for (i in seq_len(nrow(pairs))) {
+      nm <- pairs$name[i]; ty <- pairs$type[i]
+      cols[[alias_encode(nm, ty)]] <- coerce_col(.state$cols[[nm]], ty)
+    }
+    .state$dataset <- .frame_from_cols(cols)
+    log_step("preload frame", t_data,
+             sprintf("%d rows x %d aliased col(s) from %d pair(s)",
+                     nrow(.state$dataset), ncol(.state$dataset), nrow(pairs)))
+  } else {
+    .state$dataset <- NULL
+    log_step(if (preloadData) "preload frame (no pairs)" else "no preload (on-demand)", t_data,
+             sprintf("%d pair(s)", nrow(pairs)))
+  }
 
   # 2. scratchpad — per-work and absolute (§19.3). Reclaim the process cwd for this work:
   # jaspBase's initEnvironment() setwd's to a startup tempdir once, so without this the cwd would
@@ -461,14 +1123,12 @@ run_analysis <- function(work) {
   # .baseCitation left at session default unless settings provides one
   if (!is.null(settings$baseCitation)) .baseCitation <<- settings$baseCitation
 
-  # 4. run (the engine path: Internal fn + preloadData from the work, default TRUE)
-  preloadData    <- payload$preloadData %||% TRUE
-  optionsJson    <- toJSON(.processOptions(payload$options %||% list()),
-                           auto_unbox = TRUE, null = "null", digits = NA)
+  # 4. run (the engine path: Internal fn + walked/aliased options)
+  optionsJson    <- toJSON(options, auto_unbox = TRUE, null = "null", digits = NA)
   functionCall   <- paste0(module, "::", analysis, "Internal")
   cat(sprintf("[runner] running %s (work_id=%s revision=%s preloadData=%s)\n",
               functionCall, work$work_id %||% "?", work$revision %||% "?", preloadData))
-  if (VERBOSE) cat(sprintf("[runner] optionsJson (processed): %s\n", optionsJson))
+  if (VERBOSE) cat(sprintf("[runner] optionsJson (walked): %s\n", optionsJson))
 
   t_run <- now_s()
   jr <- jaspBase::runJaspResults(
@@ -494,11 +1154,14 @@ run_analysis <- function(work) {
               if (length(state_sz)) state_sz / 1e6 else 0, sum(fi$size) / 1e6, nrow(fi),
               seeded_artifacts, artifacts))
 
-  # 5. native serialization (live web form: .meta + top-level nodes)
+  # 5. native serialization (live web form: .meta + top-level nodes) + alias decode —
+  # results leave R carrying REAL names (lax decode, schema-gated, single pass, §2.2;
+  # successor of the engine's decodeJsonSafeHtml).
   t_ser <- now_s()
   jaspObject  <- jr$.__enclos_env__$private$jaspObject
   resultsJson <- jaspObject$getResults()
   parsed      <- fromJSON(resultsJson, simplifyVector = FALSE)
+  parsed      <- lax_decode_tree(parsed)
   results     <- parsed$results
   log_step("serialize results", t_ser, sprintf("%d bytes JSON", nchar(resultsJson)))
 
@@ -515,6 +1178,15 @@ run_analysis <- function(work) {
 # ── main: dial, register, loop ────────────────────────────────────────────────
 
 main <- function(control_url = ORCH_URL) {
+  # Provenance: the script is read ONCE, at spawn — a long-lived runner keeps executing the
+  # code it booted with even after the file changes on disk. Log path + mtime so a stale
+  # instance is spotted the moment it answers a work (kill orchestrator+runner to reload).
+  fa <- commandArgs(trailingOnly = FALSE)
+  f <- sub("^--file=", "", fa[grepl("^--file=", fa)])
+  if (length(f))
+    cat(sprintf("[runner] script: %s (mtime %s)\n", normalizePath(f[1L]),
+                format(file.mtime(f[1L]), "%Y-%m-%d %H:%M:%S")))
+
   t_load <- now_s()
   load_runner_modules()
   log_step("startup: load jaspBase", t_load)
@@ -549,7 +1221,7 @@ main <- function(control_url = ORCH_URL) {
     type      = "register",
     runner_id = sprintf("runner-%s", Sys.getpid()),
     capabilities = lapply(modules, function(m)
-      list(kind = "analysis", name = m$name, version = m$version,
+      list(kind = "analysis_r_classic_jaspbase", name = m$name, version = m$version,
            base_uri = paste0("file://", file.path(LIBDIR, m$name), "/"))),
     priority  = 0,
     environment = list(r_version = as.character(getRversion()))
@@ -614,7 +1286,7 @@ main <- function(control_url = ORCH_URL) {
       # carries the opaque jaspResults tree in payload$results; the orchestrator fills
       # results_dir when it forwards. module_version = the producer's provenance (§19.4):
       # what actually ran, else what the work asked for.
-      kind       = "analysis",
+      kind       = "analysis_r_classic_jaspbase",
       module_version = out$module_version %||% work$payload$module_version,
       payload    = list(results = out$results)
     )

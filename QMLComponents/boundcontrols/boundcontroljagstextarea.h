@@ -36,7 +36,6 @@ public:
 private:
 	std::set<std::string>		_usedColumnNames;
 	QSet<QString>				_usedParameters;
-	QString						_textEncoded;
 
 };
 

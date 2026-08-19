@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Client A sends a framed "register" ──
     let register = serde_json::json!({
         "v": 1, "type": "register", "id": "reg-a",
-        "capabilities": [{"kind": "analysis", "name": "jaspTTests", "version": "0.95.5"}],
+        "capabilities": [{"kind": "analysis_r_classic_jaspbase", "name": "jaspTTests", "version": "0.95.5"}],
         "priority": 0
     });
     req_a

@@ -38,6 +38,18 @@ ColumnsModel::ColumnsModel(DataSetTableModel *tableModel)
 	connect(_tableModel,				&DataSetTableModel::columnsRemoved,			info, &VariableInfo::rowCountChanged		);
 	connect(MainWindow::singleton(),	&MainWindow::dataAvailableChanged,			info, &VariableInfo::dataAvailableChanged	);
 
+	// Wide-data fix (2026-08-16): the cached dataset Terms (dataSetTerms()) must be rebuilt
+	// whenever the column set can have changed. Redundant invalidation is cheap (one lazy
+	// rebuild); a missed one would show stale variables, so err on the generous side.
+	connect(_tableModel, &DataSetTableModel::columnTypeChanged,	this, [this]() { _dataSetTermsValid = false; });
+	connect(_tableModel, &DataSetTableModel::modelReset,		this, [this]() { _dataSetTermsValid = false; });
+	connect(_tableModel, &DataSetTableModel::dataChanged,		this, [this]() { _dataSetTermsValid = false; });
+	connect(_tableModel, &DataSetTableModel::columnsInserted,	this, [this]() { _dataSetTermsValid = false; });
+	connect(_tableModel, &DataSetTableModel::columnsRemoved,	this, [this]() { _dataSetTermsValid = false; });
+	connect(_tableModel, &DataSetTableModel::emptyValuesChanged,this, [this]() { _dataSetTermsValid = false; });
+	connect(this, &ColumnsModel::columnNamesChanged,			this, [this](QMap<QString, QString>) { _dataSetTermsValid = false; });
+	connect(this, &ColumnsModel::dataSetChanged,				this, [this]() { _dataSetTermsValid = false; });
+
 	// NEO (data-model-design.md §3.4): serve the active lane dataset's schema instead of the
 	// legacy table, and re-target whenever the registry's active dataset changes.
 	if (DataSetPackage::pkg() && DataSetPackage::pkg()->registry())
@@ -58,6 +70,8 @@ void ColumnsModel::bindNeoData(DataModel * model)
 {
 	if (_neoData == model)
 		return;
+
+	_dataSetTermsValid = false;	// dataset switch: cached Terms are stale
 
 	beginResetModel();
 
@@ -207,6 +221,11 @@ QVariant ColumnsModel::provideInfo(VariableInfo::InfoType info, const QString& c
 
 	try
 	{
+		// Wide-data fast path (2026-08-16): the full (name, type) Terms of the active dataset,
+		// cached — one request + one copy instead of k per-name roundtrips per reset pass.
+		if (info == VariableInfo::DataSetTerms)
+			return QVariant::fromValue(colModel->dataSetTerms());
+
 		int colIndex = colName.isEmpty() ? 0 : colModel->getColumnIndex(fq(colName));
 
 		if (colIndex < 0)
@@ -349,6 +368,32 @@ QStringList ColumnsModel::getColumnNames() const
 		result.append(data(index(i, 0), NameRole).toString());
 
 	return result;
+}
+
+const Terms & ColumnsModel::dataSetTerms() const
+{
+	if (_dataSetTermsValid)
+		return _dataSetTermsCache;
+
+	_dataSetTermsCache.clear();
+
+	if (_neoData)
+	{
+		const size_t count = _neoData->columnCount();
+		for (size_t i = 0; i < count; i++)
+			if (const ColumnInfo * col = _neoData->columnAt(i))
+				_dataSetTermsCache.add(Term(tq(col->name), col->type));
+	}
+	else
+	{
+		// Legacy table: same walk the old per-name loop did, centralized and rebuilt only on change.
+		const QStringList names = getColumnNames();
+		for (const QString & name : names)
+			_dataSetTermsCache.add(Term(name, columnType(getColumnType(name))));
+	}
+
+	_dataSetTermsValid = true;
+	return _dataSetTermsCache;
 }
 
 void ColumnsModel::datasetChanged(  QStringList                             changedColumns,

@@ -259,7 +259,7 @@ std::string JaspClient::submit(const Json::Value & work, ResultHandler handler)
 
 	// Same work_id re-submitted → the assignment replaces the old slot (eviction by construction).
 	// No abort dance and no separate per-analysis map: this revision is the high-water mark (§23).
-	_slots[workId] = Slot{ revision, work.get("kind", "analysis").asString(), std::move(handler) };
+	_slots[workId] = Slot{ revision, work.get("kind", "analysis_r_classic_jaspbase").asString(), std::move(handler) };
 
 	sendFrame(work);
 	return workId;
@@ -312,7 +312,7 @@ void JaspClient::handleMessage(const QByteArray & body)
 			result.status	= "fatalError";
 			result.message	= env.get("message", "").asString();
 			_slots.erase(sit);
-			if (result.kind == "analysis")
+			if (result.kind == "analysis_r_classic_jaspbase")
 			{	// The analysis UI surfaces failures from the results error tree.
 				result.results					= Json::Value(Json::objectValue);
 				result.results["error"]			= true;
@@ -342,7 +342,7 @@ void JaspClient::handleMessage(const QByteArray & body)
 	Result result;
 	result.kind		= kind;
 	result.status	= status;
-	if (kind == "analysis")
+	if (kind == "analysis_r_classic_jaspbase")
 	{
 		result.results		= payload.get("results", Json::nullValue);
 		result.resultsDir	= payload.get("results_dir", "").asString();
