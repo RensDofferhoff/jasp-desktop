@@ -31,6 +31,34 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// ─── Wire constants (§18.4, data-view-format.md §1.1) ────────────────────────
+
+/// §18.4 `max_inline_payload`: the cap on the binary part of a single inline message.
+/// One ceiling across all units — view chunks (~20 MB) sit far below it; the hard cap for
+/// a single view row IS this ceiling (a bigger row cannot fit in one message; the lane
+/// answers `fatalError` instead of emitting, format doc §1.1).
+pub const MAX_INLINE_PAYLOAD: usize = 256 * 1024 * 1024;
+
+/// Envelope margin on top of [`MAX_INLINE_PAYLOAD`] when raising socket `RecvMaxSize`
+/// (§18.4/§4.4): a maximal binary part plus its JSON envelope + framing must always fit.
+pub const RECV_MARGIN: usize = 16 * 1024 * 1024;
+
+/// Socket `RecvMaxSize` every endpoint raises to (§18.4/§4.4): the inline ceiling plus the
+/// envelope margin. libnng's ~1 MiB default **silently discards** larger messages
+/// (neo-jasp §25.5); nanonext/R raises it internally — only the Rust and C endpoints need
+/// this. (Used by the data-runner binary; the orchestrator computes the same value from its
+/// configurable `max_inline_payload`.)
+#[allow(dead_code)]
+pub const RECV_MAX_SIZE: usize = MAX_INLINE_PAYLOAD + RECV_MARGIN;
+
+/// The default view-request chunk budget: ~20 MB of escaped TSV per response
+/// (`JASP_VIEW_CHUNK_BYTES`, format doc §1.1). Many chunks, never one big message.
+pub const VIEW_CHUNK_BYTES: u64 = 20_000_000;
+
+fn default_view_chunk_bytes() -> u64 {
+    VIEW_CHUNK_BYTES
+}
+
 /// The envelope every message shares (§18.2), wrapping a type-discriminated [`Message`].
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Envelope {
@@ -42,10 +70,14 @@ pub struct Envelope {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
     /// Tenancy scope; a single value on desktop.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Names the binary payload encoding (§18.2/§18.3); **required when a binary part is
+    /// present** (e.g. `"text/tsv"` on a view result), absent on JSON-only frames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
     /// Orchestrator-stamped epoch-ms.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ts: Option<u64>,
 
     /// The type-discriminated body; its `type` tag and fields are flattened into the envelope.
@@ -116,19 +148,76 @@ pub enum WorkPayload {
 /// open is just a work; the orchestrator manages the dataset.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DataWork {
-    /// The operation to perform (`data_open` in this increment).
+    /// The operation to perform (`data_open` / `data_view`).
     pub op: DataOp,
     /// The source file to read (`data_open`: the user's CSV/… file). The lane reads it
-    /// directly — the orchestrator never touches the bytes.
+    /// directly — the orchestrator never touches the bytes. Unused by `data_view`.
     pub source: String,
-    /// **Orchestrator-assigned at dispatch** (identity, not I/O — the lane writes the file);
-    /// the sender leaves it empty: `<state_root>/<session>/datasets/<dataset_id>_<revision>.arrow`.
+    /// **Orchestrator-assigned at dispatch** (identity, not I/O): `data_open` gets a fresh
+    /// path the lane writes (`<state_root>/<session>/datasets/<dataset_id>_<revision>.arrow`);
+    /// `data_view` gets the dataset's `current_path` injected so the lane can slice it.
+    /// The sender leaves it empty.
     pub cache_path: String,
     /// Routing key selecting the lane + parser (`"csv"`, later `"spss"`, `"arrow"`, …).
-    /// Meaningful for `data_open`.
+    /// Meaningful for `data_open`; `data_view` is format-agnostic (it reads the cache).
     pub format: String,
     /// Ingestion settings captured at open; forwarded verbatim on every op.
     pub ingest: IngestParams,
+
+    // ── data_view window (data-view-format.md §1.1; defaults keep the data_open shape valid) ──
+    /// First row of the window.
+    #[serde(default)]
+    pub row_offset: u64,
+    /// Window length; null = to the end of the dataset (still capped by `max_bytes`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_limit: Option<u64>,
+    /// Columns to serve, by DISPLAY name; null = all columns in schema order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub columns: Option<Vec<String>>,
+    /// Budget for THIS response, counted exactly on the escaped TSV bytes. The lane stops
+    /// at a row boundary (whole rows only), with a progress guarantee of ≥ 1 row.
+    #[serde(default = "default_view_chunk_bytes")]
+    pub max_bytes: u64,
+    /// Locale rendering spec — the lane is the only float→string converter (format doc §1.2).
+    /// Absent = lane default: `.` decimal, no grouping, precision 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<ViewRender>,
+}
+
+/// Locale rendering spec for `data_view` requests (data-view-format.md §1.2): explicit
+/// separator **characters**, not a locale id — the frontend's `QLocale` is the authority and
+/// the lane stays dependency-free. A locale/separator change is a drop-and-refill on the
+/// frontend (the buffer's strings are locale-baked).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ViewRender {
+    /// Decimal separator.
+    #[serde(default = "ViewRender::default_decimal")]
+    pub decimal: String,
+    /// Grouping (thousands) separator; `""` = no grouping.
+    #[serde(default)]
+    pub thousands: String,
+    /// Significant digits — C/Qt `'g'` semantics (legacy parity at 10).
+    #[serde(default = "ViewRender::default_precision")]
+    pub precision: u32,
+}
+
+impl ViewRender {
+    fn default_decimal() -> String {
+        ".".to_string()
+    }
+    fn default_precision() -> u32 {
+        10
+    }
+}
+
+impl Default for ViewRender {
+    fn default() -> Self {
+        ViewRender {
+            decimal: Self::default_decimal(),
+            thousands: String::new(),
+            precision: Self::default_precision(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -230,7 +319,11 @@ pub struct DataResult {
     /// **Orchestrator-filled** at the terminal result; the lane leaves it empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dataset_id: Option<String>,
-    /// Row count (lane).
+    /// The dataset revision **at dispatch** — orchestrator-filled, stamped on every view
+    /// result so the frontend drops stale chunks (data-view-design §6.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_revision: Option<u64>,
+    /// TOTAL row count of the dataset at serve time (lane).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rows: Option<u64>,
     /// The frontend's column view: `[{name, display_name, type, levels?, all_integer?}]` (§24).
@@ -239,6 +332,17 @@ pub struct DataResult {
     /// Present when `status` is a failure (lane).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+
+    // ── data_view additions (the cells themselves ride the frame's binary part, §18.1) ──
+    /// First row carried in the binary part (lane, `data_view`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_offset: Option<u64>,
+    /// Rows carried in the binary part (lane, `data_view`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_count: Option<u64>,
+    /// Stopped at `max_bytes` before `row_limit`/end (lane, `data_view`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
 }
 
 /// Result lifecycle status (wire values are camelCase, matching the existing engine strings).
@@ -394,7 +498,7 @@ pub enum Capability {
 }
 
 /// The data-plane operations — the `op` of a `data` capability (and of `data` work, §19.3).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum DataOp {
     #[serde(rename = "data_open")]
     Open,
@@ -404,6 +508,10 @@ pub enum DataOp {
     Close,
     #[serde(rename = "data_update")]
     Update,
+    /// A windowed view of a cached dataset (data-view-format.md): the lane slices the
+    /// Feather and renders the window as escaped TSV in the frame's binary part.
+    #[serde(rename = "data_view")]
+    View,
 }
 
 /// Orchestrator → Runner: registration response (§19.5).

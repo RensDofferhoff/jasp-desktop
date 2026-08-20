@@ -52,7 +52,7 @@ mod messages;
 mod provisioner;
 
 use messages::{Capability, DataOp, Envelope, Message, ModuleInfo, Status, WorkPayload};
-use nng::options::{LocalAddr, Options, RecvBufferSize, SendBufferSize};
+use nng::options::{LocalAddr, Options, RecvBufferSize, RecvMaxSize, SendBufferSize};
 use nng::{Aio, AioResult, Listener, Pipe, PipeEvent, Protocol, Socket};
 use provisioner::{LaneKind, LaneSpec, ProvEvent, ProvReq, RunnerProvisioner};
 use serde_json::json;
@@ -69,9 +69,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Frame raw JSON bytes into `[u32 BE length][json bytes]`.
 fn frame_bytes(json: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(4 + json.len());
+    frame_parts(json, &[])
+}
+
+/// Frame with an optional binary tail: `[u32 BE json_len][JSON][binary…]` (§18.1). View
+/// results carry their escaped TSV in the tail — bulk bytes never go through the JSON
+/// parser on any hop.
+fn frame_parts(json: &[u8], binary: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(4 + json.len() + binary.len());
     out.extend_from_slice(&(json.len() as u32).to_be_bytes());
     out.extend_from_slice(json);
+    out.extend_from_slice(binary);
     out
 }
 
@@ -82,6 +90,12 @@ fn frame_envelope(env: &Envelope) -> Vec<u8> {
 
 /// Parse `[u32 BE length][json bytes][…]` into a typed [`Envelope`].
 fn deframe(body: &[u8]) -> Option<Envelope> {
+    deframe_parts(body).map(|(env, _)| env)
+}
+
+/// Split a frame (§18.1) into its JSON envelope and the trailing binary payload (empty
+/// slice when the frame is JSON-only). The bulk bytes are never parsed as JSON.
+fn deframe_parts(body: &[u8]) -> Option<(Envelope, &[u8])> {
     if body.len() < 4 {
         return None;
     }
@@ -89,7 +103,8 @@ fn deframe(body: &[u8]) -> Option<Envelope> {
     if body.len() < 4 + len {
         return None;
     }
-    serde_json::from_slice(&body[4..4 + len]).ok()
+    let env = serde_json::from_slice(&body[4..4 + len]).ok()?;
+    Some((env, &body[4 + len..]))
 }
 
 /// Epoch milliseconds (saturates to 0 before the epoch).
@@ -110,6 +125,11 @@ struct Config {
     /// When set (JASP_ORCH_KEEP_WORKSPACES=1/true), skip workspace reclamation on work_close /
     /// frontend drop — for manual inspection/debugging. Off in production.
     keep_workspaces: bool,
+    /// §18.4 `max_inline_payload`: the cap on the binary part of a single inline message
+    /// (view chunks ride under it). Every channel raises `RecvMaxSize` to this plus the
+    /// envelope margin ([`messages::RECV_MARGIN`]) — libnng's ~1 MiB default silently
+    /// discards larger messages (§25.5).
+    max_inline_payload: usize,
     /// Runner provisioner config. `Some` enables on-demand runner spawning: a routing miss for an
     /// analysis module parks the work and asks the provisioner for a runner. `None` (the default,
     /// and what every existing test uses) keeps the original attach-only behaviour.
@@ -225,6 +245,10 @@ impl Config {
             keep_workspaces: std::env::var("JASP_ORCH_KEEP_WORKSPACES")
                 .map(|v| v == "1" || v == "true")
                 .unwrap_or(false),
+            max_inline_payload: std::env::var("JASP_ORCH_MAX_INLINE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(messages::MAX_INLINE_PAYLOAD),
             provisioner: ProvisionerConfig::from_env(&parse),
             lane_specs: data_lane_binary()
                 .map(|bin| {
@@ -428,10 +452,13 @@ enum RouterMsg {
         env: Envelope,
         reply: Reply<Envelope>,
     },
-    /// A deframed message arrived on a runner's data channel.
+    /// A deframed message arrived on a runner's data channel. The binary tail (§18.1) rides
+    /// along verbatim — view results carry their TSV cells there, and the router re-frames
+    /// it untouched when forwarding (bulk bytes never go through the JSON parser).
     RunnerData {
         runner: Arc<RunnerRuntime>,
         env: Envelope,
+        binary: Vec<u8>,
     },
     /// A deframed message arrived on a frontend's data channel.
     FrontendData {
@@ -519,8 +546,18 @@ static BROKER_NONCE: AtomicU64 = AtomicU64::new(0);
 /// What a parked work unit is waiting for: an analysis-module runner or a data lane.
 #[derive(Debug, Clone)]
 enum Awaiting {
-    AnalysisRClassicJaspbase { module: String, version: String },
-    Lane { lane: LaneKind, format: String },
+    AnalysisRClassicJaspbase {
+        module: String,
+        version: String,
+    },
+    /// A data work parked for its lane. `op` is the routing key alongside the lane kind:
+    /// `data_open` additionally matches on the source `format`; `data_view` is
+    /// format-agnostic (it reads the cache the Rust lane wrote).
+    Lane {
+        lane: LaneKind,
+        op: DataOp,
+        format: String,
+    },
 }
 
 /// A work unit parked while awaiting a runner that does not yet exist (§9.3). Dispatched by
@@ -568,6 +605,15 @@ struct DatasetEntry {
     ingest: messages::IngestParams,
 }
 
+/// One in-flight data work (`data_works`). Carries what the terminal result needs:
+/// which dataset it serves, which op it is (state flip on `Open` only), and — for `View` —
+/// the dataset revision **at dispatch**, stamped into the result (§6.3 race rules).
+struct DataWorkEntry {
+    dataset_id: String,
+    op: DataOp,
+    revision: u64,
+}
+
 /// The single-threaded state machine. Owns the registries, correlation table, and channel keep-
 /// alives as plain `HashMap`s — safe because only the router thread ever touches them. Created once
 /// by [`Broker::start`], moved into the router thread, and driven by [`Router::run`].
@@ -584,9 +630,11 @@ struct Router {
     /// Outstanding dispatch references per cache file (acquire at dispatch, release at
     /// teardown). Decision state only — the router never stats/deletes; the janitor does.
     path_refs: HashMap<PathBuf, usize>,
-    /// Data work in flight, keyed by `(session_id, work_id)` → the dataset it serves (the
-    /// orchestrator mints the dataset_id at dispatch). The terminal result completes it.
-    data_works: HashMap<(String, String), String>,
+    /// Data work in flight, keyed by `(session_id, work_id)` — the terminal result completes
+    /// it. **Op-aware** (data-view-design §5): `Open` mints the dataset (terminal flips the
+    /// state; a lane eviction drops the entry), `View` only references an existing one
+    /// (terminal stamps identity + revision into the result; the dataset state never flips).
+    data_works: HashMap<(String, String), DataWorkEntry>,
     /// Strong `Aio` refs keep the per-channel recv loops alive. Keyed by runner_id / session_id
     /// (and "control" for the REP socket).
     aios: HashMap<String, Aio>,
@@ -640,7 +688,11 @@ impl Router {
                     };
                     let _ = reply.send(ack);
                 }
-                RouterMsg::RunnerData { runner, env } => self.on_runner_message(&runner, env),
+                RouterMsg::RunnerData {
+                    runner,
+                    env,
+                    binary,
+                } => self.on_runner_message(&runner, env, binary),
                 RouterMsg::FrontendData { frontend, env } => {
                     self.on_frontend_message(&frontend, env)
                 }
@@ -741,6 +793,11 @@ impl Router {
         // returns `TryAgain` and the per-peer policy applies (runner → evict, frontend → drop).
         sock.set_opt::<SendBufferSize>(ORCH_SEND_BUF)?;
         sock.set_opt::<RecvBufferSize>(ORCH_RECV_BUF)?;
+        // §18.4/§4.4: raise the recv ceiling on BOTH the frontend and runner channels — the
+        // libnng default (~1 MiB) silently discards anything larger, and view chunks (~20 MB)
+        // plus any future bulk ride these channels. One ceiling + margin, never thought about
+        // again.
+        sock.set_opt::<RecvMaxSize>(self.config.max_inline_payload + messages::RECV_MARGIN)?;
         let channel = Arc::new(sock);
         Ok((channel, url))
     }
@@ -904,6 +961,7 @@ impl Router {
             ),
             reply_to: Some(reply_to.to_string()),
             session_id: None,
+            format: None,
             ts: None,
             body: Message::RegisterAck(messages::RegisterAck {
                 ok,
@@ -937,6 +995,7 @@ impl Router {
             // The assigned session lives on the envelope (the tenancy scope every message carries);
             // `Welcome` has no separate `session_id` field, which would collide on the flattened wire.
             session_id,
+            format: None,
             ts: None,
             body: Message::Welcome(messages::Welcome {
                 ok,
@@ -972,10 +1031,11 @@ impl Router {
                 if let Err(e) = rt.channel.recv_async(&aio) {
                     eprintln!("[orch] runner {} re-arm failed: {e}", rt.runner_id);
                 }
-                if let Some(env) = deframe(&msg[..]) {
+                if let Some((env, binary)) = deframe_parts(&msg[..]) {
                     let _ = tx.send(RouterMsg::RunnerData {
                         runner: Arc::clone(&rt),
                         env,
+                        binary: binary.to_vec(),
                     });
                 }
             }
@@ -1028,7 +1088,7 @@ impl Router {
 
     // ── Message handling & routing (§6) ──────────────────────────────────────
 
-    fn on_runner_message(&mut self, runner: &RunnerRuntime, env: Envelope) {
+    fn on_runner_message(&mut self, runner: &RunnerRuntime, env: Envelope, binary: Vec<u8>) {
         match &env.body {
             Message::Result(r) => {
                 let terminal = matches!(
@@ -1042,7 +1102,7 @@ impl Router {
                         |v| v.checked_sub(1),
                     );
                 }
-                self.route_result(env, terminal);
+                self.route_result(env, terminal, binary);
             }
             Message::Activity(_) => { /* last_activity already bumped on recv */ }
             other => println!("[orch] runner {} -> {other:?}", runner.runner_id),
@@ -1053,7 +1113,9 @@ impl Router {
         // Decide the action with data cloned out of `env` first, so the match that moves `env`
         // (into `route_work`) does not also borrow `env.body`.
         enum Action {
-            Work(messages::Work),
+            // Boxed: the view fields grew `Work` well past the other variants; the indirection
+            // keeps this per-message dispatch enum small (clippy::large_enum_variant).
+            Work(Box<messages::Work>),
             Abort(String),
             WorkClose(String, Option<u64>),
             ListModules,
@@ -1061,7 +1123,7 @@ impl Router {
             Other,
         }
         let action = match &env.body {
-            Message::Work(w) => Action::Work(w.clone()),
+            Message::Work(w) => Action::Work(Box::new(w.clone())),
             Message::Abort(a) => Action::Abort(a.work_id.clone()),
             Message::WorkClose(wc) => Action::WorkClose(wc.work_id.clone(), wc.revision),
             Message::ListModules => Action::ListModules,
@@ -1093,6 +1155,7 @@ impl Router {
                     id: format!("orch-pong-{}", env.id),
                     reply_to: Some(env.id.clone()),
                     session_id: Some(fe.session_id.clone()),
+                    format: None,
                     ts: None,
                     body: Message::Pong,
                 };
@@ -1200,12 +1263,54 @@ impl Router {
                     ingest,
                 },
             );
-            self.data_works
-                .insert((fe.session_id.clone(), w.work_id.clone()), dataset_id);
+            self.data_works.insert(
+                (fe.session_id.clone(), w.work_id.clone()),
+                DataWorkEntry {
+                    dataset_id: dataset_id.clone(),
+                    op: DataOp::Open,
+                    revision: 0,
+                },
+            );
             value["payload"]["cache_path"] = json!(cache_path.to_string_lossy());
             if d.ingest.format.is_empty() {
                 value["payload"]["ingest"]["format"] = json!(d.format);
             }
+        }
+
+        // Data-view work: the dataset was resolved above (its path ref is held by this
+        // route). Inject the dataset's current cache path so the lane can slice it, and
+        // record the entry for the terminal stamp (identity + revision at dispatch, §6.3).
+        // No dataset is minted and no state flips — a view is a pure read.
+        if let WorkPayload::Data(d) = &w.payload
+            && d.op == DataOp::View
+        {
+            if resolved.len() != 1 {
+                // Zero ids fail in the resolution loop only when the dataset is unknown;
+                // an empty `dataset_ids` or several of them is a malformed view request.
+                let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
+                self.release_paths(&acquired);
+                self.send_bad_request(&fe, w, "data_view requires exactly one dataset_id");
+                return;
+            }
+            let (dataset_id, cache_path) = &resolved[0];
+            let revision = self
+                .datasets
+                .get(dataset_id)
+                .map(|e| e.revision)
+                .unwrap_or(0);
+            println!(
+                "[orch] data_view {dataset_id} (session {}) offset={} -> lane {}",
+                fe.session_id, d.row_offset, runner.runner_id
+            );
+            self.data_works.insert(
+                (fe.session_id.clone(), w.work_id.clone()),
+                DataWorkEntry {
+                    dataset_id: dataset_id.clone(),
+                    op: DataOp::View,
+                    revision,
+                },
+            );
+            value["payload"]["cache_path"] = json!(cache_path.to_string_lossy());
         }
 
         let frame = frame_bytes(&serde_json::to_vec(&value).expect("re-serialize work"));
@@ -1255,9 +1360,15 @@ impl Router {
         let prov = self.provisioner.clone();
 
         if let WorkPayload::Data(d) = &w.payload {
-            // Routing table format → lane (a format migrates lanes by configuration alone).
-            let lane = match d.format.as_str() {
-                "csv" => Some(LaneKind::RustData),
+            // Routing table op/format → lane (a format migrates lanes by configuration
+            // alone). `data_open` routes by source format; `data_view` is format-agnostic
+            // and rides the Rust lane that owns the Arrow cache.
+            let lane = match d.op {
+                DataOp::Open => match d.format.as_str() {
+                    "csv" => Some(LaneKind::RustData),
+                    _ => None,
+                },
+                DataOp::View => Some(LaneKind::RustData),
                 _ => None,
             };
             let configured =
@@ -1270,6 +1381,7 @@ impl Router {
                     w,
                     Awaiting::Lane {
                         lane,
+                        op: d.op,
                         format: d.format.clone(),
                     },
                 );
@@ -1407,6 +1519,9 @@ impl Router {
             std::collections::hash_map::Entry::Vacant(slot) => {
                 let what = match &awaiting {
                     Awaiting::AnalysisRClassicJaspbase { module, .. } => format!("module {module}"),
+                    Awaiting::Lane {
+                        op: DataOp::View, ..
+                    } => "data lane for views".to_string(),
                     Awaiting::Lane { format, .. } => format!("data lane for '{format}'"),
                 };
                 println!(
@@ -1449,12 +1564,13 @@ impl Router {
                 Awaiting::AnalysisRClassicJaspbase { module, .. } => caps
                     .iter()
                     .any(|c| matches!(c, Capability::AnalysisRClassicJaspbase { name, .. } if name == module)),
-                Awaiting::Lane { format, .. } => caps.iter().any(|c| {
-                    matches!(c, Capability::Data { op, formats }
-                        if op == &DataOp::Open
-                        && formats
-                            .as_ref()
-                            .is_some_and(|fs| fs.iter().any(|f| f == format)))
+                Awaiting::Lane { op, format, .. } => caps.iter().any(|c| {
+                    matches!(c, Capability::Data { op: cop, formats }
+                        if cop == op
+                            && (*op != DataOp::Open
+                                || formats
+                                    .as_ref()
+                                    .is_some_and(|fs| fs.iter().any(|f| f == format))))
                 }),
             })
             .map(|(k, _)| k.clone())
@@ -1471,6 +1587,9 @@ impl Router {
             };
             let what = match &pw.awaiting {
                 Awaiting::AnalysisRClassicJaspbase { module, .. } => format!("module {module}"),
+                Awaiting::Lane {
+                    op: DataOp::View, ..
+                } => "data lane for views".to_string(),
                 Awaiting::Lane { format, .. } => format!("data lane '{format}'"),
             };
             println!(
@@ -1554,6 +1673,9 @@ impl Router {
                     Awaiting::AnalysisRClassicJaspbase { module, .. } => {
                         format!("runner for module '{module}'")
                     }
+                    Awaiting::Lane {
+                        op: DataOp::View, ..
+                    } => "data lane for views".to_string(),
                     Awaiting::Lane { format, .. } => format!("data lane for '{format}'"),
                 };
                 eprintln!(
@@ -1572,8 +1694,11 @@ impl Router {
         }
     }
 
-    /// Result (runner → frontend) — §6.2.
-    fn route_result(&mut self, env: Envelope, terminal: bool) {
+    /// Result (runner → frontend) — §6.2. The frame's binary tail (§18.1) rides along
+    /// verbatim: the router re-parses only the (small) JSON envelope for the typed identity
+    /// fills and re-frames `re-serialized envelope + same tail` — bulk bytes never touch the
+    /// JSON parser here.
+    fn route_result(&mut self, env: Envelope, terminal: bool, binary: Vec<u8>) {
         let (work_id, revision, status) = match &env.body {
             Message::Result(r) => (r.work_id.clone(), r.revision, r.status.clone()),
             _ => return,
@@ -1581,27 +1706,31 @@ impl Router {
         let session_id = env.session_id.clone().unwrap_or_default();
         let key = (session_id.clone(), work_id.clone());
 
-        // Data-plane work (a dataset open; later edits): the terminal result completes it —
-        // flip the dataset entry. The orchestrator-minted dataset_id is filled into the typed
-        // Data payload below, so the submitter learns the identity to reference in work.
-        // (The router still manages the dataset; the open just rides the work pipeline.)
-        let data_dataset = if terminal {
+        // Data-plane work: the terminal result completes it — OP-AWARE. An open flips the
+        // dataset entry (minted at dispatch); a view never touches dataset state — it only
+        // gets identity + revision stamped into the forwarded payload below (§6.3).
+        let data_entry = if terminal {
             self.data_works.remove(&key)
         } else {
             None
         };
-        if let Some(dataset_id) = &data_dataset {
+        if let Some(entry) = &data_entry
+            && entry.op == DataOp::Open
+        {
             if matches!(status, Status::Complete) {
-                if let Some(entry) = self.datasets.get_mut(dataset_id) {
-                    entry.state = DatasetState::Ready;
+                if let Some(ds) = self.datasets.get_mut(&entry.dataset_id) {
+                    ds.state = DatasetState::Ready;
                 }
-                println!("[orch] dataset {dataset_id} ready — {session_id}");
+                println!("[orch] dataset {} ready — {session_id}", entry.dataset_id);
             } else {
                 // Failed open: drop the entry; the janitor sweeps any partial cache file.
-                eprintln!("[orch] dataset {dataset_id} open failed (lane error)");
-                if let Some(entry) = self.datasets.remove(dataset_id) {
-                    self.path_refs.remove(&entry.current_path);
-                    let _ = self.janitor.send(Reclaim::File(entry.current_path));
+                eprintln!(
+                    "[orch] dataset {} open failed (lane error)",
+                    entry.dataset_id
+                );
+                if let Some(ds) = self.datasets.remove(&entry.dataset_id) {
+                    self.path_refs.remove(&ds.current_path);
+                    let _ = self.janitor.send(Reclaim::File(ds.current_path));
                 }
             }
         }
@@ -1623,17 +1752,22 @@ impl Router {
         //
         // Fill the orchestrator-owned identity & location fields as TYPED payload assignments
         // (§19.2 division of labor) — no raw-JSON splices, no writes into the opaque `results`
-        // tree. A terminal data-work result carries the minted `dataset_id`; an analysis result
-        // carries `results_dir` — the revision dir holding its file artifacts (plot PNGs +
-        // plotly JSON), the wire-only bootstrap for asset-path resolution (the on-disk results
-        // JSON keeps relative paths — artifacts are its siblings; the frontend rewrites them
-        // before the webview).
+        // tree. A terminal data-work result carries the `dataset_id` (minted at dispatch for
+        // opens, echoed for views) — and a VIEW result additionally carries the dataset
+        // revision at dispatch, so the frontend can drop stale chunks (§6.3). An analysis
+        // result carries `results_dir` — the revision dir holding its file artifacts (plot
+        // PNGs + plotly JSON), the wire-only bootstrap for asset-path resolution (the on-disk
+        // results JSON keeps relative paths — artifacts are its siblings; the frontend
+        // rewrites them before the webview).
         let mut env = env;
         if let Message::Result(r) = &mut env.body {
             match &mut r.payload {
                 messages::ResultPayload::Data(d) => {
-                    if let Some(dataset_id) = &data_dataset {
-                        d.dataset_id = Some(dataset_id.clone());
+                    if let Some(entry) = &data_entry {
+                        d.dataset_id = Some(entry.dataset_id.clone());
+                        if entry.op == DataOp::View {
+                            d.dataset_revision = Some(entry.revision);
+                        }
                     }
                 }
                 messages::ResultPayload::AnalysisRClassicJaspbase(a) => {
@@ -1643,7 +1777,10 @@ impl Router {
                 messages::ResultPayload::Rcode(_) => {}
             }
         }
-        let frame = frame_bytes(&serde_json::to_vec(&env).expect("re-serialize result"));
+        let frame = frame_parts(
+            &serde_json::to_vec(&env).expect("re-serialize result"),
+            &binary,
+        );
         if let Err(e) = route.frontend.send(frame) {
             eprintln!(
                 "[orch] result to frontend {} failed ({e}); dropping result",
@@ -1720,6 +1857,7 @@ impl Router {
             id: format!("orch-abort-{work_id}"),
             reply_to: None,
             session_id: Some(session_id.to_string()),
+            format: None,
             ts: None,
             body: Message::Abort(messages::Abort {
                 work_id: work_id.to_string(),
@@ -1776,6 +1914,7 @@ impl Router {
             id: format!("orch-ds-notready-{}", w.work_id),
             reply_to: None,
             session_id: Some(fe.session_id.clone()),
+            format: None,
             ts: None,
             body: Message::Error(messages::ErrorMsg {
                 code: "dataset_not_ready".to_string(),
@@ -1788,6 +1927,32 @@ impl Router {
         if let Err(e) = fe.send(frame_envelope(&env)) {
             eprintln!(
                 "[orch] dataset_not_ready to frontend {} failed: {e}",
+                fe.session_id
+            );
+        }
+    }
+
+    /// A `bad_request` error for a malformed work (e.g. a `data_view` without exactly one
+    /// `dataset_ids` entry). Carries the `work_id` so the frontend surfaces it as a
+    /// `fatalError` result on that work's slot — no silent loss.
+    fn send_bad_request(&self, fe: &FrontendRuntime, w: &messages::Work, message: &str) {
+        eprintln!("[orch] work_id={} is malformed: {message}", w.work_id);
+        let env = Envelope {
+            v: 1,
+            id: format!("orch-badreq-{}", w.work_id),
+            reply_to: None,
+            session_id: Some(fe.session_id.clone()),
+            format: None,
+            ts: None,
+            body: Message::Error(messages::ErrorMsg {
+                code: "bad_request".to_string(),
+                message: message.to_string(),
+                work_id: Some(w.work_id.clone()),
+            }),
+        };
+        if let Err(e) = fe.send(frame_envelope(&env)) {
+            eprintln!(
+                "[orch] bad_request to frontend {} failed: {e}",
                 fe.session_id
             );
         }
@@ -1811,6 +1976,7 @@ impl Router {
             id: format!("orch-abort-{work_id}"),
             reply_to: None,
             session_id: Some(fe.session_id.clone()),
+            format: None,
             ts: None,
             body: Message::Abort(messages::Abort {
                 work_id: work_id.to_string(),
@@ -1882,10 +2048,13 @@ impl Router {
             })
             .collect::<Vec<_>>();
         for (key, frontend, revision, kind, _) in &affected {
-            // A data work in flight on this lane: its dataset dies with the lane (the
-            // frontend gets the generic no-runner failure below, like any work).
-            if let Some(dataset_id) = self.data_works.remove(key)
-                && let Some(entry) = self.datasets.remove(&dataset_id)
+            // A data work in flight on this lane fails like any work (generic no-runner
+            // failure below) — OP-AWARE: only an OPEN dies with the lane (its half-written
+            // dataset is dropped). A VIEW references an existing Ready dataset, which
+            // survives the lane's death untouched; the frontend may retry from its frontier.
+            if let Some(dw) = self.data_works.remove(key)
+                && dw.op == DataOp::Open
+                && let Some(entry) = self.datasets.remove(&dw.dataset_id)
             {
                 self.path_refs.remove(&entry.current_path);
                 let _ = self.janitor.send(Reclaim::File(entry.current_path));
@@ -2072,6 +2241,7 @@ impl Router {
             id: format!("orch-modules-{}", now_ms()),
             reply_to,
             session_id,
+            format: None,
             ts: None,
             body: Message::Modules(messages::ModulesMsg {
                 modules: catalog.to_vec(),
@@ -2379,9 +2549,13 @@ fn running_result(work_id: &str, revision: u64, session_id: &str, kind: WorkKind
         }
         WorkKind::Data => messages::ResultPayload::Data(messages::DataResult {
             dataset_id: None,
+            dataset_revision: None,
             rows: None,
             schema: None,
             error_message: None,
+            row_offset: None,
+            row_count: None,
+            truncated: None,
         }),
         WorkKind::Rcode => {
             messages::ResultPayload::Rcode(json!({ "title": "provisioning a runner" }))
@@ -2392,6 +2566,7 @@ fn running_result(work_id: &str, revision: u64, session_id: &str, kind: WorkKind
         id: format!("orch-running-{work_id}"),
         reply_to: None,
         session_id: Some(session_id.to_string()),
+        format: None,
         ts: None,
         body: Message::Result(messages::ResultMsg {
             work_id: work_id.to_string(),
@@ -2431,9 +2606,13 @@ fn no_runner_result(
         }
         WorkKind::Data => messages::ResultPayload::Data(messages::DataResult {
             dataset_id: None,
+            dataset_revision: None,
             rows: None,
             schema: None,
             error_message: Some(detail.to_string()),
+            row_offset: None,
+            row_count: None,
+            truncated: None,
         }),
         WorkKind::Rcode => messages::ResultPayload::Rcode(json!({
             "error": true,
@@ -2445,6 +2624,7 @@ fn no_runner_result(
         id: format!("orch-norunner-{work_id}"),
         reply_to: None,
         session_id: Some(session_id.to_string()),
+        format: None,
         ts: None,
         body: Message::Result(messages::ResultMsg {
             work_id: work_id.to_string(),
@@ -2465,6 +2645,7 @@ fn orch_err(reply_to: Option<&str>, code: &str, message: &str) -> Envelope {
         id: "orch-err".into(),
         reply_to: reply_to.map(|s| s.to_string()),
         session_id: None,
+        format: None,
         ts: None,
         body: Message::Error(messages::ErrorMsg {
             code: code.into(),
@@ -2573,6 +2754,7 @@ mod tests {
             hang_timeout_ms: 30_000,
             activity_min_ms: 1_000,
             keep_workspaces: false,
+            max_inline_payload: messages::MAX_INLINE_PAYLOAD,
             provisioner: None,
             lane_specs: Vec::new(),
         }
@@ -2595,6 +2777,7 @@ mod tests {
             id: format!("t-{}", unique()),
             reply_to: None,
             session_id: None,
+            format: None,
             ts: None,
             body,
         }
@@ -2752,6 +2935,7 @@ mod tests {
             id: format!("rn-{work_id}"),
             reply_to: None,
             session_id: Some(session_id.to_string()),
+            format: None,
             ts: None,
             body: Message::Result(ResultMsg {
                 work_id: work_id.to_string(),
@@ -3882,6 +4066,11 @@ mod tests {
                 cache_path: String::new(),
                 format: format.to_string(),
                 ingest: messages::IngestParams::default(),
+                row_offset: 0,
+                row_limit: None,
+                columns: None,
+                max_bytes: messages::VIEW_CHUNK_BYTES,
+                render: None,
             }),
         }))
     }
@@ -3919,6 +4108,7 @@ mod tests {
             id: format!("rn-{work_id}"),
             reply_to: None,
             session_id: Some(session.to_string()),
+            format: None,
             ts: None,
             body: Message::Result(ResultMsg {
                 work_id: work_id.to_string(),
@@ -3926,9 +4116,13 @@ mod tests {
                 status: Status::Complete,
                 payload: ResultPayload::Data(DataResult {
                     dataset_id: None,
+                    dataset_revision: None,
                     rows: Some(rows),
                     schema: Some(schema),
                     error_message: None,
+                    row_offset: None,
+                    row_count: None,
+                    truncated: None,
                 }),
                 module_version: None,
                 message: None,
@@ -4158,6 +4352,7 @@ mod tests {
             id: "rn-w-open-broken".to_string(),
             reply_to: None,
             session_id: Some(session.clone()),
+            format: None,
             ts: None,
             body: Message::Result(ResultMsg {
                 work_id: "w-open-broken".to_string(),
@@ -4165,9 +4360,13 @@ mod tests {
                 status: Status::FatalError,
                 payload: ResultPayload::Data(DataResult {
                     dataset_id: None,
+                    dataset_revision: None,
                     rows: None,
                     schema: None,
                     error_message: Some("malformed csv at line 3".to_string()),
+                    row_offset: None,
+                    row_count: None,
+                    truncated: None,
                 }),
                 module_version: None,
                 message: None,
@@ -4198,6 +4397,384 @@ mod tests {
         }
         // The failed open left no index entry behind.
         assert!(broker.datasets_snapshot().is_empty());
+    }
+
+    // ── data_view: windowed views of Ready datasets ──────────────────────
+
+    /// Framing (§18.1) with a binary tail: `[u32 BE json_len][JSON][bytes…]` round-trips
+    /// both parts; a JSON-only frame deframes to an empty tail.
+    #[test]
+    fn framing_binary_tail_round_trips() {
+        let env = envelope(Message::Ping);
+        let json = serde_json::to_vec(&env).unwrap();
+        let tsv = b"1.234.567,891\tA\thello\n";
+        let framed = frame_parts(&json, tsv);
+        let (back, tail) = deframe_parts(&framed).expect("frame with tail");
+        assert!(matches!(back.body, Message::Ping));
+        assert_eq!(tail, tsv, "the tail survives untouched");
+        let json_only = frame_bytes(&json);
+        let (back2, tail2) = deframe_parts(&json_only).expect("json-only frame");
+        assert!(matches!(back2.body, Message::Ping));
+        assert!(tail2.is_empty());
+        assert!(
+            deframe_parts(&json[..2]).is_none(),
+            "short garbage rejected"
+        );
+    }
+
+    /// Register a lane serving both open (csv) and view — the real data-runner's
+    /// capability pair.
+    fn register_view_lane(control_url: &str) -> (Socket, String) {
+        register_with_caps(
+            control_url,
+            vec![
+                Capability::Data {
+                    op: DataOp::Open,
+                    formats: Some(vec!["csv".to_string()]),
+                },
+                Capability::Data {
+                    op: DataOp::View,
+                    formats: None,
+                },
+            ],
+        )
+    }
+
+    /// A `data_view` work against one Ready dataset.
+    fn data_view_work(work_id: &str, dataset_id: &str, row_offset: u64) -> Envelope {
+        envelope(Message::Work(Work {
+            work_id: work_id.to_string(),
+            revision: 0,
+            base_revision: None,
+            dataset_ids: vec![dataset_id.to_string()],
+            payload: WorkPayload::Data(messages::DataWork {
+                op: DataOp::View,
+                source: String::new(),
+                cache_path: String::new(),
+                format: String::new(),
+                ingest: messages::IngestParams::default(),
+                row_offset,
+                row_limit: None,
+                columns: None,
+                max_bytes: messages::VIEW_CHUNK_BYTES,
+                render: None,
+            }),
+        }))
+    }
+
+    /// The mock lane answers a view with the Data view fields + a binary TSV tail.
+    fn lane_view_result(
+        lane: &Socket,
+        session: &str,
+        work_id: &str,
+        rows_total: u64,
+        row_offset: u64,
+        tsv: &[u8],
+        truncated: bool,
+    ) {
+        let row_count = tsv.iter().filter(|b| **b == b'\n').count() as u64;
+        let env = Envelope {
+            v: 1,
+            id: format!("rn-{work_id}"),
+            reply_to: None,
+            session_id: Some(session.to_string()),
+            format: Some("text/tsv".to_string()),
+            ts: None,
+            body: Message::Result(ResultMsg {
+                work_id: work_id.to_string(),
+                revision: 0,
+                status: Status::Complete,
+                payload: ResultPayload::Data(DataResult {
+                    dataset_id: None,
+                    dataset_revision: None,
+                    rows: Some(rows_total),
+                    schema: None,
+                    error_message: None,
+                    row_offset: Some(row_offset),
+                    row_count: Some(row_count),
+                    truncated: Some(truncated),
+                }),
+                module_version: None,
+                message: None,
+            }),
+        };
+        let json = serde_json::to_vec(&env).expect("serialize view result");
+        lane.send(frame_parts(&json, tsv).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+    }
+
+    // 24. A view work against a Ready dataset resolves it (refcount acquired), reaches the
+    //     lane with the CURRENT cache path injected, and the lane's answer round-trips to the
+    //     frontend with identity + revision stamped and the binary tail byte-exact. A view is
+    //     a pure read: no state flip, ref released at teardown.
+    #[test]
+    fn data_view_flows_to_lane_and_round_trips_the_tail() {
+        let url = format!("inproc://orch-ds-view-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_view_lane(&url);
+        let (fe, session) = hello_frontend(&url);
+
+        let dataset_id = open_to_ready(&fe, &lane, &session);
+        let cache_path = broker.datasets_snapshot()[0].2.clone();
+
+        let view = data_view_work("w-view", &dataset_id, 0);
+        fe.send(frame_envelope(&view).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let raw = lane.recv().expect("lane recv view work");
+        let env = deframe(&raw[..]).unwrap();
+        assert_eq!(env.session_id.as_deref(), Some(session.as_str()));
+        match &env.body {
+            Message::Work(w) => match &w.payload {
+                WorkPayload::Data(d) => {
+                    assert!(matches!(d.op, DataOp::View));
+                    assert_eq!(
+                        d.cache_path,
+                        cache_path.to_string_lossy(),
+                        "cache_path = the dataset's current path at dispatch"
+                    );
+                    assert_eq!(d.row_offset, 0);
+                    assert_eq!(d.max_bytes, messages::VIEW_CHUNK_BYTES);
+                }
+                other => panic!("expected data work payload, got {other:?}"),
+            },
+            other => panic!("expected work, got {other:?}"),
+        }
+        assert_eq!(
+            broker.datasets_snapshot()[0].3,
+            1,
+            "dispatch acquired a path ref for the view"
+        );
+
+        // The lane answers with view fields + a binary tail; both round-trip untouched.
+        let tsv = b"A\t1.5\t10.2\t100\nB\t5.2\t20.1\t200\n";
+        lane_view_result(&lane, &session, "w-view", 6, 0, tsv, true);
+        let raw = fe.recv().expect("frontend recv view result");
+        let (env, tail) = deframe_parts(&raw[..]).expect("frame with binary tail");
+        assert_eq!(tail, tsv, "the TSV tail round-trips byte-exact");
+        assert_eq!(env.format.as_deref(), Some("text/tsv"));
+        match env.body {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-view");
+                assert!(matches!(r.status, Status::Complete));
+                let ResultPayload::Data(d) = &r.payload else {
+                    panic!("expected data result payload")
+                };
+                assert_eq!(d.dataset_id.as_deref(), Some(dataset_id.as_str()));
+                assert_eq!(d.dataset_revision, Some(0), "revision at dispatch stamped");
+                assert_eq!(d.rows, Some(6));
+                assert_eq!(d.row_offset, Some(0));
+                assert_eq!(d.row_count, Some(2));
+                assert_eq!(d.truncated, Some(true));
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
+        // Pure read: the dataset is still ready and the teardown released the ref.
+        let snap = broker.datasets_snapshot();
+        assert_eq!(snap[0].1, "ready", "no state flip on a view terminal");
+        assert_eq!(snap[0].3, 0, "teardown released the path ref");
+    }
+
+    // 25. A view of an unknown dataset fails statelessly (dataset_not_ready) and never
+    //     reaches a lane — same guard as analysis work.
+    #[test]
+    fn data_view_of_unknown_dataset_errors_statelessly() {
+        let url = format!("inproc://orch-ds-viewnotready-{}", unique());
+        let (_broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_view_lane(&url);
+        let (fe, _session) = hello_frontend(&url);
+
+        let view = data_view_work("w-view-nope", "ds-nope", 0);
+        fe.send(frame_envelope(&view).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        match deframe(&fe.recv().expect("dataset_not_ready error")[..])
+            .unwrap()
+            .body
+        {
+            Message::Error(e) => {
+                assert_eq!(e.code, "dataset_not_ready");
+                assert_eq!(e.work_id.as_deref(), Some("w-view-nope"));
+            }
+            other => panic!("expected error, got {other:?}"),
+        }
+        lane.set_opt::<RecvTimeout>(Some(Duration::from_millis(300)))
+            .unwrap();
+        assert!(lane.recv().is_err(), "no work reaches the lane");
+    }
+
+    // 26. A view without exactly one dataset_id is a malformed request: a visible
+    //     bad_request error (never a silent drop), nothing dispatched.
+    #[test]
+    fn data_view_without_dataset_ids_errors() {
+        let url = format!("inproc://orch-ds-viewbadreq-{}", unique());
+        let (_broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_view_lane(&url);
+        let (fe, _session) = hello_frontend(&url);
+
+        let mut view = data_view_work("w-view-bare", "ignored", 0);
+        if let Message::Work(w) = &mut view.body {
+            w.dataset_ids.clear();
+        }
+        fe.send(frame_envelope(&view).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        match deframe(&fe.recv().expect("bad_request error")[..])
+            .unwrap()
+            .body
+        {
+            Message::Error(e) => {
+                assert_eq!(e.code, "bad_request");
+                assert_eq!(e.work_id.as_deref(), Some("w-view-bare"));
+            }
+            other => panic!("expected error, got {other:?}"),
+        }
+        lane.set_opt::<RecvTimeout>(Some(Duration::from_millis(300)))
+            .unwrap();
+        assert!(lane.recv().is_err(), "no work reaches the lane");
+    }
+
+    // 27. A lane death mid-VIEW fails the work like any eviction but keeps the dataset
+    //     (op-aware: only opens die with their lane). The frontend may retry the view.
+    #[test]
+    fn lane_eviction_fails_an_in_flight_view_but_keeps_the_dataset() {
+        let url = format!("inproc://orch-ds-viewevict-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, lid) = register_view_lane(&url);
+        let (fe, _session) = hello_frontend(&url);
+
+        let dataset_id = open_to_ready(&fe, &lane, &_session);
+        let view = data_view_work("w-view-evict", &dataset_id, 0);
+        fe.send(frame_envelope(&view).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let _ = lane.recv().expect("lane recv view work");
+        drop(lane); // pipe removal → eviction
+
+        match deframe(&fe.recv().expect("eviction failure")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-view-evict");
+                assert!(matches!(r.status, Status::FatalError));
+            }
+            other => panic!("expected fatalError result, got {other:?}"),
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if !broker.runners_snapshot().contains(&lid) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "lane evicted");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let snap = broker.datasets_snapshot();
+        assert_eq!(snap.len(), 1, "the viewed dataset survives the lane death");
+        assert_eq!(snap[0].1, "ready");
+    }
+
+    // 28. A view arriving while its lane is down parks (running marker + EnsureLane) and is
+    //     dispatched with the cache path injected when a view-capable lane registers —
+    //     op-aware parking (the capability match is on the op, not a format).
+    #[test]
+    fn data_view_parks_until_a_view_lane_registers() {
+        let url = format!("inproc://orch-ds-viewpark-{}", unique());
+        let (_broker, _ctl, req_rx, _event_tx) =
+            start_broker_with_stub_provisioner(url.clone(), 60_000, vec![], true);
+        // Boot pre-spawn of the configured lane.
+        match req_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("boot EnsureLane")
+        {
+            crate::provisioner::ProvReq::EnsureLane { lane } => {
+                assert!(matches!(lane, crate::provisioner::LaneKind::RustData));
+            }
+            other => panic!("expected EnsureLane, got {other:?}"),
+        }
+
+        let (fe, session) = hello_frontend(&url);
+        // A Ready dataset first (the lane is still up), then the lane goes away.
+        let (lane, lid) = register_view_lane(&url);
+        let dataset_id = open_to_ready(&fe, &lane, &session);
+        drop(lane);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if !_broker.runners_snapshot().contains(&lid) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "lane evicted");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // The view now misses its lane: parked, not dropped.
+        // (First drain the provisioner queue — the first lane's registration queued a
+        // RunnerUp and its eviction a RunnerGone; both are expected bookkeeping here.)
+        let mut drained = Vec::new();
+        while let Ok(req) = req_rx.recv_timeout(Duration::from_millis(200)) {
+            drained.push(req);
+        }
+        assert!(
+            drained.iter().any(|r| matches!(
+                r,
+                crate::provisioner::ProvReq::RunnerUp { lanes, .. }
+                    if lanes.contains(&crate::provisioner::LaneKind::RustData)
+            )),
+            "saw the first lane's RunnerUp: {drained:?}"
+        );
+        assert!(
+            drained.iter().any(|r| matches!(
+                r,
+                crate::provisioner::ProvReq::RunnerGone { lanes, .. }
+                    if lanes.contains(&crate::provisioner::LaneKind::RustData)
+            )),
+            "saw the dropped lane's RunnerGone: {drained:?}"
+        );
+        let view = data_view_work("w-view-park", &dataset_id, 0);
+        fe.send(frame_envelope(&view).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        match deframe(&fe.recv().expect("running marker")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => assert!(matches!(r.status, Status::Running)),
+            other => panic!("expected running result, got {other:?}"),
+        }
+        match req_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("park EnsureLane")
+        {
+            crate::provisioner::ProvReq::EnsureLane { .. } => {}
+            other => panic!("expected EnsureLane, got {other:?}"),
+        }
+
+        // A fresh lane registers → the parked view is dispatched with the cache path.
+        let (lane2, _lid2) = register_view_lane(&url);
+        let raw = lane2.recv().expect("lane recv parked view work");
+        match deframe(&raw[..]).unwrap().body {
+            Message::Work(w) => match &w.payload {
+                WorkPayload::Data(d) => {
+                    assert!(matches!(d.op, DataOp::View));
+                    assert!(
+                        d.cache_path.contains("/datasets/") && d.cache_path.ends_with("_0.arrow"),
+                        "cache path injected at dispatch of the parked view: {}",
+                        d.cache_path
+                    );
+                }
+                other => panic!("expected data work payload, got {other:?}"),
+            },
+            other => panic!("expected work, got {other:?}"),
+        }
+        lane_view_result(&lane2, &session, "w-view-park", 7, 0, b"x\n", false);
+        match deframe(&fe.recv().expect("view result")[..]).unwrap().body {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-view-park");
+                assert!(matches!(r.status, Status::Complete));
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
     }
 
     // 22. The janitor deletes both single files (retired dataset cache files) and directory

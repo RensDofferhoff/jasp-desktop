@@ -538,6 +538,13 @@
     "v"
   ],
   "properties": {
+    "format": {
+      "description": "Names the binary payload encoding (§18.2/§18.3); **required when a binary part is present** (e.g. `\"text/tsv\"` on a view result), absent on JSON-only frames.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "id": {
       "description": "Correlation id for this message.",
       "type": "string"
@@ -715,12 +722,23 @@
     },
     "DataOp": {
       "description": "The data-plane operations — the `op` of a `data` capability (and of `data` work, §19.3).",
-      "type": "string",
-      "enum": [
-        "data_open",
-        "data_edit",
-        "data_close",
-        "data_update"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "data_open",
+            "data_edit",
+            "data_close",
+            "data_update"
+          ]
+        },
+        {
+          "description": "A windowed view of a cached dataset (data-view-format.md): the lane slices the Feather and renders the window as escaped TSV in the frame's binary part.",
+          "type": "string",
+          "enum": [
+            "data_view"
+          ]
+        }
       ]
     },
     "DataResult": {
@@ -734,6 +752,15 @@
             "null"
           ]
         },
+        "dataset_revision": {
+          "description": "The dataset revision **at dispatch** — orchestrator-filled, stamped on every view result so the frontend drops stale chunks (data-view-design §6.3).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "error_message": {
           "description": "Present when `status` is a failure (lane).",
           "type": [
@@ -741,8 +768,26 @@
             "null"
           ]
         },
+        "row_count": {
+          "description": "Rows carried in the binary part (lane, `data_view`).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "row_offset": {
+          "description": "First row carried in the binary part (lane, `data_view`).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "rows": {
-          "description": "Row count (lane).",
+          "description": "TOTAL row count of the dataset at serve time (lane).",
           "type": [
             "integer",
             "null"
@@ -752,6 +797,13 @@
         },
         "schema": {
           "description": "The frontend's column view: `[{name, display_name, type, levels?, all_integer?}]` (§24)."
+        },
+        "truncated": {
+          "description": "Stopped at `max_bytes` before `row_limit`/end (lane, `data_view`).",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       }
     },
@@ -767,11 +819,21 @@
       ],
       "properties": {
         "cache_path": {
-          "description": "**Orchestrator-assigned at dispatch** (identity, not I/O — the lane writes the file); the sender leaves it empty: `<state_root>/<session>/datasets/<dataset_id>_<revision>.arrow`.",
+          "description": "**Orchestrator-assigned at dispatch** (identity, not I/O): `data_open` gets a fresh path the lane writes (`<state_root>/<session>/datasets/<dataset_id>_<revision>.arrow`); `data_view` gets the dataset's `current_path` injected so the lane can slice it. The sender leaves it empty.",
           "type": "string"
         },
+        "columns": {
+          "description": "Columns to serve, by DISPLAY name; null = all columns in schema order.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
         "format": {
-          "description": "Routing key selecting the lane + parser (`\"csv\"`, later `\"spss\"`, `\"arrow\"`, …). Meaningful for `data_open`.",
+          "description": "Routing key selecting the lane + parser (`\"csv\"`, later `\"spss\"`, `\"arrow\"`, …). Meaningful for `data_open`; `data_view` is format-agnostic (it reads the cache).",
           "type": "string"
         },
         "ingest": {
@@ -782,16 +844,50 @@
             }
           ]
         },
+        "max_bytes": {
+          "description": "Budget for THIS response, counted exactly on the escaped TSV bytes. The lane stops at a row boundary (whole rows only), with a progress guarantee of ≥ 1 row.",
+          "default": 20000000,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "op": {
-          "description": "The operation to perform (`data_open` in this increment).",
+          "description": "The operation to perform (`data_open` / `data_view`).",
           "allOf": [
             {
               "$ref": "#/definitions/DataOp"
             }
           ]
         },
+        "render": {
+          "description": "Locale rendering spec — the lane is the only float→string converter (format doc §1.2). Absent = lane default: `.` decimal, no grouping, precision 10.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ViewRender"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "row_limit": {
+          "description": "Window length; null = to the end of the dataset (still capped by `max_bytes`).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "row_offset": {
+          "description": "First row of the window.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
         "source": {
-          "description": "The source file to read (`data_open`: the user's CSV/… file). The lane reads it directly — the orchestrator never touches the bytes.",
+          "description": "The source file to read (`data_open`: the user's CSV/… file). The lane reads it directly — the orchestrator never touches the bytes. Unused by `data_view`.",
           "type": "string"
         }
       }
@@ -913,6 +1009,29 @@
         "fatalError",
         "validationError"
       ]
+    },
+    "ViewRender": {
+      "description": "Locale rendering spec for `data_view` requests (data-view-format.md §1.2): explicit separator **characters**, not a locale id — the frontend's `QLocale` is the authority and the lane stays dependency-free. A locale/separator change is a drop-and-refill on the frontend (the buffer's strings are locale-baked).",
+      "type": "object",
+      "properties": {
+        "decimal": {
+          "description": "Decimal separator.",
+          "default": ".",
+          "type": "string"
+        },
+        "precision": {
+          "description": "Significant digits — C/Qt `'g'` semantics (legacy parity at 10).",
+          "default": 10,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "thousands": {
+          "description": "Grouping (thousands) separator; `\"\"` = no grouping.",
+          "default": "",
+          "type": "string"
+        }
+      }
     }
   }
 }

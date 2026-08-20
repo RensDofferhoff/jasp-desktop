@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include <QObject>
 #include <QByteArray>
@@ -139,6 +140,10 @@ private:
 	void logIo(const char * dir, const Json::Value & env) const;	///< log one message per _verbosity
 	// Framing (§18.1).
 	static QByteArray frameEnvelope(const Json::Value & env);
+	/// Split a frame into its JSON envelope and trailing binary payload (§18.1). View
+	/// results carry their escaped-TSV cells in the tail — consumers get raw bytes that
+	/// never went through the JSON parser. The tail is empty on JSON-only frames.
+	static std::pair<Json::Value, QByteArray> splitFrame(const QByteArray & body);
 	static Json::Value deframeEnvelope(const QByteArray & body);
 
 	static JaspClient * _singleton;

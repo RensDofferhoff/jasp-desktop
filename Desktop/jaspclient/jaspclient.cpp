@@ -22,6 +22,11 @@ constexpr nng_duration kHandshakeTimeoutMs = 3000;	// REQ send/recv timeout
 constexpr int          kReconnectChunks    = 10;	// back off ~1s between attempts ...
 constexpr int          kChunkMs            = 100;	// ... in 100ms chunks so shutdown stays prompt
 constexpr int          kPeerBufDepth       = 64;	// PAIR SENDBUF/RECVBUF (messages)
+// §18.4/§4.4 wire ceiling: libnng's RecvMaxSize DEFAULTS TO ~1 MiB AND SILENTLY DISCARDS
+// larger messages (neo-jasp §25.5). View chunks (~20 MB) and any future bulk ride this
+// channel, so raise it to the shared ceiling + envelope margin — matching the orchestrator
+// and the data lane. nanonext/R raises it internally; the C endpoint must do it itself.
+constexpr size_t kRecvMaxSize = (size_t(256) + 16) * 1024 * 1024;
 }
 
 JaspClient * JaspClient::_singleton = nullptr;
@@ -101,6 +106,8 @@ bool JaspClient::handshake()
 	// Bound every step so a missing/unresponsive orchestrator fails fast and we retry.
 	nng_socket_set_ms(req, NNG_OPT_SENDTIMEO, kHandshakeTimeoutMs);
 	nng_socket_set_ms(req, NNG_OPT_RECVTIMEO, kHandshakeTimeoutMs);
+	// Harmless on the handshake REQ (its replies are small), but uniform with the data channel.
+	nng_socket_set_size(req, NNG_OPT_RECVMAXSZ, kRecvMaxSize);
 
 	// Non-blocking dial: NNG connects in the background; the send below times out if it cannot.
 	rv = nng_dial(req, _url.c_str(), nullptr, NNG_FLAG_NONBLOCK);
@@ -176,6 +183,10 @@ bool JaspClient::openDataChannel()
 	// recv room for its frames to land even before we post the next recv.
 	nng_socket_set_int(s, NNG_OPT_SENDBUF, kPeerBufDepth);
 	nng_socket_set_int(s, NNG_OPT_RECVBUF, kPeerBufDepth);
+	// §18.4/§4.4: raise the recv ceiling — the libnng default (~1 MiB) silently discards
+	// larger messages, and view chunks (~20 MB) arrive on this channel.
+	if (nng_socket_set_size(s, NNG_OPT_RECVMAXSZ, kRecvMaxSize) != 0)
+		Log::log() << "JaspClient: could not raise NNG_OPT_RECVMAXSZ; large frames may be dropped." << std::endl;
 
 	rv = nng_dial(s, _channelUrl.c_str(), nullptr, 0);	// blocking: the orchestrator just created this listener
 	if (rv != 0)
@@ -404,7 +415,7 @@ void JaspClient::sendFrame(const Json::Value & envelope)
 		Log::log() << "JaspClient: send failed: " << nng_strerror(rv) << std::endl;
 }
 
-// ── framing (§18.1) ──────────────────────────────────────────────────────────
+// ── framing (§18.1) ──────────────────────────────────────────────
 
 QByteArray JaspClient::frameEnvelope(const Json::Value & env)
 {
@@ -422,11 +433,13 @@ QByteArray JaspClient::frameEnvelope(const Json::Value & env)
 	return frame;
 }
 
-Json::Value JaspClient::deframeEnvelope(const QByteArray & body)
+std::pair<Json::Value, QByteArray> JaspClient::splitFrame(const QByteArray & body)
 {
-	// Frame (§18.1): [u32 BE json_len][json][binary?]. The alpha ignores any binary payload.
+	// Frame (§18.1): [u32 BE json_len][json][binary tail?]. The JSON envelope is parsed;
+	// the trailing binary payload (e.g. a view chunk's escaped TSV) is returned verbatim —
+	// bulk bytes never go through the JSON parser.
 	if (body.size() < 4)
-		return Json::Value();
+		return { Json::Value(), QByteArray() };
 
 	const quint32 len = (static_cast<quint8>(body.at(0)) << 24) |
 						(static_cast<quint8>(body.at(1)) << 16) |
@@ -434,7 +447,7 @@ Json::Value JaspClient::deframeEnvelope(const QByteArray & body)
 						 static_cast<quint8>(body.at(3));
 
 	if (static_cast<quint32>(body.size()) < 4u + len)
-		return Json::Value();
+		return { Json::Value(), QByteArray() };
 
 	Json::CharReaderBuilder rb;
 	std::unique_ptr<Json::CharReader> reader(rb.newCharReader());
@@ -444,9 +457,14 @@ Json::Value JaspClient::deframeEnvelope(const QByteArray & body)
 	if (!reader->parse(begin, begin + len, &env, &errs))
 	{
 		Log::log() << "JaspClient: bad envelope JSON: " << errs << std::endl;
-		return Json::Value();
+		return { Json::Value(), QByteArray() };
 	}
-	return env;
+	return { env, body.mid(static_cast<int>(4u + len)) };
+}
+
+Json::Value JaspClient::deframeEnvelope(const QByteArray & body)
+{
+	return splitFrame(body).first;
 }
 
 void JaspClient::logIo(const char * dir, const Json::Value & env) const
