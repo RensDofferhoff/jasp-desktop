@@ -213,11 +213,10 @@ void RibbonButton::setEnabled(bool enabled)
 
 	if(DynamicModules::dynMods())
 	{
-		if(!isSpecial())
-		{
-			if(enabled)	DynamicModules::dynMods()->loadModule(_module->name());
-			else		DynamicModules::dynMods()->unloadModule(_module->name());
-		}
+		//We only load here and never unload: deselecting a module should merely hide it from the ribbon, not destroy anything.
+		//DynamicModules::unloadModule removes any running analyses of the module (through dynamicModuleUnloadBegin) and is reserved for actually uninstalling or replacing a module.
+		if(enabled && !isSpecial())
+			DynamicModules::dynMods()->loadModule(_module->name());
 
 		emit DynamicModules::dynMods()->moduleEnabledChanged(nameQ(), enabled);
 	}

@@ -19,6 +19,7 @@
 
 #include "ribbonmodel.h"
 #include "utilities/messageforwarder.h"
+#include "utilities/settings.h"
 #include "log.h"
 #include "qquick/datasetview.h"
 #include "mainwindow.h"
@@ -73,17 +74,32 @@ void RibbonModel::loadModules(std::vector<InstalledModules::ModuleInfo> modulesT
 
 	addSpecialRibbonButtonsLate();
 
-	if(PreferencesModel::prefs()->modulesRemember())
+	//All modules, common (core) ones included, can be (de)selected by the user in the modules-menu.
+	//The common-modules are merely the initial default set of enabled modules (possibly overridden by an admin through OverrideCommon, which is likewise only an initial state).
+	//If the user chose to remember enabled modules and ever stored a selection then that list is leading, otherwise we start out with the common modules enabled.
+	QStringList		enabledModules	= PreferencesModel::prefs()->modulesRemembered();
+	bool		selectionStored	= PreferencesModel::prefs()->modulesRemember() && Settings::isSet(Settings::MODULES_REMEMBERED);
+
+	if(selectionStored && !Settings::isSet(Settings::MODULES_SELECTION_MIGRATED))
 	{
-		QStringList enabledModules = PreferencesModel::prefs()->modulesRemembered();
+		//One-time migration for selections stored before all modules became (de)selectable:
+		//those lists never contained the common modules (those were force-enabled and so never stored), so add them to prevent the core modules disappearing from the ribbon upon upgrading.
+		//The enabled-true-calls below store the added modules in the selection automatically.
+		for(auto & nameButton : _buttonModelsByName)
+			if(nameButton.second->remember() && nameButton.second->isCommon() && !enabledModules.contains(nameButton.second->nameQ()))
+				enabledModules.append(nameButton.second->nameQ());
 
-		for(const QString & enabledModule : enabledModules)
-		{
-			std::string mod = enabledModule.toStdString();
+		Settings::setValue(Settings::MODULES_SELECTION_MIGRATED, true);
+	}
 
-			if(_buttonModelsByName.count(mod) > 0 && _buttonModelsByName[mod]->remember())
-				_buttonModelsByName[mod]->setEnabled(true);
-		}
+	for(auto & nameButton : _buttonModelsByName)
+	{
+		RibbonButton * button = nameButton.second;
+
+		if(!button->remember())
+			continue;
+
+		button->setEnabled(selectionStored ? enabledModules.contains(button->nameQ()) : button->isCommon());
 	}
 }
 
