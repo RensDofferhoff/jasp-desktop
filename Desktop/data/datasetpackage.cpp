@@ -190,7 +190,14 @@ void DataSetPackage::onDataModeChanged(bool dataMode)
 {
 	Log::log() << "Data Mode " << (dataMode ? "on" : "off") << "!" << std::endl;
 	_dataMode = dataMode;
-	
+
+	// NEO: with a lane-owned dataset active the legacy model is an EMPTY skeleton — resetting
+	// it only churns legacy consumers (filters, label editor) into indexing empty columns.
+	// Their UIs stay inert until the NEO equivalents land (data-model-design decision 11),
+	// and the grid reads GridModel, which doesn't care about this reset.
+	if (_registry && _registry->active())
+		return;
+
 	doWalCheckPoint();
 
 	beginResetModel();
@@ -1901,7 +1908,9 @@ QStringList DataSetPackage::getColumnLabelsAsStringList(size_t columnIndex)	cons
 std::map<std::string, bool> DataSetPackage::getColumnFilterAllows(size_t columnIndex) const
 {
 	std::map<std::string, bool> map;
-	if(columnIndex < 0 || columnIndex >= dataColumnCount()) 
+	// Bound against the legacy vector actually indexed — dataColumnCount() is delegated to
+	// the NEO schema and would let indices through this empty skeleton cannot serve.
+	if (!_dataSet || columnIndex < 0 || size_t(columnIndex) >= _dataSet->columns().size())
 		return map;
 	
 	Column * column =_dataSet->columns()[columnIndex];
@@ -1916,7 +1925,7 @@ std::map<std::string, bool> DataSetPackage::getColumnFilterAllows(size_t columnI
 stringvec DataSetPackage::getColumnLabelsAsStrVec(size_t columnIndex) const
 {
 	stringvec list;
-	if(columnIndex < 0 || columnIndex >= dataColumnCount()) 
+	if (!_dataSet || columnIndex < 0 || size_t(columnIndex) >= _dataSet->columns().size())
 		return list;
 
 	return _dataSet->columns()[columnIndex]->labelsAsStrings();
@@ -1926,7 +1935,7 @@ stringvec DataSetPackage::getColumnLabelsAsStrVec(size_t columnIndex) const
 stringvec DataSetPackage::getColumnLevelsAsStrVec(size_t columnIndex) const
 {
 	stringvec list;
-	if(columnIndex < 0 || columnIndex >= dataColumnCount()) 
+	if (!_dataSet || columnIndex < 0 || size_t(columnIndex) >= _dataSet->columns().size())
 		return list;
 
 	return _dataSet->columns()[columnIndex]->nonEmptyLevelsStrings();
@@ -1936,7 +1945,7 @@ stringvec DataSetPackage::getColumnLevelsAsStrVec(size_t columnIndex) const
 QList<QVariant> DataSetPackage::getColumnValuesAsDoubleList(size_t columnIndex)	const
 {
 	QList<QVariant> list;
-	if(columnIndex < 0 || columnIndex >= dataColumnCount()) return list;
+	if (!_dataSet || columnIndex < 0 || size_t(columnIndex) >= _dataSet->columns().size()) return list;
 
 	for (double value : _dataSet->columns()[columnIndex]->dbls())
 		list.append(value);
@@ -1946,9 +1955,12 @@ QList<QVariant> DataSetPackage::getColumnValuesAsDoubleList(size_t columnIndex)	
 
 bool DataSetPackage::labelNeedsFilter(size_t columnIndex) const
 {
-	if(columnIndex < 0 || columnIndex >= dataColumnCount()) 
+	// Bound against the vector actually indexed below — NOT dataColumnCount(), which is
+	// delegated to the NEO schema when a lane-owned dataset is active and would let indices
+	// through that this empty legacy skeleton cannot serve.
+	if (!_dataSet || columnIndex >= _dataSet->columns().size())
 		return false;
-			
+
 	return _dataSet->columns()[columnIndex]->hasFilter();
 }
 

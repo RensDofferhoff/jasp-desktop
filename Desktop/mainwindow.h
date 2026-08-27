@@ -71,6 +71,7 @@ using Modules::Upgrader;
 class Application;
 class AllHelp;
 class JaspClient;
+class GridModel;
 ///
 /// Not only the main window of the application but also the main class.
 /// Instantiates relevant models and loads QML (see loadQml)
@@ -333,6 +334,7 @@ private:
 	DataSetPackage				*	_package				= nullptr;
 	DataSetTableModel			*	_datasetTableModel		= nullptr,
 								*	_dataSetModelVarInfo	= nullptr;
+	GridModel					*	_gridModel				= nullptr;	///< NEO: the grid's model, registered as `dataSetModel` (data-view-design §7.3)
 	labelFilterGenerator		*	_labelFilterGenerator	= nullptr;
 	ColumnsModel				*	_columnsModel			= nullptr;
 	ComputedColumnModel			*	_computedColumnsModel	= nullptr;

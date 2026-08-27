@@ -91,10 +91,18 @@ Qt::ItemFlags ExpandDataProxyModel::flags(const QModelIndex &index) const
 	if (!_sourceModel)
 		return Qt::NoItemFlags;
 
-	if (index.column() < _sourceModel->columnCount() && index.row() < _sourceModel->rowCount())
-		return _sourceModel->flags(_sourceModel->index(index.row(), index.column()));
+	// NEO read-only guard (data-view-design §7.5): a non-DataSetTableModel source (the NEO
+	// GridModel) has no editing surface — strip ItemIsEditable everywhere, virtual cells
+	// included, so no edit can start (typing, pasting, double-click).
+	const bool editableSource = useUndoStack();
 
-	return Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsEditable;
+	if (index.column() < _sourceModel->columnCount() && index.row() < _sourceModel->rowCount())
+	{
+		Qt::ItemFlags sourceFlags = _sourceModel->flags(_sourceModel->index(index.row(), index.column()));
+		return editableSource ? sourceFlags : (sourceFlags & ~Qt::ItemIsEditable);
+	}
+
+	return Qt::ItemIsSelectable | Qt::ItemIsEnabled | (editableSource ? Qt::ItemIsEditable : Qt::NoItemFlags);
 }
 
 QModelIndex ExpandDataProxyModel::index(int row, int column, const QModelIndex &) const
@@ -154,7 +162,7 @@ void ExpandDataProxyModel::setSourceModel(QAbstractItemModel *sourceModel)
 
 void ExpandDataProxyModel::removeRows(int start, int count)
 {
-	if (!_sourceModel || count <= 0 || start < 0 || start >= _sourceModel->rowCount())
+	if (!_sourceModel || !useUndoStack() || count <= 0 || start < 0 || start >= _sourceModel->rowCount())
 		return;
 
 	if (start + count > _sourceModel->rowCount())
@@ -163,8 +171,11 @@ void ExpandDataProxyModel::removeRows(int start, int count)
 	_undoStack->pushCommand(new RemoveRowsCommand(_sourceModel, start, count));
 }
 
-void ExpandDataProxyModel::removeRowGroups(std::vector<std::pair<int, int> > groups)
+void ExpandDataProxyModel::removeRowGroups(std::vector<std::pair<int,int>> groups)
 {
+	if (!useUndoStack())
+		return;
+
 	int rows = 0;
 	for(const auto & startCount : groups)
 		rows += startCount.second; 
@@ -181,7 +192,7 @@ void ExpandDataProxyModel::removeRowGroups(std::vector<std::pair<int, int> > gro
 
 void ExpandDataProxyModel::removeColumns(int start, int count)
 {
-	if (!_sourceModel || count <= 0 || start < 0 || start >= _sourceModel->columnCount())
+	if (!_sourceModel || !useUndoStack() || count <= 0 || start < 0 || start >= _sourceModel->columnCount())
 		return;
 
 	if (start + count > _sourceModel->columnCount())
@@ -190,8 +201,11 @@ void ExpandDataProxyModel::removeColumns(int start, int count)
 	_undoStack->pushCommand(new RemoveColumnsCommand(_sourceModel, start, count));
 }
 
-void ExpandDataProxyModel::removeColumnGroups(std::vector<std::pair<int, int> > groups)
+void ExpandDataProxyModel::removeColumnGroups(std::vector<std::pair<int,int>> groups)
 {
+	if (!useUndoStack())
+		return;
+
 	int cols = 0;
 	for(const auto & startCount : groups)
 		cols += startCount.second; 
@@ -208,7 +222,7 @@ void ExpandDataProxyModel::removeColumnGroups(std::vector<std::pair<int, int> > 
 
 void ExpandDataProxyModel::insertRows(int row, int count)
 {
-	if (!_sourceModel)
+	if (!_sourceModel || !useUndoStack())
 		return;
 
 	_undoStack->pushCommand(new InsertRowsCommand(_sourceModel, row, count));
@@ -217,7 +231,7 @@ void ExpandDataProxyModel::insertRows(int row, int count)
 
 void ExpandDataProxyModel::insertColumns(int col, int count)
 {
-	if (!_sourceModel)
+	if (!_sourceModel || !useUndoStack())
 		return;
 
 	_undoStack->pushCommand(new InsertColumnsCommand(_sourceModel, col, count));
@@ -226,7 +240,7 @@ void ExpandDataProxyModel::insertColumns(int col, int count)
 
 void ExpandDataProxyModel::insertColumn(int col, bool computed, bool R)
 {
-	if (!_sourceModel)
+	if (!_sourceModel || !useUndoStack())
 		return;
 
 	QMap<QString, QVariant> props;
@@ -237,7 +251,7 @@ void ExpandDataProxyModel::insertColumn(int col, bool computed, bool R)
 
 void ExpandDataProxyModel::resize(int row, int col, bool onlyExpand, const QString& undoText)
 {
-	if (!_sourceModel || row < 0 || col < 0)
+	if (!_sourceModel || !useUndoStack() || row < 0 || col < 0)
 		return;
 
 	if (onlyExpand)
@@ -299,7 +313,7 @@ bool ExpandDataProxyModel::setData(const QModelIndex &index, const QVariant &val
 
 void ExpandDataProxyModel::pasteSpreadsheet(int row, int col, const std::vector<std::vector<QString>> & values, const std::vector<std::vector<QString>> & labels, const QStringList & colNames, const std::vector<boolvec> & selected)
 {
-	if (!_sourceModel || row < 0 || col < 0 || values.size() == 0 || values[0].size() == 0 )
+	if (!_sourceModel || !useUndoStack() || row < 0 || col < 0 || values.size() == 0 || values[0].size() == 0 )
 		return;
 
 	resize(row + values[0].size() - 1, col + values.size() - 1);
@@ -308,6 +322,9 @@ void ExpandDataProxyModel::pasteSpreadsheet(int row, int col, const std::vector<
 
 int ExpandDataProxyModel::setColumnType(intset columnIndexes, int columnType)
 {
+	if (!useUndoStack())
+		return columnType;
+
 	_undoStack->pushCommand(new SetColumnTypeCommand(_sourceModel, columnIndexes, columnType));
 
 	return columnType; //it always works
@@ -315,17 +332,23 @@ int ExpandDataProxyModel::setColumnType(intset columnIndexes, int columnType)
 
 void ExpandDataProxyModel::columnReverseValues(intset columnIndexes)
 {
+	if (!useUndoStack())
+		return;
+
 	_undoStack->pushCommand(new ColumnReverseValuesCommand(_sourceModel, columnIndexes));
 }
 
 void ExpandDataProxyModel::columnautoSortByValues(intset columnIndexes)
 {
+	if (!useUndoStack())
+		return;
+
     _undoStack->pushCommand(new ColumnToggleAutoSortByValuesCommand(_sourceModel, columnIndexes));
 }
 
 void ExpandDataProxyModel::copyColumns(int startCol, const std::vector<Json::Value>& copiedColumns)
 {
-	if (!_sourceModel || startCol < 0 || copiedColumns.size() == 0)
+	if (!_sourceModel || !useUndoStack() || startCol < 0 || copiedColumns.size() == 0)
 		return;
 
 	resize(0, startCol + copiedColumns.size() - 1);

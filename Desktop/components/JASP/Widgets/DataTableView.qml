@@ -324,7 +324,9 @@ FocusScope
 			Text
 			{
 				id:						dataFilterStatusText
-				text:					filterModel.statusBarText
+				// NEO: the filter status has priority; otherwise the grid's view status
+				// (buffered-prefix note / fill failure — GridModel::viewStatus).
+				text:					filterModel.statusBarText !== "" ? filterModel.statusBarText : dataSetModel.viewStatus
 				font:					jaspTheme.font
 				color:					jaspTheme.textEnabled
 				anchors.left:			parent.left

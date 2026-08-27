@@ -96,6 +96,12 @@ public:
 	double					viewportW()							const	{ return _viewportW;				}
 	double					viewportH()							const	{ return _viewportH;				}
 
+	/// Current viewport ROW range as computed by determineCurrentViewPortIndices(): [min, max),
+	/// margins already applied. 0 before the first layout pass (the fields start at -1). NEO
+	/// sliding mode reads these to drive the view-fill scheduler.
+	int						viewportRowMin()					const	{ return _currentViewportRowMin < 0 ? 0 : _currentViewportRowMin;	}
+	int					viewportRowMax()					const	{ return _currentViewportRowMax < 0 ? 0 : _currentViewportRowMax;	}
+
 	QQmlComponent		*	itemDelegate()						const	{ return _itemDelegate;				}
 	QQmlComponent		*	rowNumberDelegate()					const	{ return _rowNumberDelegate;		}
 	QQmlComponent		*	columnHeaderDelegate()				const	{ return _columnHeaderDelegate;		}
@@ -154,6 +160,12 @@ signals:
 	void		viewportYChanged();
 	void		viewportWChanged();
 	void		viewportHChanged();
+
+	/// NEO sliding mode (data-view-format.md §2.5): the viewport's row range [firstRow, lastRow)
+	/// was recomputed (margins already applied). REAL signal, rows only — the fill scheduler's
+	/// viewport feed. (viewportChangedDelayed is a SLOT: connecting TO it as a sender silently
+	/// makes no connection — found against the real GUI.)
+	void		viewportRowsChanged(int firstRow, int lastRow);
 
 	void		rowNumberDelegateChanged();
 	void		columnHeaderDelegateChanged();

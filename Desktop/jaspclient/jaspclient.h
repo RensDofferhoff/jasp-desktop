@@ -73,6 +73,14 @@ public:
 		uint64_t    rows = 0;	///< row count
 		Json::Value schema;		///< column view [{name, display_name, type, levels?, all_integer?}]
 
+		// kind:"data" — data_view additions (data-view-design §4.1): the chunk metadata plus the
+		// frame's binary tail — the escaped TSV cells, raw bytes that never went through JSON.
+		uint64_t    datasetRevision = 0;	///< dataset revision at dispatch — stale-chunk guard (§6.3)
+		uint64_t    rowOffset = 0;		///< first row carried in `binary`
+		uint64_t    rowCount = 0;		///< rows carried in `binary`
+		bool        truncated = false;	///< the lane stopped at max_bytes before row_limit/end
+		QByteArray  binary;				///< the binary payload part ("" when the frame was JSON-only)
+
 		std::string message;	///< human-readable detail on failure (payload error_message / result message)
 	};
 
@@ -124,6 +132,12 @@ signals:
 	/// (first frame on the data channel), change pushes, and any list_modules reply. GUI thread.
 	/// Replace your menu with it.
 	void modulesUpdated(const ModuleCatalog & catalog);
+
+	/// A `data_changed` broadcast arrived (neo-jasp §19.2, data-view-design §6): invalidation
+	/// metadata, never a data carrier — consumers refetch the affected scope via `data_view`.
+	/// Skeleton signal: no producer exists until `data_edit`/`data_update` land; the reaction
+	/// matrix hooks in when they do.
+	void datasetChanged(const QString & datasetId, quint64 revision);
 
 private:
 	// Connection lifecycle — all run on the single worker thread (`_recvThread`).

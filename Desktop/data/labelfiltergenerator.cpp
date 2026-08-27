@@ -12,6 +12,11 @@ std::string labelFilterGenerator::generateFilter()
 {
 	JASPTIMER_SCOPE(labelFilterGenerator::generateFilter);
 
+	// NEO: label filters stay inert for lane-owned datasets until filters land there
+	// (data-model-design decision 11) — the loop below would index the empty legacy skeleton.
+	if (!DataSetPackage::pkg()->datasetId().empty())
+		return DEFAULT_FILTER_GEN;
+
 	int neededFilters = 0;
 	
 	DataSetPackage * pkg = DataSetPackage::pkg();

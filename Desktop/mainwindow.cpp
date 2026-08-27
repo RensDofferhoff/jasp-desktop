@@ -43,6 +43,7 @@
 #include "data/exporters/jaspexporter.h"
 #include "data/datasetregistry.h"	// NEO data model (data-model-design.md)
 #include "data/datamodel.h"
+#include "data/gridmodel.h"			// NEO data view (data-view-design.md §7.2/§7.3)
 #include "utilities/application.h"
 #include "gui/jaspversionchecker.h"
 #include "ALTNavigation/altnavcontrol.h"
@@ -134,6 +135,11 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 	_datasetTableModel		= new DataSetTableModel();
 	_dataSetModelVarInfo	= new DataSetTableModel(false);
 	_columnModel			= new ColumnModel(_datasetTableModel);
+	// NEO data view (data-view-design §7.3 — the burn-down seam): the grid's `dataSetModel`
+	// IS this GridModel, bound to the registry's active dataset + view buffer. The legacy
+	// chain above keeps compiling (ColumnModel, label editor) but the grid never reads it
+	// again — it dies with Phase B.
+	_gridModel				= new GridModel(this);
 	
 	initLog(); //initLog needs _preferences!
 
@@ -685,7 +691,7 @@ void MainWindow::loadQML()
 	_qml->rootContext()->setContextProperty("columnModel",								_columnModel									);
 	_qml->rootContext()->setContextProperty("aboutModel",								_aboutModel										);
 	_qml->rootContext()->setContextProperty("encryptionModel",							_encryptionModel								);
-	_qml->rootContext()->setContextProperty("dataSetModel",								_datasetTableModel								);
+	_qml->rootContext()->setContextProperty("dataSetModel",								_gridModel										);
 	_qml->rootContext()->setContextProperty("columnsModel",								_columnsModel									);
 	_qml->rootContext()->setContextProperty("workspaceModel",							_workspaceModel									);
 	_qml->rootContext()->setContextProperty("analysesModel",							_analyses										);
@@ -818,6 +824,17 @@ void MainWindow::loadQML()
 	connect(_ribbonModel, &RibbonModel::dataRedo,						DataSetView::mainDataViewer(),	&DataSetView::redo);
 	connect(this,		  &MainWindow::resizeData,						DataSetView::mainDataViewer(),	&DataSetView::resizeData);
 	connect(_ribbonModel, &RibbonModel::showNewData,					this,							&MainWindow::showNewData);
+
+	// NEO sliding mode (data-view-format.md §2.5): the grid's viewport drives the active
+	// dataset's fill scheduler — urgent viewport-miss fetches + down-biased background fill
+	// around it, eviction farthest-from-viewport first. viewportRowsChanged is a REAL signal
+	// carrying the view's post-margin row range. (Found against the real GUI: connecting to
+	// the viewportChangedDelayed SLOT as the sender silently makes no connection —
+	// "QObject::connect: signal not found" — so scrolling never reached the scheduler.)
+	connect(DataSetView::mainDataViewer(), &DataSetViewBase::viewportRowsChanged, this, [this](int firstRow, int lastRow)
+	{
+		DataSetPackage::pkg()->registry()->setViewportRows(uint64_t(qMax(0, firstRow)), uint64_t(qMax(0, lastRow)));
+	});
 
 	//connect(DataSetView::lastInstancedDataSetView(), &DataSetView::selectionStartChanged,	_columnModel,	&ColumnModel::changeSelectedColumn);
 

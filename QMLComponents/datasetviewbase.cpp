@@ -386,8 +386,13 @@ void DataSetViewBase::determineCurrentViewPortIndices()
     _currentViewportColMin = std::max(0, std::min(_model->columnCount(),	_currentViewportColMin							- _viewportMargin));
     _currentViewportColMax = std::max(0, std::min(_model->columnCount(),	_currentViewportColMax							+ _viewportMargin));
 
-	_currentViewportRowMin = _dataRowsMaxHeight == 0 ? 0 : std::max(0, std::min(_model->rowCount(),		qRound(leftTop.y()		/ _dataRowsMaxHeight)	- (1 + _viewportMargin)));
-	_currentViewportRowMax = _dataRowsMaxHeight == 0 ? 0 : std::max(0, std::min(_model->rowCount(),		qRound(rightBottom.y()	/ _dataRowsMaxHeight)	+ (1 + _viewportMargin)));
+	    _currentViewportRowMin = _dataRowsMaxHeight == 0 ? 0 : std::max(0, std::min(_model->rowCount(),		qRound(leftTop.y()		/ _dataRowsMaxHeight)	- (1 + _viewportMargin)));
+	    _currentViewportRowMax = _dataRowsMaxHeight == 0 ? 0 : std::max(0, std::min(_model->rowCount(),		qRound(rightBottom.y()	/ _dataRowsMaxHeight)	+ (1 + _viewportMargin)));
+
+		// NEO sliding mode: feed the fill scheduler — but only when the ROW range actually moved
+		// (this also runs on horizontal-only viewport changes, and on every chunk-arrival rebuild).
+		if (_currentViewportRowMin != _previousViewportRowMin || _currentViewportRowMax != _previousViewportRowMax)
+			emit viewportRowsChanged(_currentViewportRowMin, _currentViewportRowMax);
 
 #ifdef DATASETVIEW_DEBUG_VIEWPORT
 	Log::log() << "viewport X: " << _viewportX << " Y: " << _viewportY << " W: " << _viewportW << " H: " << _viewportH <<  std::endl;

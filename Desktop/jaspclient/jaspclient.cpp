@@ -292,13 +292,24 @@ void JaspClient::abort(const std::string & workId)
 
 void JaspClient::handleMessage(const QByteArray & body)
 {
-	const Json::Value env = deframeEnvelope(body);
+	// §18.1: envelope + optional binary tail. Bulk bytes (view chunks) never go through the
+	// JSON parser — splitFrame hands them back verbatim.
+	const auto [env, binary] = splitFrame(body);
 	if (env.isNull())
 		return;
 
 	logIo("RX", env);
 
 	const std::string type = env.get("type", "").asString();
+
+	if (type == "data_changed")
+	{	// Dataset mutation broadcast (§19.2, data-view-design §6) — invalidation only; the
+		// frontend refetches via data_view. No producer yet (lands with data_edit/data_update);
+		// the signal exists so the reaction matrix can hook in.
+		emit datasetChanged(QString::fromStdString(env.get("dataset_id", "").asString()),
+							env.get("revision", 0).asUInt64());
+		return;
+	}
 
 	if (type == "modules")
 	{	// Module catalog — connect-time push (first frame on the channel), change push, or a
@@ -360,10 +371,16 @@ void JaspClient::handleMessage(const QByteArray & body)
 	}
 	else if (kind == "data")
 	{
-		result.datasetId	= payload.get("dataset_id", "").asString();
-		result.rows			= payload.get("rows", 0).asUInt64();
-		result.schema		= payload.get("schema", Json::nullValue);
-		result.message		= payload.get("error_message", "").asString();
+		result.datasetId		= payload.get("dataset_id", "").asString();
+		result.datasetRevision	= payload.get("dataset_revision", 0).asUInt64();
+		result.rows				= payload.get("rows", 0).asUInt64();
+		result.schema			= payload.get("schema", Json::nullValue);
+		result.message			= payload.get("error_message", "").asString();
+		// data_view chunk metadata + the TSV cells (§4.1; the tail rides the frame §18.1).
+		result.rowOffset		= payload.get("row_offset", 0).asUInt64();
+		result.rowCount			= payload.get("row_count", 0).asUInt64();
+		result.truncated		= payload.get("truncated", false).asBool();
+		result.binary			= binary;
 	}
 	if (result.message.empty())
 		result.message = env.get("message", "").asString();
