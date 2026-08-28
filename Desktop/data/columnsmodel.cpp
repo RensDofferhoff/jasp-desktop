@@ -49,7 +49,7 @@ ColumnsModel::ColumnsModel(DataSetTableModel *tableModel)
 	connect(this, &ColumnsModel::dataSetChanged,				this, [this]() { _dataSetTermsValid = false; });
 
 	// Multi-dataset fold (data-model-design.md §3.4): serve the SHOWN dataset; whenever it is
-	// lane-owned the wire schema is the source of truth, else the legacy table serves.
+	// orchestrator-backed the wire schema is the source of truth, else the legacy table serves.
 	if (DataSetPackage::pkg() && DataSetPackage::pkg()->workspace())
 	{
 		connect(DataSetPackage::pkg()->workspace(), &Workspace::shownDataSetChanged, this,
@@ -79,7 +79,7 @@ void ColumnsModel::bindLane(DataSet * dataSet)
 	_laneDataSet = dataSet;
 
 	if (_laneDataSet)
-		connect(_laneDataSet, &DataSet::laneSchemaChanged, this, [this]()
+		connect(_laneDataSet, &DataSet::schemaChanged, this, [this]()
 		{
 			beginResetModel();
 			endResetModel();
@@ -163,9 +163,9 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 	columnType			colType;
 	computedColumnType	codeType;
 
-	if (_laneDataSet && _laneDataSet->isLaneOwned())
+	if (_laneDataSet && _laneDataSet->isOpen())
 	{
-		const ColumnInfo * col = _laneDataSet->laneColumnAt(size_t(index.row()));
+		const ColumnInfo * col = _laneDataSet->schemaColumnAt(size_t(index.row()));
 		if (!col)
 			return QVariant();
 
@@ -202,7 +202,7 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 
 int ColumnsModel::rowCount(const QModelIndex &) const
 {
-	return _laneDataSet && _laneDataSet->isLaneOwned() ? int(_laneDataSet->laneSchema().size()) : _tableModel->columnCount();
+	return _laneDataSet && _laneDataSet->isOpen() ? int(_laneDataSet->schema().size()) : _tableModel->columnCount();
 }
 
 int ColumnsModel::columnCount(const QModelIndex &) const
@@ -231,9 +231,9 @@ QVariant ColumnsModel::provideInfo(varInfoType info, const QString& colName, int
 
 		// NEO lane dataset (data-model-design.md §3.4): schema info comes from the shown DataSet's wire schema.
 		// Value-flavoured info has no frontend source until data_view lands — return empty.
-		if (colModel->_laneDataSet && colModel->_laneDataSet->isLaneOwned())
+		if (colModel->_laneDataSet && colModel->_laneDataSet->isOpen())
 		{
-			const ColumnInfo	* col = colModel->_laneDataSet->laneColumnAt(size_t(colIndex));
+			const ColumnInfo	* col = colModel->_laneDataSet->schemaColumnAt(size_t(colIndex));
 
 			if (!col)
 				return QVariant();
@@ -244,7 +244,7 @@ QVariant ColumnsModel::provideInfo(varInfoType info, const QString& colName, int
 			case varInfoType::NameRole:			return ColumnsModel::NameRole;
 			case varInfoType::VariableNames:		return getColumnNames();
 			case varInfoType::DataAvailable:		return MainWindow::singleton()->dataAvailable();
-			case varInfoType::DataSetRowCount:	return qulonglong(colModel->_laneDataSet->laneRows());
+			case varInfoType::DataSetRowCount:	return qulonglong(colModel->_laneDataSet->schemaRows());
 			case varInfoType::Labels:
 			{
 				QStringList levels;
@@ -313,7 +313,7 @@ bool ColumnsModel::absorbInfo(varInfoType info, const QString &colName, int row,
 	if (!colModel)
 		return false;
 
-	if (colModel->_laneDataSet && colModel->_laneDataSet->isLaneOwned())
+	if (colModel->_laneDataSet && colModel->_laneDataSet->isOpen())
 		return false;	// NEO: no frontend cell writes until data_edit lands (data-model-design.md §3.4)
 
 	try
@@ -374,11 +374,11 @@ const Terms & ColumnsModel::dataSetTerms() const
 
 	_dataSetTermsCache.clear();
 
-	if (_laneDataSet && _laneDataSet->isLaneOwned())
+	if (_laneDataSet && _laneDataSet->isOpen())
 	{
-		const size_t count = _laneDataSet->laneSchema().size();
+		const size_t count = _laneDataSet->schema().size();
 		for (size_t i = 0; i < count; i++)
-			if (const ColumnInfo * col = _laneDataSet->laneColumnAt(i))
+			if (const ColumnInfo * col = _laneDataSet->schemaColumnAt(i))
 				_dataSetTermsCache.add(Term(tq(col->name), col->type));
 	}
 	else

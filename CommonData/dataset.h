@@ -92,21 +92,18 @@ public:
 
 	// ————— NEO lane identity + wire schema (multi-dataset fold; data-model-design.md §3.2) —————
 	// One id space: the orchestrator-assigned dataset id is THE id (their SQLite int stays for
-	// db rows only). "" = not lane-owned (legacy import / computed) — serve via the legacy path.
+	// db rows only). "" = not orchestrator-backed (legacy import / computed) — serve via the legacy path.
 	const	std::string	&	datasetId()				const	{ return _laneDatasetId;				}
-	bool				isLaneOwned()		const	{ return !_laneDatasetId.empty();	}
-	uint64_t			laneRows()			const	{ return _laneRows;					}
-	const	std::string	&	laneSourcePath()	const	{ return _laneSourcePath;			}
-	const	std::vector<ColumnInfo> &	laneSchema()	const	{ return _laneColumns;				}
-	const	ColumnInfo	*	laneColumnAt(size_t index)				const;	///< nullptr when out of range
-	const	ColumnInfo	*	laneColumn(const std::string & name)	const;	///< nullptr when absent
-	int					laneColumnIndex(const std::string & name)	const;	///< -1 when absent
-	stringvec			laneColumnNames()									const;
-	std::map<std::string, columnType>	laneColumnTypesMap()				const;
+	bool				isOpen()		const	{ return !_laneDatasetId.empty();	}
+	uint64_t			schemaRows()			const	{ return _schemaRows;					}
+	const	std::vector<ColumnInfo> &	schema()	const	{ return _schemaColumns;				}
+	const	ColumnInfo	*	schemaColumnAt(size_t index)				const;	///< nullptr when out of range
+	const	ColumnInfo	*	schemaColumn(const std::string & name)	const;	///< nullptr when absent
+	int					schemaColumnIndex(const std::string & name)	const;	///< -1 when absent
 	/// Populate from the orchestrator's kind:"data" terminal result and mirror the metadata
 	/// (columns + row count; NEVER row data) into this DataSet so the per-dataset provider
-	/// chain (filters, forms, headers) serves lane metadata. Emits laneSchemaChanged.
-	void				applyLaneSchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema, const std::string & sourcePath);
+	/// chain (filters, forms, headers) serves lane metadata. Emits schemaChanged.
+	void				applySchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema, const std::string & sourcePath);
 			bool			dataFileSynch()			const { return _dataFileSynch;			}
 			
 	const	std::string &	dataFilePath()			const { return _dataFilePath;			}
@@ -259,7 +256,7 @@ public:
 			void			writeToOStream(std::ostream & out, bool includeComputed);
 
 signals:
-			void			laneSchemaChanged();	///< applyLaneSchema landed (id/rows/schema ready or refreshed)
+			void			schemaChanged();	///< applySchema landed (id/rows/schema ready or refreshed)
 			void			manualEditMade(); 
 			void			datasetChanged(				int						dataSetId,
 															QStringList				changedColumns,
@@ -373,10 +370,9 @@ private:
 
 	// NEO lane identity + wire schema (multi-dataset fold) — see the public block above
 	std::string				_laneDatasetId;
-	uint64_t				_laneRows				= 0;
-	std::string				_laneSourcePath;
-	std::vector<ColumnInfo>	_laneColumns;
-	std::unordered_map<std::string, size_t>	_laneColumnIndex;	///< first-wins, same semantics as the old DataModel linear scan
+	uint64_t				_schemaRows				= 0;
+	std::vector<ColumnInfo>	_schemaColumns;
+	std::unordered_map<std::string, size_t>	_schemaColumnIndex;	///< first-wins, same semantics as the old DataModel linear scan
 	static stringset		_defaultEmptyvalues;	// Default empty values if workspace do not have its own empty values (used for backward compatibility)
 	std::string				_description;
 	UndoStack			*	_undoStack				= nullptr;

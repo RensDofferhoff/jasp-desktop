@@ -15,7 +15,7 @@ class ViewFiller;
 /// the burn-down seam: NO switcher façade, NO legacy fallback).
 ///
 /// Multi-dataset fold: binds to the SHOWN DataSet (Workspace is the one dataset truth —
-/// the registry is gone). Serves from the shown dataset's lane schema (identity + metadata
+/// the registry is gone). Serves from the shown dataset's schema (identity + metadata
 /// live on DataSet now); the view lane (DataViewBuffer + ViewFiller) is GridModel-owned and
 /// recreated per shown dataset — the same drop-on-switch memory policy the registry had
 /// (data-view-design §7.6: only the shown dataset holds a buffer, ceiling = 1 × budget).
@@ -84,7 +84,7 @@ signals:
 
 private slots:
 	void				bindToShown();			///< Workspace::shownDataSetChanged — rebind the whole lane
-	void				onLaneSchemaChanged();	///< shown dataset's applyLaneSchema landed (open completed) — (re)start its lane
+	void				onLaneSchemaChanged();	///< shown dataset's applySchema landed (open completed) — (re)start its lane
 	void				onChunkIngested(quint64 firstRow, quint64 rows);
 	void				onChunksEvicted(quint64 firstRow, quint64 rows);
 	void				onBufferReset();
@@ -97,8 +97,8 @@ private:
 	void				refreshRows(quint64 firstRow, quint64 rows);	///< dataChanged over a chunk's rows (content changed; rows always exist)
 	void				ensureCell(int row, int col) const;
 	static qreal	columnWidthFallbackFor(columnType type);
-	void				startLane();			///< fresh buffer + filler for the shown lane dataset (rows > 0)
-	void				dropLane();			///< stop the filler + drop the buffer (memory policy §7.6)
+	void				startView();			///< fresh buffer + filler for the shown lane dataset (rows > 0)
+	void				dropView();			///< stop the filler + drop the buffer (memory policy §7.6)
 
 	DataSet			*	_dataSet		= nullptr;	///< the SHOWN dataset (identity + lane schema; nullptr = nothing shown)
 	DataViewBuffer	*	_buffer			= nullptr;	///< the shown dataset's resident cells (GridModel-owned, dropped on switch)

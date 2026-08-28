@@ -735,10 +735,10 @@ void DataSetPackage::neoOpenDataset(std::string filePath)
 				   << " (" << result.rows << " rows)" << std::endl;
 		// Multi-dataset fold: the typed kind:"data" payload (dataset_id, rows, schema)
 		// lands on the SHOWN DataSet itself — identity + wire schema live there now
-		// (data-model-design.md §3.2); applyLaneSchema also mirrors the metadata into the
+		// (data-model-design.md §3.2); applySchema also mirrors the metadata into the
 		// legacy columns so the per-dataset provider chain serves it.
 		if (DataSet * ds = dataSet())
-			ds->applyLaneSchema(result.datasetId, result.rows, result.schema, filePath);
+			ds->applySchema(result.datasetId, result.rows, result.schema, filePath);
 		emit datasetIdChanged();
 	});
 }

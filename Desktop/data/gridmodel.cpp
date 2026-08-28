@@ -19,7 +19,7 @@ GridModel::GridModel(QObject * parent)
 {
 	// Multi-dataset fold: Workspace is the one dataset truth — the shown dataset IS the
 	// active dataset. A switch rebinds the whole lane; the open completing on the shown
-	// dataset (applyLaneSchema) (re)starts it.
+	// dataset (applySchema) (re)starts it.
 	if (DataSetPackage * pkg = DataSetPackage::pkg())
 		if (Workspace * ws = pkg->workspace())
 		{
@@ -34,10 +34,10 @@ void GridModel::bindToShown()
 {
 	beginResetModel();
 
-	dropLane();
+	dropView();
 
 	if (_dataSet)
-		disconnect(_dataSet, nullptr, this, nullptr);	// our laneSchemaChanged hook dies with the old dataset
+		disconnect(_dataSet, nullptr, this, nullptr);	// our schemaChanged hook dies with the old dataset
 
 	_dataSet = DataSetPackage::pkg() && DataSetPackage::pkg()->workspace()
 			? DataSetPackage::pkg()->workspace()->shownDataSet()
@@ -53,9 +53,9 @@ void GridModel::bindToShown()
 	if (_dataSet)
 	{
 		// The open completes AFTER the dataset is shown (asyncloader creates the skeleton first):
-		// when the schema lands, (re)start the lane — it carries rows, which startLane needs.
-		connect(_dataSet, &DataSet::laneSchemaChanged, this, &GridModel::onLaneSchemaChanged);
-		startLane();	// no-op when the schema hasn't landed yet (0 rows)
+		// when the schema lands, (re)start the lane — it carries rows, which startView needs.
+		connect(_dataSet, &DataSet::schemaChanged, this, &GridModel::onLaneSchemaChanged);
+		startView();	// no-op when the schema hasn't landed yet (0 rows)
 	}
 
 	endResetModel();
@@ -71,14 +71,14 @@ void GridModel::onLaneSchemaChanged()
 		bindToShown();
 }
 
-void GridModel::startLane()
+void GridModel::startView()
 {
-	if (!_dataSet || !_dataSet->isLaneOwned() || _dataSet->laneRows() == 0)
+	if (!_dataSet || !_dataSet->isOpen() || _dataSet->schemaRows() == 0)
 		return;		// nothing to view (legacy dataset, or a schema-only one) — the grid shows an empty model
 
 	_viewEpoch++;
 	_buffer = new DataViewBuffer(this);
-	_buffer->reset(_dataSet->laneRows(), 0 /* dataset revision — edits bump it in a later increment */, _viewEpoch);
+	_buffer->reset(_dataSet->schemaRows(), 0 /* dataset revision — edits bump it in a later increment */, _viewEpoch);
 	_filler = new ViewFiller(_dataSet->datasetId(), _buffer, this);
 
 	connect(_buffer, &DataViewBuffer::chunkIngested,	this, &GridModel::onChunkIngested);
@@ -92,7 +92,7 @@ void GridModel::startLane()
 	_filler->start();	// the fill loop IS the prefetch — back-to-back chunks, background
 }
 
-void GridModel::dropLane()
+void GridModel::dropView()
 {
 	if (_filler)
 	{
@@ -213,14 +213,14 @@ int GridModel::rowCount(const QModelIndex & parent) const
 	// scrollbar. int-capped for the view's index machinery.
 	if (!_dataSet)
 		return 0;
-	return int(std::min<uint64_t>(_dataSet->laneRows(), uint64_t(std::numeric_limits<int>::max())));
+	return int(std::min<uint64_t>(_dataSet->schemaRows(), uint64_t(std::numeric_limits<int>::max())));
 }
 
 int GridModel::columnCount(const QModelIndex & parent) const
 {
 	if (parent.isValid())
 		return 0;
-	return _dataSet ? int(_dataSet->laneSchema().size()) : 0;
+	return _dataSet ? int(_dataSet->schema().size()) : 0;
 }
 
 void GridModel::ensureCell(int row, int col) const
@@ -277,17 +277,17 @@ QVariant GridModel::data(const QModelIndex & index, int role) const
 
 	case int(dataPkgRoles::columnType):
 	{
-		const ColumnInfo * c = _dataSet ? _dataSet->laneColumnAt(size_t(col)) : nullptr;
+		const ColumnInfo * c = _dataSet ? _dataSet->schemaColumnAt(size_t(col)) : nullptr;
 		return int(c ? c->type : columnType::unknown);
 	}
 	case int(dataPkgRoles::name):
 	{
-		const ColumnInfo * c = _dataSet ? _dataSet->laneColumnAt(size_t(col)) : nullptr;
+		const ColumnInfo * c = _dataSet ? _dataSet->schemaColumnAt(size_t(col)) : nullptr;
 		return c ? tq(c->displayName) : QString();
 	}
 	case int(dataPkgRoles::description):
 	{
-		const ColumnInfo * c = _dataSet ? _dataSet->laneColumnAt(size_t(col)) : nullptr;
+		const ColumnInfo * c = _dataSet ? _dataSet->schemaColumnAt(size_t(col)) : nullptr;
 		return c ? tq(c->description) : QString();
 	}
 	case int(dataPkgRoles::columnPkgIndex):
@@ -308,7 +308,7 @@ QVariant GridModel::headerData(int section, Qt::Orientation orientation, int rol
 
 	if (orientation == Qt::Horizontal)
 	{
-		const ColumnInfo * col = _dataSet ? _dataSet->laneColumnAt(size_t(section)) : nullptr;
+		const ColumnInfo * col = _dataSet ? _dataSet->schemaColumnAt(size_t(section)) : nullptr;
 		if (!col)
 			return QVariant();
 
@@ -357,7 +357,7 @@ QVariant GridModel::headerData(int section, Qt::Orientation orientation, int rol
 	if (role == Qt::DisplayRole)
 		return section + 1;
 	if (role == int(dataPkgRoles::maxRowHeaderString))
-		return QString::number(_dataSet ? _dataSet->laneRows() : 0);
+		return QString::number(_dataSet ? _dataSet->schemaRows() : 0);
 	return QVariant();
 }
 
@@ -409,7 +409,7 @@ QHash<int, QByteArray> GridModel::roleNames() const
 
 QString GridModel::columnName(int column) const
 {
-	const ColumnInfo * c = _dataSet ? _dataSet->laneColumnAt(size_t(column)) : nullptr;
+	const ColumnInfo * c = _dataSet ? _dataSet->schemaColumnAt(size_t(column)) : nullptr;
 	return c ? tq(c->displayName) : QString();
 }
 
@@ -455,7 +455,7 @@ void GridModel::toggleColType(int, bool)
 
 bool GridModel::isColumnNameFree(QString name) const
 {
-	return _dataSet ? _dataSet->laneColumnIndex(fq(name)) < 0 : true;
+	return _dataSet ? _dataSet->schemaColumnIndex(fq(name)) < 0 : true;
 }
 
 void GridModel::setShowInactive(bool showInactive)

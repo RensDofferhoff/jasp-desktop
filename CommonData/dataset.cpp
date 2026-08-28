@@ -2247,13 +2247,12 @@ void DataSet::writeToOStream(std::ostream & out, bool includeComputed)
 
 // ————— NEO lane identity + wire schema (multi-dataset fold; data-model-design.md §3.2) —————
 
-void DataSet::applyLaneSchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema, const std::string & sourcePath)
+void DataSet::applySchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema, const std::string & sourcePath)
 {
 	_laneDatasetId	= datasetId;
-	_laneRows		= rows;
-	_laneSourcePath	= sourcePath;
-	_laneColumns.clear();
-	_laneColumnIndex.clear();
+	_schemaRows		= rows;
+	_schemaColumns.clear();
+	_schemaColumnIndex.clear();
 
 	if (schema.isArray())
 		for (const Json::Value & col : schema)
@@ -2285,8 +2284,8 @@ void DataSet::applyLaneSchema(const std::string & datasetId, uint64_t rows, cons
 				for (const Json::Value & level : col["levels"])
 					info.levels.push_back(level.asString());
 
-			_laneColumnIndex.emplace(info.name, _laneColumns.size());	// first-wins, same semantics as the old linear scan
-			_laneColumns.push_back(std::move(info));
+			_schemaColumnIndex.emplace(info.name, _schemaColumns.size());	// first-wins, same semantics as the old linear scan
+			_schemaColumns.push_back(std::move(info));
 		}
 
 	// Mirror the metadata into the legacy columns so the per-dataset provider chain (shown
@@ -2296,46 +2295,31 @@ void DataSet::applyLaneSchema(const std::string & datasetId, uint64_t rows, cons
 	// data values) and wiring it by hand would corrupt the by-value/by-display maps; the
 	// label editor stays inert for lane datasets until the edit era (data-model-design
 	// decision 11).
-	if (_columns.size() < _laneColumns.size())
-		for (size_t i = _columns.size(); i < _laneColumns.size(); i++)
-			createColumn(_laneColumns[i].name, _laneColumns[i].type);
+	if (_columns.size() < _schemaColumns.size())
+		for (size_t i = _columns.size(); i < _schemaColumns.size(); i++)
+			createColumn(_schemaColumns[i].name, _schemaColumns[i].type);
 
 	setRowCount(size_t(rows), false);	// metadata only — never load row data
 
-	Log::log() << "DataSet: lane schema applied for " << datasetId << " (" << rows << " rows, " << _laneColumns.size() << " columns)" << std::endl;
-	emit laneSchemaChanged();
+	Log::log() << "DataSet: lane schema applied for " << datasetId << " (" << rows << " rows, " << _schemaColumns.size() << " columns)" << std::endl;
+	emit schemaChanged();
 }
 
-const ColumnInfo * DataSet::laneColumnAt(size_t index) const
+const ColumnInfo * DataSet::schemaColumnAt(size_t index) const
 {
-	return index < _laneColumns.size() ? &_laneColumns[index] : nullptr;
+	return index < _schemaColumns.size() ? &_schemaColumns[index] : nullptr;
 }
 
-const ColumnInfo * DataSet::laneColumn(const std::string & name) const
+const ColumnInfo * DataSet::schemaColumn(const std::string & name) const
 {
-	const int idx = laneColumnIndex(name);
-	return idx < 0 ? nullptr : &_laneColumns[size_t(idx)];
+	const int idx = schemaColumnIndex(name);
+	return idx < 0 ? nullptr : &_schemaColumns[size_t(idx)];
 }
 
-int DataSet::laneColumnIndex(const std::string & name) const
+int DataSet::schemaColumnIndex(const std::string & name) const
 {
-	auto found = _laneColumnIndex.find(name);
-	return found == _laneColumnIndex.end() ? -1 : int(found->second);
+	auto found = _schemaColumnIndex.find(name);
+	return found == _schemaColumnIndex.end() ? -1 : int(found->second);
 }
 
-stringvec DataSet::laneColumnNames() const
-{
-	stringvec names;
-	names.reserve(_laneColumns.size());
-	for (const ColumnInfo & ci : _laneColumns)
-		names.push_back(ci.name);
-	return names;
-}
 
-std::map<std::string, columnType> DataSet::laneColumnTypesMap() const
-{
-	std::map<std::string, columnType> types;
-	for (const ColumnInfo & ci : _laneColumns)
-		types[ci.name] = ci.type;
-	return types;
-}

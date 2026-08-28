@@ -100,7 +100,7 @@ public:
 				bool				hasAnalyses()						const	{ return _analysesData.size() > 0;				}
 					bool				synchingData()						const	{ return _synchingData;								}
 					std::string			dataFilePath()				const	{ return dataSet() ? dataSet()->dataFilePath() : "";	}
-					std::string				datasetId()					const;	///< NEO: orchestrator-assigned id of the SHOWN dataset ("" while not lane-owned)
+					std::string				datasetId()					const;	///< NEO: orchestrator-assigned id of the SHOWN dataset ("" while not orchestrator-backed)
 					bool				isDatabase()						const	{ return _database != Json::nullValue;				}
 		QVariant				getColumnTypesWithIcons()													const;	///< NEO compat: gridmodel asks the package (strips to Workspace in the fold commit)
 			bool				synchingExternally()								const	{ return false;								}	///< NEO compat: external-db sync is dead under the orchestrator lane

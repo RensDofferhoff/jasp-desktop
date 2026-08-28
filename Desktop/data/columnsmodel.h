@@ -30,8 +30,8 @@ public:
 				QVariant					data(			const QModelIndex & index, int role = Qt::DisplayRole)				const	override;
 				int							rowCount(		const QModelIndex &parent = QModelIndex())							const	override;
 				QHash<int, QByteArray>		roleNames()																			const	override;
-				int						getColumnIndex(const std::string & col)																			const	{ return _laneDataSet && _laneDataSet->isLaneOwned() ? _laneDataSet->laneColumnIndex(col) : _tableModel->getColumnIndex(col);	}
-				void						bindLane(DataSet * dataSet);	///< multi-dataset fold: serve the SHOWN dataset; when lane-owned the wire schema is the source of truth (data-model-design.md §3.4)
+				int						getColumnIndex(const std::string & col)																			const	{ return _laneDataSet && _laneDataSet->isOpen() ? _laneDataSet->schemaColumnIndex(col) : _tableModel->getColumnIndex(col);	}
+				void						bindLane(DataSet * dataSet);	///< multi-dataset fold: serve the SHOWN dataset; when orchestrator-backed the wire schema is the source of truth (data-model-design.md §3.4)
 				int						columnCount(	const QModelIndex &parent = QModelIndex())								const	override;
 				QStringList					getColumnNames()																							const;
 				const Terms &				dataSetTerms()																									const;	///< wide-data: cached (name, type) Terms of the active dataset, rebuilt only when the columns change
@@ -66,7 +66,7 @@ signals:
 
 private:
 	DataSetTableModel		* _tableModel	= nullptr;
-	DataSet					*	_laneDataSet	= nullptr;	///< the SHOWN dataset (multi-dataset fold); when lane-owned (datasetId set) the wire schema is the source of truth
+	DataSet					*	_laneDataSet	= nullptr;	///< the SHOWN dataset (multi-dataset fold); when orchestrator-backed (datasetId set) the wire schema is the source of truth
 	static ColumnsModel		* _singleton;
 
 	// Wide-data cache (2026-08-16): the dataset's Terms built once per column-set change and

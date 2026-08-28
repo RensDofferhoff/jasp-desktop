@@ -501,7 +501,7 @@ void MainWindow::makeConnections()
 	connect(_package,				&DataSetPackage::dataModeChanged,					_analyses,				&Analyses::dataModeChanged									);
 	connect(_package,				&DataSetPackage::dataModeChanged,					this,					&MainWindow::onDataModeChanged								);
 
-	// NEO data plane: the frontend no longer populates the legacy columns for lane-owned opens
+	// NEO data plane: the frontend no longer populates the legacy columns for orchestrator-backed opens
 	// (CSV etc. is read by the data-runner), so populateUIfromDataSet's rowCount-based
 	// setDataAvailable() stays false. Readiness is the SHOWN dataset's lane schema instead
 	// (data-model-design.md §3.2, multi-dataset fold): the open's terminal result carries
@@ -511,13 +511,13 @@ void MainWindow::makeConnections()
 	{
 		connect(_package->workspace(),	&Workspace::shownDataSetChanged,		this,			[this](DataSet * ds)
 		{
-			setDataAvailable(ds && ds->isLaneOwned() && ds->laneRows() > 0);
+			setDataAvailable(ds && ds->isOpen() && ds->schemaRows() > 0);
 		});
 		connect(_package,				&DataSetPackage::datasetIdChanged,	this,			[this]()
 		{
 			// the open completing on the already-shown dataset flips readiness
 			DataSet * ds = _package->dataSet();
-			setDataAvailable(ds && ds->isLaneOwned() && ds->laneRows() > 0);
+			setDataAvailable(ds && ds->isOpen() && ds->schemaRows() > 0);
 		});
 	}
 	connect(_package,				&DataSetPackage::askUserForExternalDataFile,		this,					&MainWindow::startDataEditorHandler							);
@@ -1557,9 +1557,9 @@ void MainWindow::registerRpcHandlers()
 				// (levels from the wire schema) — but only when the info is asked for the SHOWN dataset,
 				// carried on the DataSet itself. Legacy imports and background
 				// datasets keep the Column path.
-				if (ds->isLaneOwned())
+				if (ds->isOpen())
 				{
-					if (const ColumnInfo * columnInfo = ds->laneColumn(name))
+					if (const ColumnInfo * columnInfo = ds->schemaColumn(name))
 						col["distinctCount"] = static_cast<int>(columnInfo->levels.size());
 				}
 				else

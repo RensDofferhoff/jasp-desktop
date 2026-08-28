@@ -326,7 +326,7 @@ void AsyncLoader::loadPackage(QString id)
 			}
 
 			//The load above may have added a dataset to the workspace table model (legacy and NEO
-			//lane-owned opens both do). The model was mutated on this (worker) thread, so let the
+			//orchestrator-backed opens both do). The model was mutated on this (worker) thread, so let the
 			//GUI thread know it must refresh its views (dataset tabbuttons etc.).
 			if(!syncTargetDataSet)
 				emit dataSetsChanged();
