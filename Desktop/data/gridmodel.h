@@ -6,24 +6,23 @@
 #include "dataviewbuffer.h"
 #include "dataenums.h"
 #include "columntype.h"
+#include "columninfo.h"
 
-class DataModel;
-class DatasetRegistry;
+class DataSet;
 class ViewFiller;
 
 /// NEO grid model — the direct `dataSetModel` (refactor_design/data-view-design.md §7.2/§7.3,
 /// the burn-down seam: NO switcher façade, NO legacy fallback).
 ///
-/// Rows come from the active DataModel's schema row count (the model ALWAYS spans the whole
-/// dataset — the view's item creation is viewport-driven, so a 30M-row span is as cheap as a
-/// 30-row one), cells from the registry-owned DataViewBuffer. Rows whose chunk is not resident
-/// (not yet filled, or evicted to make room) render as placeholder cells until their chunk
-/// arrives — sliding mode, format doc §2.5. Read-only in v1: `flags()` never sets ItemIsEditable
-/// and `setData` refuses — the editing surface returns with `data_edit`.
-///
-/// The QML invokables QML calls on `dataSetModel` are served from the DataModel (reads) or
-/// no-op'd (mutations). Binds to the registry's active dataset + its view buffer; a dataset
-/// switch/reset rebinds under a model reset.
+/// Multi-dataset fold: binds to the SHOWN DataSet (Workspace is the one dataset truth —
+/// the registry is gone). Serves from the shown dataset's lane schema (identity + metadata
+/// live on DataSet now); the view lane (DataViewBuffer + ViewFiller) is GridModel-owned and
+/// recreated per shown dataset — the same drop-on-switch memory policy the registry had
+/// (data-view-design §7.6: only the shown dataset holds a buffer, ceiling = 1 × budget).
+/// Rows span the whole dataset — the view's item creation is viewport-driven, so a 30M-row
+/// span is as cheap as a 30-row one. Non-resident cells render as placeholders until their
+/// chunk arrives — sliding mode, format doc §2.5. Read-only in v1: `flags()` never sets
+/// ItemIsEditable and `setData` refuses — the editing surface returns with `data_edit`.
 class GridModel : public QAbstractTableModel
 {
 	Q_OBJECT
@@ -53,7 +52,7 @@ public:
 	QHash<int, QByteArray> roleNames()																	const	override;
 	bool				setData(		const QModelIndex & index, const QVariant & value, int role)			override;
 
-	// QML-invokable surface QML calls on `dataSetModel` (reads → DataModel; mutations no-op in v1)
+	// QML-invokable surface QML calls on `dataSetModel` (reads → the shown DataSet's lane schema; mutations no-op in v1)
 	Q_INVOKABLE QString		columnName(int column) const;
 	Q_INVOKABLE void		setColumnName(int col, QString name);			///< no-op until data_edit
 	Q_INVOKABLE QVariant	getColumnTypesWithIcons() const;
@@ -64,6 +63,10 @@ public:
 	Q_INVOKABLE void		toggleColType(int column, bool next = true);	///< edit-era: logged no-op (fail loudly, merge-multidataset.md §6)
 
 	int					columnsFilteredCount() const { return 0; }		///< no filters in v1
+	/// The grid's current viewport row range [firstRow, lastRow) — forwarded to the shown
+	/// dataset's fill scheduler (MainWindow wires DataSetViewBase::viewportRowsChanged here).
+	/// No-op without a live lane.
+	void				setViewportRows(uint64_t firstRow, uint64_t lastRow);
 	QString				columnFilter() const { return _columnFilter; }
 	void				setColumnFilter(const QString & filter);
 	QVariantList		currentTypeIcons() const { return QVariantList(); }	///< empty until selection is wired (edit era)
@@ -80,7 +83,8 @@ signals:
 	void				renameColumnDialog(int columnIndex);			///< RenameColumnDialog listens; never emitted in v1
 
 private slots:
-	void				bindToActive();
+	void				bindToShown();			///< Workspace::shownDataSetChanged — rebind the whole lane
+	void				onLaneSchemaChanged();	///< shown dataset's applyLaneSchema landed (open completed) — (re)start its lane
 	void				onChunkIngested(quint64 firstRow, quint64 rows);
 	void				onChunksEvicted(quint64 firstRow, quint64 rows);
 	void				onBufferReset();
@@ -92,12 +96,14 @@ private slots:
 private:
 	void				refreshRows(quint64 firstRow, quint64 rows);	///< dataChanged over a chunk's rows (content changed; rows always exist)
 	void				ensureCell(int row, int col) const;
-	static qreal		columnWidthFallbackFor(columnType type);
+	static qreal	columnWidthFallbackFor(columnType type);
+	void				startLane();			///< fresh buffer + filler for the shown lane dataset (rows > 0)
+	void				dropLane();			///< stop the filler + drop the buffer (memory policy §7.6)
 
-	DatasetRegistry	*	_registry		= nullptr;
-	DataModel		*	_model			= nullptr;	///< active dataset's schema (nullable)
-	DataViewBuffer	*	_buffer			= nullptr;	///< active dataset's resident cells (nullable)
-	ViewFiller		*	_filler			= nullptr;	///< active dataset's fill driver (nullable)
+	DataSet			*	_dataSet		= nullptr;	///< the SHOWN dataset (identity + lane schema; nullptr = nothing shown)
+	DataViewBuffer	*	_buffer			= nullptr;	///< the shown dataset's resident cells (GridModel-owned, dropped on switch)
+	ViewFiller		*	_filler			= nullptr;	///< its chunked fill driver (GridModel-owned, dropped on switch)
+	uint64_t			_viewEpoch		= 0;		///< bumped per fill — the buffer's fill identity
 	bool				_showInactive	= true;
 	QString				_viewStatus;	///< grid status-bar note (windowed-mode note / fill failure)
 	QString				_columnFilter;	///< status-bar column filter text (stored; filtering is edit-era)

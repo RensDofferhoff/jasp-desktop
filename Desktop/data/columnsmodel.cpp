@@ -4,6 +4,8 @@
 #include "dataenums.h"
 #include "mainwindow.h"
 #include "columnsmodel.h"
+#include "dataset.h"
+#include "workspace.h"
 
 ColumnsModel * ColumnsModel::_singleton = nullptr;
 
@@ -46,13 +48,13 @@ ColumnsModel::ColumnsModel(DataSetTableModel *tableModel)
 	connect(this, &ColumnsModel::columnNamesChanged,			this, [this](QMap<QString, QString>) { _dataSetTermsValid = false; });
 	connect(this, &ColumnsModel::dataSetChanged,				this, [this]() { _dataSetTermsValid = false; });
 
-	// NEO (data-model-design.md §3.4): serve the active lane dataset's schema instead of the
-	// legacy table, and re-target whenever the registry's active dataset changes.
-	if (DataSetPackage::pkg() && DataSetPackage::pkg()->registry())
+	// Multi-dataset fold (data-model-design.md §3.4): serve the SHOWN dataset; whenever it is
+	// lane-owned the wire schema is the source of truth, else the legacy table serves.
+	if (DataSetPackage::pkg() && DataSetPackage::pkg()->workspace())
 	{
-		connect(DataSetPackage::pkg()->registry(), &DatasetRegistry::activeChanged, this,
-				[this](const QString &) { bindNeoData(DataSetPackage::pkg()->registry()->active()); });
-		bindNeoData(DataSetPackage::pkg()->registry()->active());
+		connect(DataSetPackage::pkg()->workspace(), &Workspace::shownDataSetChanged, this,
+				[this](DataSet *) { bindLane(DataSetPackage::pkg()->workspace()->shownDataSet()); });
+		bindLane(DataSetPackage::pkg()->workspace()->shownDataSet());
 	}
 }
 
@@ -62,22 +64,22 @@ ColumnsModel::~ColumnsModel()
 		_singleton = nullptr;
 }
 
-void ColumnsModel::bindNeoData(DataModel * model)
+void ColumnsModel::bindLane(DataSet * dataSet)
 {
-	if (_neoData == model)
+	if (_laneDataSet == dataSet)
 		return;
 
 	_dataSetTermsValid = false;	// dataset switch: cached Terms are stale
 
 	beginResetModel();
 
-	if (_neoData)
-		disconnect(_neoData, nullptr, this, nullptr);
+	if (_laneDataSet)
+		disconnect(_laneDataSet, nullptr, this, nullptr);
 
-	_neoData = model;
+	_laneDataSet = dataSet;
 
-	if (_neoData)
-		connect(_neoData, &DataModel::schemaChanged, this, [this]()
+	if (_laneDataSet)
+		connect(_laneDataSet, &DataSet::laneSchemaChanged, this, [this]()
 		{
 			beginResetModel();
 			endResetModel();
@@ -161,9 +163,9 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 	columnType			colType;
 	computedColumnType	codeType;
 
-	if (_neoData)
+	if (_laneDataSet && _laneDataSet->isLaneOwned())
 	{
-		const ColumnInfo * col = _neoData->columnAt(size_t(index.row()));
+		const ColumnInfo * col = _laneDataSet->laneColumnAt(size_t(index.row()));
 		if (!col)
 			return QVariant();
 
@@ -200,7 +202,7 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 
 int ColumnsModel::rowCount(const QModelIndex &) const
 {
-	return _neoData ? int(_neoData->columnCount()) : _tableModel->columnCount();
+	return _laneDataSet && _laneDataSet->isLaneOwned() ? int(_laneDataSet->laneSchema().size()) : _tableModel->columnCount();
 }
 
 int ColumnsModel::columnCount(const QModelIndex &) const
@@ -227,12 +229,11 @@ QVariant ColumnsModel::provideInfo(varInfoType info, const QString& colName, int
 		if (colIndex < 0)
 			return QVariant();
 
-		// NEO lane dataset (data-model-design.md §3.4): schema info comes from the DataModel.
+		// NEO lane dataset (data-model-design.md §3.4): schema info comes from the shown DataSet's wire schema.
 		// Value-flavoured info has no frontend source until data_view lands — return empty.
-		if (colModel->_neoData)
+		if (colModel->_laneDataSet && colModel->_laneDataSet->isLaneOwned())
 		{
-			const DataModel		* neo = colModel->_neoData;
-			const ColumnInfo	* col = neo->columnAt(size_t(colIndex));
+			const ColumnInfo	* col = colModel->_laneDataSet->laneColumnAt(size_t(colIndex));
 
 			if (!col)
 				return QVariant();
@@ -243,7 +244,7 @@ QVariant ColumnsModel::provideInfo(varInfoType info, const QString& colName, int
 			case varInfoType::NameRole:			return ColumnsModel::NameRole;
 			case varInfoType::VariableNames:		return getColumnNames();
 			case varInfoType::DataAvailable:		return MainWindow::singleton()->dataAvailable();
-			case varInfoType::DataSetRowCount:	return qulonglong(neo->rows());
+			case varInfoType::DataSetRowCount:	return qulonglong(colModel->_laneDataSet->laneRows());
 			case varInfoType::Labels:
 			{
 				QStringList levels;
@@ -312,7 +313,7 @@ bool ColumnsModel::absorbInfo(varInfoType info, const QString &colName, int row,
 	if (!colModel)
 		return false;
 
-	if (colModel->_neoData)
+	if (colModel->_laneDataSet && colModel->_laneDataSet->isLaneOwned())
 		return false;	// NEO: no frontend cell writes until data_edit lands (data-model-design.md §3.4)
 
 	try
@@ -373,11 +374,11 @@ const Terms & ColumnsModel::dataSetTerms() const
 
 	_dataSetTermsCache.clear();
 
-	if (_neoData)
+	if (_laneDataSet && _laneDataSet->isLaneOwned())
 	{
-		const size_t count = _neoData->columnCount();
+		const size_t count = _laneDataSet->laneSchema().size();
 		for (size_t i = 0; i < count; i++)
-			if (const ColumnInfo * col = _neoData->columnAt(i))
+			if (const ColumnInfo * col = _laneDataSet->laneColumnAt(i))
 				_dataSetTermsCache.add(Term(tq(col->name), col->type));
 	}
 	else

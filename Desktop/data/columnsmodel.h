@@ -4,9 +4,10 @@
 #include <QAbstractTableModel>
 #include "datasettablemodel.h"
 #include "variableinfo.h"
-#include "datamodel.h"
-#include "datasetregistry.h"
+#include "columninfo.h"
 #include "models/terms.h"
+
+class DataSet;
 
 /// 
 /// Model used by the filter-drag-n-drop to give all the columns and their datatypes
@@ -29,8 +30,8 @@ public:
 				QVariant					data(			const QModelIndex & index, int role = Qt::DisplayRole)				const	override;
 				int							rowCount(		const QModelIndex &parent = QModelIndex())							const	override;
 				QHash<int, QByteArray>		roleNames()																			const	override;
-				int						getColumnIndex(const std::string & col)																			const	{ return _neoData ? _neoData->columnIndex(col) : _tableModel->getColumnIndex(col);	}
-				void						bindNeoData(DataModel * model);	///< NEO: serve the active lane dataset's schema instead of the legacy table (data-model-design.md §3.4)
+				int						getColumnIndex(const std::string & col)																			const	{ return _laneDataSet && _laneDataSet->isLaneOwned() ? _laneDataSet->laneColumnIndex(col) : _tableModel->getColumnIndex(col);	}
+				void						bindLane(DataSet * dataSet);	///< multi-dataset fold: serve the SHOWN dataset; when lane-owned the wire schema is the source of truth (data-model-design.md §3.4)
 				int						columnCount(	const QModelIndex &parent = QModelIndex())								const	override;
 				QStringList					getColumnNames()																							const;
 				const Terms &				dataSetTerms()																									const;	///< wide-data: cached (name, type) Terms of the active dataset, rebuilt only when the columns change
@@ -65,7 +66,7 @@ signals:
 
 private:
 	DataSetTableModel		* _tableModel	= nullptr;
-	DataModel				* _neoData		= nullptr;	///< NEO active dataset (schema from the lane); when set, it is the source of truth
+	DataSet					*	_laneDataSet	= nullptr;	///< the SHOWN dataset (multi-dataset fold); when lane-owned (datasetId set) the wire schema is the source of truth
 	static ColumnsModel		* _singleton;
 
 	// Wide-data cache (2026-08-16): the dataset's Terms built once per column-set change and

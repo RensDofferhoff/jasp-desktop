@@ -2244,3 +2244,98 @@ void DataSet::writeToOStream(std::ostream & out, bool includeComputed)
 			else if (r != rows-1)		out << "\n";
 		}
 }
+
+// ————— NEO lane identity + wire schema (multi-dataset fold; data-model-design.md §3.2) —————
+
+void DataSet::applyLaneSchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema, const std::string & sourcePath)
+{
+	_laneDatasetId	= datasetId;
+	_laneRows		= rows;
+	_laneSourcePath	= sourcePath;
+	_laneColumns.clear();
+	_laneColumnIndex.clear();
+
+	if (schema.isArray())
+		for (const Json::Value & col : schema)
+		{
+			ColumnInfo info;
+
+			info.name			= col.get("name", "").asString();
+			info.displayName	= col.get("display_name", info.name).asString();
+			info.description	= col.get("description", "").asString();
+
+			const std::string wireType = col.get("type", "scale").asString();
+			info.type =	wireType == "scale"		? columnType::scale
+					:	wireType == "ordinal"	? columnType::ordinal
+					:							  columnType::nominal;
+
+			info.allInteger		= col.get("all_integer", false).asBool();
+
+			// Constraint-check stats (data-model-design.md §2): non-empty count + distinct count
+			// from the lane — they answer every form levels/numeric threshold; nothing in the
+			// frontend ever counts distinct values itself.
+			if (col.isMember("value_count"))
+				info.valueCount = col["value_count"].asUInt64();
+			if (col.isMember("distinct_count"))
+				info.distinctCount = col["distinct_count"].asUInt64();
+			if (col.isMember("numeric_levels"))
+				info.numericLevels = col["numeric_levels"].asInt();
+
+			if (col.isMember("levels") && col["levels"].isArray())
+				for (const Json::Value & level : col["levels"])
+					info.levels.push_back(level.asString());
+
+			_laneColumnIndex.emplace(info.name, _laneColumns.size());	// first-wins, same semantics as the old linear scan
+			_laneColumns.push_back(std::move(info));
+		}
+
+	// Mirror the metadata into the legacy columns so the per-dataset provider chain (shown
+	// filter -> forms/headers/variable info) serves lane metadata — names, types, row count.
+	// NEVER row data: the grid reads cells through the view lane, not from here.
+	// Levels/labels are NOT mirrored: their label store is value-indexed (labels belong to
+	// data values) and wiring it by hand would corrupt the by-value/by-display maps; the
+	// label editor stays inert for lane datasets until the edit era (data-model-design
+	// decision 11).
+	if (_columns.size() < _laneColumns.size())
+		for (size_t i = _columns.size(); i < _laneColumns.size(); i++)
+			createColumn(_laneColumns[i].name, _laneColumns[i].type);
+
+	setRowCount(size_t(rows), false);	// metadata only — never load row data
+
+	Log::log() << "DataSet: lane schema applied for " << datasetId << " (" << rows << " rows, " << _laneColumns.size() << " columns)" << std::endl;
+	emit laneSchemaChanged();
+}
+
+const ColumnInfo * DataSet::laneColumnAt(size_t index) const
+{
+	return index < _laneColumns.size() ? &_laneColumns[index] : nullptr;
+}
+
+const ColumnInfo * DataSet::laneColumn(const std::string & name) const
+{
+	const int idx = laneColumnIndex(name);
+	return idx < 0 ? nullptr : &_laneColumns[size_t(idx)];
+}
+
+int DataSet::laneColumnIndex(const std::string & name) const
+{
+	auto found = _laneColumnIndex.find(name);
+	return found == _laneColumnIndex.end() ? -1 : int(found->second);
+}
+
+stringvec DataSet::laneColumnNames() const
+{
+	stringvec names;
+	names.reserve(_laneColumns.size());
+	for (const ColumnInfo & ci : _laneColumns)
+		names.push_back(ci.name);
+	return names;
+}
+
+std::map<std::string, columnType> DataSet::laneColumnTypesMap() const
+{
+	std::map<std::string, columnType> types;
+	for (const ColumnInfo & ci : _laneColumns)
+		types[ci.name] = ci.type;
+	return types;
+}

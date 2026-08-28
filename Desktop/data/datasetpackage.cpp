@@ -32,7 +32,6 @@
 #include "variableinfo.h"
 #include "fileevent.h"
 #include "jaspclient/jaspclient.h"		///< NEO: data_open submission lane
-#include "datasetregistry.h"				///< NEO data model (data-model-design.md)
 
 
 DataSetPackage * DataSetPackage::_singleton = nullptr;
@@ -63,11 +62,10 @@ DataSetPackage::DataSetPackage(QObject * parent) : QObject(parent)
 	_autoSaveTimer			.setSingleShot(false);
 	handleAutoSavePrefChange();
 
-	// NEO data model (data-model-design.md §3.2): the registry owns the open DataModels;
-	// datasetId() and the metadata group delegate to its active dataset. Relay its
-	// activeChanged as the existing datasetIdChanged signal for legacy listeners.
-	_registry = new DatasetRegistry(this);
-	connect(_registry, &DatasetRegistry::activeChanged, this, [this](const QString &) { emit datasetIdChanged(); });
+	// Multi-dataset fold: Workspace is the one dataset truth. The shown dataset's lane id
+	// IS datasetId() — relay shownDataSetChanged as datasetIdChanged for legacy listeners.
+	if (_workspace)
+		connect(_workspace, &Workspace::shownDataSetChanged, this, [this](DataSet *) { emit datasetIdChanged(); });
 }
 
 DataSetPackage::~DataSetPackage() 
@@ -637,8 +635,8 @@ void DataSetPackage::setManualEdits(bool newManualEdits)
 
 std::string DataSetPackage::datasetId() const
 {
-	// NEO: identity lives in the registry now — the active dataset's orchestrator id.
-	return _registry ? _registry->activeId() : std::string();
+	// Multi-dataset fold: identity lives on the DataSet — the shown dataset's orchestrator id.
+	return dataSet() ? dataSet()->datasetId() : std::string();
 }
 
 QVariant DataSetPackage::getColumnTypesWithIcons() const
@@ -735,10 +733,13 @@ void DataSetPackage::neoOpenDataset(std::string filePath)
 		}
 		Log::log() << "NEO dataset ready: " << result.datasetId
 				   << " (" << result.rows << " rows)" << std::endl;
-		// NEO data model: the registry creates/populates the DataModel from the typed
-		// kind:"data" payload (dataset_id, rows, schema) and makes it active — that is
-		// the frontend's whole view of the dataset now (data-model-design.md §3.2).
-		_registry->openFromResult(result, filePath);
+		// Multi-dataset fold: the typed kind:"data" payload (dataset_id, rows, schema)
+		// lands on the SHOWN DataSet itself — identity + wire schema live there now
+		// (data-model-design.md §3.2); applyLaneSchema also mirrors the metadata into the
+		// legacy columns so the per-dataset provider chain serves it.
+		if (DataSet * ds = dataSet())
+			ds->applyLaneSchema(result.datasetId, result.rows, result.schema, filePath);
+		emit datasetIdChanged();
 	});
 }
 

@@ -8,7 +8,7 @@
 
 #include <json/value.h>
 
-class DataModel;
+class DataViewBuffer;
 class DataViewBuffer;
 
 /// The ACTIVE dataset's view-fill scheduler (refactor_design/data-view-design.md §7.4,
@@ -48,7 +48,7 @@ public:
 	static constexpr uint64_t	kViewportMargin		= 1024;		///< rows kept resident around the viewport (test-tunable)
 	static constexpr int		kMaxFailRetries		= 2;			///< transient-failure auto-retries before giving up (viewport motion still revives)
 
-	explicit ViewFiller(DataModel * model, DataViewBuffer * buffer, QObject * parent = nullptr);
+	explicit ViewFiller(const std::string & datasetId, DataViewBuffer * buffer, QObject * parent = nullptr);
 	~ViewFiller() override;
 
 	void	start();			///< begin the fill (viewport at the top — the urgent class covers [0, margin))
@@ -76,7 +76,7 @@ private:
 
 	enum class StopState { None, Completed, Budget, Failed };
 
-	DataModel		*	_model;
+	std::string				_datasetId;	///< the orchestrator dataset id — every data-view request names it
 	DataViewBuffer	*	_buffer;
 	int					_nextWork		= 0;	///< data-view-N work_id counter (fresh ids — staleness is revision-stamped, not superseded)
 	bool				_filling		= false;

@@ -30,7 +30,6 @@
 #include <QSortFilterProxyModel>
 
 class DataSetPackageSubNodeModel;
-class DatasetRegistry;
 
 ///
 /// DataSetPackage is the Desktop-side wrapper around a Workspace (the multi-dataset model in CommonData).
@@ -101,8 +100,7 @@ public:
 				bool				hasAnalyses()						const	{ return _analysesData.size() > 0;				}
 					bool				synchingData()						const	{ return _synchingData;								}
 					std::string			dataFilePath()				const	{ return dataSet() ? dataSet()->dataFilePath() : "";	}
-					std::string				datasetId()					const;	///< NEO: orchestrator-assigned id of the ACTIVE dataset ("" until the open completes)
-					DatasetRegistry		*	registry()					const	{ return _registry;	}	///< NEO: open DataModels + active dataset (data-model-design.md §3.2)
+					std::string				datasetId()					const;	///< NEO: orchestrator-assigned id of the SHOWN dataset ("" while not lane-owned)
 					bool				isDatabase()						const	{ return _database != Json::nullValue;				}
 		QVariant				getColumnTypesWithIcons()													const;	///< NEO compat: gridmodel asks the package (strips to Workspace in the fold commit)
 			bool				synchingExternally()								const	{ return false;								}	///< NEO compat: external-db sync is dead under the orchestrator lane
@@ -253,7 +251,6 @@ private:
 
 	bool						_synchingData				= false;
 	Json::Value					_database;											///< NEO compat: external-database connection info (isDatabase/databaseJson) until the open-flow rewrite
-	DatasetRegistry			*	_registry				= nullptr;	///< NEO: owner of the open DataModels + active dataset (main thread only)
 	int							_nextDataOpen			= 0;	///< NEO: work_id counter for data_open submissions
 	QTimer						_autoSaveTimer;
 };

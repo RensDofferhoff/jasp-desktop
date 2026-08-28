@@ -41,8 +41,6 @@
 
 #include "gui/preferencesmodel.h"
 #include "data/exporters/jaspexporter.h"
-#include "data/datasetregistry.h"	// NEO data model (data-model-design.md)
-#include "data/datamodel.h"
 #include "data/gridmodel.h"			// NEO data view (data-view-design.md §7.2/§7.3)
 #include "utilities/application.h"
 #include "gui/jaspversionchecker.h"
@@ -135,7 +133,7 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 	_datasetTableModel		= new DataSetTableModel(this);
 	_columnModel			= new ColumnModel();
 	// NEO data view (data-view-design §7.3 — the burn-down seam): the grid's `dataSetModel`
-	// IS this GridModel, bound to the registry's active dataset + view buffer. The legacy
+	// IS this GridModel, bound to the shown dataset + its view lane (multi-dataset fold). The legacy
 	// chain above keeps compiling (ColumnModel, label editor) but the grid never reads it
 	// again — it dies with Phase B.
 	_gridModel				= new GridModel(this);
@@ -503,16 +501,25 @@ void MainWindow::makeConnections()
 	connect(_package,				&DataSetPackage::dataModeChanged,					_analyses,				&Analyses::dataModeChanged									);
 	connect(_package,				&DataSetPackage::dataModeChanged,					this,					&MainWindow::onDataModeChanged								);
 
-	// NEO data plane: the frontend no longer populates _dataSet for lane-owned opens (CSV etc.
-	// is read by the data-runner), so populateUIfromDataSet's rowCount-based setDataAvailable()
-	// stays false. Readiness is the registry's active dataset instead (data-model-design.md §3.2):
-	// the lane's terminal result carries rows + schema, which the registry publishes. Legacy
-	// (non-lane) imports never touch the registry and keep the populateUIfromDataSet path.
-	connect(_package->registry(),	&DatasetRegistry::activeChanged,		this,			[this](const QString &)
+	// NEO data plane: the frontend no longer populates the legacy columns for lane-owned opens
+	// (CSV etc. is read by the data-runner), so populateUIfromDataSet's rowCount-based
+	// setDataAvailable() stays false. Readiness is the SHOWN dataset's lane schema instead
+	// (data-model-design.md §3.2, multi-dataset fold): the open's terminal result carries
+	// rows + schema onto the DataSet itself. Legacy (non-lane) imports keep the
+	// populateUIfromDataSet path.
+	if (_package->workspace())
 	{
-		auto * activeData = _package->registry()->active();
-		setDataAvailable(activeData && activeData->rows() > 0);
-	});
+		connect(_package->workspace(),	&Workspace::shownDataSetChanged,		this,			[this](DataSet * ds)
+		{
+			setDataAvailable(ds && ds->isLaneOwned() && ds->laneRows() > 0);
+		});
+		connect(_package,				&DataSetPackage::datasetIdChanged,	this,			[this]()
+		{
+			// the open completing on the already-shown dataset flips readiness
+			DataSet * ds = _package->dataSet();
+			setDataAvailable(ds && ds->isLaneOwned() && ds->laneRows() > 0);
+		});
+	}
 	connect(_package,				&DataSetPackage::askUserForExternalDataFile,		this,					&MainWindow::startDataEditorHandler							);
 	connect(_package,				&DataSetPackage::makeAnAutoSave,					this,					&MainWindow::saveTmpFileHandler								); 
 	connect(_package,				&DataSetPackage::showWarning,						_msgForwarder,			&MessageForwarder::showWarningQML,							Qt::QueuedConnection);
@@ -878,7 +885,7 @@ void MainWindow::loadQML()
 	// "QObject::connect: signal not found" — so scrolling never reached the scheduler.)
 	connect(DataSetView::mainDataViewer(), &DataSetViewBase::viewportRowsChanged, this, [this](int firstRow, int lastRow)
 	{
-		DataSetPackage::pkg()->registry()->setViewportRows(uint64_t(qMax(0, firstRow)), uint64_t(qMax(0, lastRow)));
+		_gridModel->setViewportRows(uint64_t(qMax(0, firstRow)), uint64_t(qMax(0, lastRow)));
 	});
 
 	//connect(DataSetView::lastInstancedDataSetView(), &DataSetView::selectionStartChanged,	_columnModel,	&ColumnModel::changeSelectedColumn);
@@ -1546,15 +1553,13 @@ void MainWindow::registerRpcHandlers()
 
 			if (type == columnType::nominal || type == columnType::nominalText || type == columnType::ordinal)
 			{
-				// NEO (data-model-design.md §3.6): lane datasets answer from the active DataModel
+				// NEO (data-model-design.md §3.6): lane datasets answer from the wire schema
 				// (levels from the wire schema) — but only when the info is asked for the SHOWN dataset,
-				// which is the one the registry's active model mirrors. Legacy imports and background
+				// carried on the DataSet itself. Legacy imports and background
 				// datasets keep the Column path.
-				DataSetPackage * pkg = DataSetPackage::pkg();
-				DataModel * neo = (pkg && pkg->registry() && ds == pkg->dataSet()) ? pkg->registry()->active() : nullptr;
-				if (neo)
+				if (ds->isLaneOwned())
 				{
-					if (const ColumnInfo * columnInfo = neo->column(name))
+					if (const ColumnInfo * columnInfo = ds->laneColumn(name))
 						col["distinctCount"] = static_cast<int>(columnInfo->levels.size());
 				}
 				else

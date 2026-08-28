@@ -4,10 +4,10 @@
 #include <algorithm>
 #include <limits>
 
-#include "datamodel.h"
-#include "datasetregistry.h"
 #include "viewfiller.h"
 #include "data/datasetpackage.h"
+#include "workspace.h"
+#include "dataset.h"
 #include "qutils.h"
 #include "jasptheme.h"
 #include "log.h"
@@ -16,24 +16,32 @@ const QString	GridModel::placeholderText = QStringLiteral("…");	// U+2026 — 
 
 GridModel::GridModel(QObject * parent)
 	: QAbstractTableModel(parent)
-	, _registry(DataSetPackage::pkg()->registry())
 {
-	connect(_registry, &DatasetRegistry::activeChanged, this, &GridModel::bindToActive);
-	bindToActive();		// startup: no active dataset yet → empty 0×0 model
+	// Multi-dataset fold: Workspace is the one dataset truth — the shown dataset IS the
+	// active dataset. A switch rebinds the whole lane; the open completing on the shown
+	// dataset (applyLaneSchema) (re)starts it.
+	if (DataSetPackage * pkg = DataSetPackage::pkg())
+		if (Workspace * ws = pkg->workspace())
+		{
+			connect(ws, &Workspace::shownDataSetChanged, this, &GridModel::bindToShown);
+			bindToShown();		// startup: nothing shown yet → empty 0×0 model
+			return;
+		}
+	Log::log() << "GridModel: no workspace yet — starting unbound (empty)" << std::endl;
 }
 
-void GridModel::bindToActive()
+void GridModel::bindToShown()
 {
 	beginResetModel();
 
-	if (_buffer)
-		disconnect(_buffer, nullptr, this, nullptr);
-	if (_filler)
-		disconnect(_filler, nullptr, this, nullptr);
+	dropLane();
 
-	_model	= _registry->active();
-	_buffer	= _registry->viewBuffer();
-	_filler	= _registry->viewFiller();
+	if (_dataSet)
+		disconnect(_dataSet, nullptr, this, nullptr);	// our laneSchemaChanged hook dies with the old dataset
+
+	_dataSet = DataSetPackage::pkg() && DataSetPackage::pkg()->workspace()
+			? DataSetPackage::pkg()->workspace()->shownDataSet()
+			: nullptr;
 
 	_cacheRow = UINT64_MAX;
 	_cacheCol = -1;
@@ -42,22 +50,69 @@ void GridModel::bindToActive()
 	_cacheMissing = false;
 	_viewStatus.clear();
 
-	if (_buffer)
+	if (_dataSet)
 	{
-		connect(_buffer, &DataViewBuffer::chunkIngested,	this, &GridModel::onChunkIngested);
-		connect(_buffer, &DataViewBuffer::chunksEvicted,	this, &GridModel::onChunksEvicted);
-		connect(_buffer, &DataViewBuffer::bufferReset,		this, &GridModel::onBufferReset);
-	}
-	if (_filler)
-	{
-		connect(_filler, &ViewFiller::budgetReached,	this, &GridModel::onFillBudgetReached);
-		connect(_filler, &ViewFiller::fillCompleted,	this, &GridModel::onFillCompleted);
-		connect(_filler, &ViewFiller::fillFailed,		this, &GridModel::onFillFailed);
-		connect(_filler, &ViewFiller::fillRecovered,	this, &GridModel::onFillRecovered);
+		// The open completes AFTER the dataset is shown (asyncloader creates the skeleton first):
+		// when the schema lands, (re)start the lane — it carries rows, which startLane needs.
+		connect(_dataSet, &DataSet::laneSchemaChanged, this, &GridModel::onLaneSchemaChanged);
+		startLane();	// no-op when the schema hasn't landed yet (0 rows)
 	}
 
 	endResetModel();
 	emit viewStatusChanged(_viewStatus);
+}
+
+void GridModel::onLaneSchemaChanged()
+{
+	// Only the SHOWN dataset's schema matters — a background dataset landing its schema
+	// (multi-dataset) must not disturb this lane. Rebind to be safe: it drops any stale
+	// lane bound before the schema arrived and starts the fresh one under a model reset.
+	if (_dataSet && sender() == _dataSet)
+		bindToShown();
+}
+
+void GridModel::startLane()
+{
+	if (!_dataSet || !_dataSet->isLaneOwned() || _dataSet->laneRows() == 0)
+		return;		// nothing to view (legacy dataset, or a schema-only one) — the grid shows an empty model
+
+	_viewEpoch++;
+	_buffer = new DataViewBuffer(this);
+	_buffer->reset(_dataSet->laneRows(), 0 /* dataset revision — edits bump it in a later increment */, _viewEpoch);
+	_filler = new ViewFiller(_dataSet->datasetId(), _buffer, this);
+
+	connect(_buffer, &DataViewBuffer::chunkIngested,	this, &GridModel::onChunkIngested);
+	connect(_buffer, &DataViewBuffer::chunksEvicted,	this, &GridModel::onChunksEvicted);
+	connect(_buffer, &DataViewBuffer::bufferReset,		this, &GridModel::onBufferReset);
+	connect(_filler, &ViewFiller::budgetReached,	this, &GridModel::onFillBudgetReached);
+	connect(_filler, &ViewFiller::fillCompleted,	this, &GridModel::onFillCompleted);
+	connect(_filler, &ViewFiller::fillFailed,		this, &GridModel::onFillFailed);
+	connect(_filler, &ViewFiller::fillRecovered,	this, &GridModel::onFillRecovered);
+
+	_filler->start();	// the fill loop IS the prefetch — back-to-back chunks, background
+}
+
+void GridModel::dropLane()
+{
+	if (_filler)
+	{
+		_filler->stop();		// aborts any in-flight chunk — its handler slot is dropped
+		_filler->deleteLater();
+		_filler = nullptr;
+	}
+	if (_buffer)
+	{
+		disconnect(_buffer, nullptr, this, nullptr);
+		_buffer->deleteLater();
+		_buffer = nullptr;
+	}
+}
+
+void GridModel::setViewportRows(uint64_t firstRow, uint64_t lastRow)
+{
+	// Sliding mode (format doc §2.5): the viewport drives the shown dataset's fill scheduler.
+	if (_filler)
+		_filler->setViewport(firstRow, lastRow);
 }
 
 void GridModel::onChunkIngested(quint64 firstRow, quint64 rows)
@@ -156,16 +211,16 @@ int GridModel::rowCount(const QModelIndex & parent) const
 	// placeholders until their chunk arrives (or after eviction). Item creation in
 	// DataSetViewBase is viewport-driven, so a multi-million-row span costs nothing but the
 	// scrollbar. int-capped for the view's index machinery.
-	if (!_model)
+	if (!_dataSet)
 		return 0;
-	return int(std::min<uint64_t>(_model->rows(), uint64_t(std::numeric_limits<int>::max())));
+	return int(std::min<uint64_t>(_dataSet->laneRows(), uint64_t(std::numeric_limits<int>::max())));
 }
 
 int GridModel::columnCount(const QModelIndex & parent) const
 {
 	if (parent.isValid())
 		return 0;
-	return _model ? int(_model->columnCount()) : 0;
+	return _dataSet ? int(_dataSet->laneSchema().size()) : 0;
 }
 
 void GridModel::ensureCell(int row, int col) const
@@ -222,17 +277,17 @@ QVariant GridModel::data(const QModelIndex & index, int role) const
 
 	case int(dataPkgRoles::columnType):
 	{
-		const ColumnInfo * c = _model ? _model->columnAt(size_t(col)) : nullptr;
+		const ColumnInfo * c = _dataSet ? _dataSet->laneColumnAt(size_t(col)) : nullptr;
 		return int(c ? c->type : columnType::unknown);
 	}
 	case int(dataPkgRoles::name):
 	{
-		const ColumnInfo * c = _model ? _model->columnAt(size_t(col)) : nullptr;
+		const ColumnInfo * c = _dataSet ? _dataSet->laneColumnAt(size_t(col)) : nullptr;
 		return c ? tq(c->displayName) : QString();
 	}
 	case int(dataPkgRoles::description):
 	{
-		const ColumnInfo * c = _model ? _model->columnAt(size_t(col)) : nullptr;
+		const ColumnInfo * c = _dataSet ? _dataSet->laneColumnAt(size_t(col)) : nullptr;
 		return c ? tq(c->description) : QString();
 	}
 	case int(dataPkgRoles::columnPkgIndex):
@@ -253,7 +308,7 @@ QVariant GridModel::headerData(int section, Qt::Orientation orientation, int rol
 
 	if (orientation == Qt::Horizontal)
 	{
-		const ColumnInfo * col = _model ? _model->columnAt(size_t(section)) : nullptr;
+		const ColumnInfo * col = _dataSet ? _dataSet->laneColumnAt(size_t(section)) : nullptr;
 		if (!col)
 			return QVariant();
 
@@ -302,7 +357,7 @@ QVariant GridModel::headerData(int section, Qt::Orientation orientation, int rol
 	if (role == Qt::DisplayRole)
 		return section + 1;
 	if (role == int(dataPkgRoles::maxRowHeaderString))
-		return QString::number(_model ? _model->rows() : 0);
+		return QString::number(_dataSet ? _dataSet->laneRows() : 0);
 	return QVariant();
 }
 
@@ -354,7 +409,7 @@ QHash<int, QByteArray> GridModel::roleNames() const
 
 QString GridModel::columnName(int column) const
 {
-	const ColumnInfo * c = _model ? _model->columnAt(size_t(column)) : nullptr;
+	const ColumnInfo * c = _dataSet ? _dataSet->laneColumnAt(size_t(column)) : nullptr;
 	return c ? tq(c->displayName) : QString();
 }
 
@@ -400,7 +455,7 @@ void GridModel::toggleColType(int, bool)
 
 bool GridModel::isColumnNameFree(QString name) const
 {
-	return _model ? _model->isColumnNameFree(fq(name)) : true;
+	return _dataSet ? _dataSet->laneColumnIndex(fq(name)) < 0 : true;
 }
 
 void GridModel::setShowInactive(bool showInactive)

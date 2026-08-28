@@ -1,6 +1,5 @@
 #include "viewfiller.h"
 
-#include "datamodel.h"
 #include "dataviewbuffer.h"
 #include "jaspclient/jaspclient.h"
 #include "gui/preferencesmodel.h"
@@ -8,10 +7,11 @@
 #include "log.h"
 
 #include <QLocale>
+#include <string>
 
-ViewFiller::ViewFiller(DataModel * model, DataViewBuffer * buffer, QObject * parent)
+ViewFiller::ViewFiller(const std::string & datasetId, DataViewBuffer * buffer, QObject * parent)
 	: QObject(parent)
-	, _model(model)
+	, _datasetId(datasetId)
 	, _buffer(buffer)
 {
 }
@@ -23,7 +23,7 @@ ViewFiller::~ViewFiller()
 
 void ViewFiller::start()
 {
-	if (!_model || !_buffer || !JaspClient::client())
+	if (_datasetId.empty() || !_buffer || !JaspClient::client())
 		return;
 	_stopState	= StopState::None;
 	_filling	= true;
@@ -82,7 +82,7 @@ void ViewFiller::setViewport(uint64_t firstRow, uint64_t lastRow)
 
 void ViewFiller::requestNext()
 {
-	if (_planning || !_filling || _inFlight || !_buffer || !_model)
+	if (_planning || !_filling || _inFlight || !_buffer || _datasetId.empty())
 	{
 		// Anomaly detector: the wake path sets _filling=true then calls this — bailing here
 		// would leave the filler claiming to fill while idle (the s-21 stuck state; repaired
@@ -91,7 +91,7 @@ void ViewFiller::requestNext()
 		if (_filling)
 			Log::log() << "ViewFiller: requestNext bailed at guard (planning=" << _planning
 					   << " inFlight=" << _inFlight << " buffer=" << bool(_buffer)
-					   << " model=" << bool(_model) << ")" << std::endl;
+					   << " id=" << _datasetId << ")" << std::endl;
 		return;
 	}
 
@@ -211,7 +211,7 @@ void ViewFiller::requestNext()
 	payload["render"]		= renderSpec();
 
 	Json::Value datasetIds(Json::arrayValue);
-	datasetIds.append(_model->datasetId());
+	datasetIds.append(_datasetId);
 
 	Json::Value work(Json::objectValue);
 	work["v"]			= 1;
