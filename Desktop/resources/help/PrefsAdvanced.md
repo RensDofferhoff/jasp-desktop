@@ -84,6 +84,7 @@ Format = "0.1.0"
 JASPVersion = "0.19.3"
 
 EnabledModules = ["jaspAudit",]
+OverrideCommon = ["jaspAudit", "jaspMachineLearning", "jaspQualityControl"]
 
 [Constants]
 rain = true

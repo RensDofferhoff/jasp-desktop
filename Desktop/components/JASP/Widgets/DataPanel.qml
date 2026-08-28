@@ -50,10 +50,11 @@ Rectangle
 
 		DataTableView
 		{
-			objectName:				"dataSetTableView"
-			SplitView.fillHeight:	true
-			onDoubleClicked:		ribbonModel.showData()
-			isMainDataViewer:		true
+			objectName:					"dataSetTableView"
+			SplitView.fillHeight:		true
+			onDoubleClicked:			ribbonModel.showData()
+			isMainDataViewer:			true
+			SplitView.minimumHeight:	calculatedMinimumHeight
         }
 
 		handle: Rectangle

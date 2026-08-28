@@ -18,6 +18,7 @@
 
 #include "columntypesmodel.h"
 #include "variableinfo.h"
+#include "qutils.h"
 
 columnTypeVec ColumnTypesModel::_allTypes;
 
@@ -58,8 +59,8 @@ QVariant ColumnTypesModel::data(const QModelIndex &index, int role) const
 	switch(role)
 	{
 	case TypeRole:				return int(_types[index.row()]);
-	case DisplayRole:			return VariableInfo::getTypeFriendly(_types[index.row()]);
-	case MenuImageSourceRole:	return VariableInfo::getIconFile(_types[index.row()], VariableInfo::IconType::DefaultIconType);
+	case DisplayRole:			return QColumnUtils::getTypeFriendly(_types[index.row()]);
+	case MenuImageSourceRole:	return getIconFilename(_types[index.row()], varIconType::DefaultIconType);
 	case IsEnabledRole:			return true;
 	case IsSeparatorRole:		return false;
 	case JSFunctionRole:
@@ -116,7 +117,7 @@ QStringList ColumnTypesModel::iconList() const
 		return result;
 
 	for (columnType type : _types)
-		result.push_back(VariableInfo::getIconFile(type, VariableInfo::IconType::InactiveIconType));
+		result.push_back(getIconFilename(type, varIconType::InactiveIconType));
 
 	return result;
 }

@@ -552,3 +552,57 @@ void QColumnUtils::setCallbacksAndDefaultLocale(const QLocale & locale, bool use
 	ColumnUtils::setAlternativeDoubleToString(	altFuncToString, altFuncCurToString	);
 	ColumnUtils::setExtraStringToNumber(		altFuncToDouble, altFuncToInt		);	
 }
+
+QString QColumnUtils::getTypeFriendly(columnType colType)
+{
+	switch(colType)
+	{
+	case columnType::scale:			return tr("Scale");
+	case columnType::ordinal:		return tr("Ordinal");
+	case columnType::nominal:		return tr("Nominal");
+	default:						break;
+	}
+	
+	return tr("Unknown");
+}
+
+QVariantList tvl(const QStringList &from)
+{
+	QVariantList argh;
+	
+	for(auto & f : from)
+		argh.push_back(f);
+	
+	return argh;
+}
+
+QVariant getColumnTypesWithIcons()
+{
+	static QVariantList ColumnTypeAndIcons;
+
+	if(ColumnTypeAndIcons.size() == 0)
+	{
+		ColumnTypeAndIcons.push_back("");
+		ColumnTypeAndIcons.push_back("variable-scale.svg");
+		ColumnTypeAndIcons.push_back("variable-ordinal.svg");
+		ColumnTypeAndIcons.push_back("variable-nominal.svg");
+	}
+
+	return QVariant(ColumnTypeAndIcons);
+}
+
+QString getIconFilename(columnType colType, varIconType type)
+{
+	QString iconType;
+	
+	switch(type)
+	{
+	default:
+	case varIconType::DefaultIconType:		iconType = "";				break;
+	case varIconType::DisabledIconType:		iconType = "-disabled";		break;
+	case varIconType::InactiveIconType:		iconType = "-inactive";		break;		
+	case varIconType::TransformedIconType:	iconType = "-transformed";	break;
+	}
+	
+	return QString("variable-%1%2.svg").arg(columnTypeToQString(colType)).arg(iconType);
+}

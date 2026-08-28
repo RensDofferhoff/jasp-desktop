@@ -3,7 +3,7 @@
 #include "jasptheme.h"
 #include "utilities/settings.h"
 #include "utilities/appdirs.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "rpc/jasprpcdispatcher.h"
 #include "log.h"
 

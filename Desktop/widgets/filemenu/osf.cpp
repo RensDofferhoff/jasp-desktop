@@ -23,7 +23,7 @@
 
 
 #include "utilities/settings.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "utilities/messageforwarder.h"
 #include "osf/onlineusernodeosf.h"
 #include "filemenu.h"

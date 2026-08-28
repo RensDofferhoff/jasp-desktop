@@ -346,12 +346,6 @@ static void clearQmlFormCache()
 	}
 }
 
-static void refreshQmlDataSetInfoContext()
-{
-	if (gl_qmlEngine)
-		gl_qmlEngine->rootContext()->setContextProperty("dataSetInfo", VariableInfo::info());
-}
-
 static DataSetProvider* resetDataProvider(bool dbInMemory, bool resetDataSet)
 {
 	bool providerWillBeRecreated = gl_initialized && gl_initializedDbInMemory != dbInMemory;
@@ -360,7 +354,6 @@ static DataSetProvider* resetDataProvider(bool dbInMemory, bool resetDataSet)
 
 	DataSetProvider * provider = DataSetProvider::getProvider(dbInMemory, resetDataSet, gl_application);
 	gl_initializedDbInMemory = dbInMemory;
-	refreshQmlDataSetInfoContext();
 	return provider;
 }
 
@@ -730,25 +723,22 @@ const char* STDCALL syntaxBridgeParseDescription(const char* modulePath)
 	return result.c_str();
 }
 
-const char* STDCALL syntaxBridgeGetVariableNames()
+const char*	STDCALL syntaxBridgeGetVariableNames()
 {
+	DataSetProvider* provider = DataSetProvider::getProvider(false, false);
+	if (!provider)
+		return "";
+
 	static std::string result;
 
-	if (!init())
-	{
-		Log::log() << "Error during initialization" << std::endl;
-		result = "";
-		return result.c_str();
-	}
-
-	size_t numCols = 0;
-	const char ** columnNames = rbridge_allColumnNames(numCols, false);
-
+	QStringList names = provider->provideInfo(varInfoType::VariableNames).toStringList();
 	Json::Value jsonNames(Json::arrayValue);
-	for (size_t i = 0; i < numCols; ++i)
-		jsonNames.append(columnNames[i]);
+
+	for (const QString & name : names)
+		jsonNames.append(fq(name));
 
 	result = jsonNames.toStyledString();
+
 	return result.c_str();
 }
 

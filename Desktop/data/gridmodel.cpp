@@ -8,7 +8,7 @@
 #include "datasetregistry.h"
 #include "viewfiller.h"
 #include "data/datasetpackage.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "jasptheme.h"
 #include "log.h"
 
@@ -218,7 +218,7 @@ QVariant GridModel::data(const QModelIndex & index, int role) const
 		return false;
 
 	case int(dataPkgRoles::lines):
-		return DataSetPackage::getDataSetViewLines(col > 0, row > 0, true, true);
+		return DataSet::getDataSetViewLines(col > 0, row > 0, true, true);
 
 	case int(dataPkgRoles::columnType):
 	{
@@ -377,6 +377,25 @@ bool GridModel::columnUsedInEasyFilter(int) const
 void GridModel::resetAllFilters()
 {
 	// no-op until filters land
+}
+
+void GridModel::setColumnFilter(const QString & filter)
+{
+	if (_columnFilter == filter)
+		return;
+
+	_columnFilter = filter;
+	emit columnFilterChanged(filter);
+
+	// Edit-era TODO: the header view must skip columns whose name doesn't match. Until then
+	// the box accepts text without effect — log it so the gap is visible, not silent.
+	Log::log() << "GridModel: column filter '" << tq(filter.toStdString()) << "' stored, but column filtering is not implemented until the edit era" << std::endl;
+}
+
+void GridModel::toggleColType(int, bool)
+{
+	// Edit-era: column type changes ride data_edit (merge-multidataset.md §6 — fail loudly).
+	Log::log() << "GridModel: toggleColType ignored — column type editing waits for data_edit (edit era)" << std::endl;
 }
 
 bool GridModel::isColumnNameFree(QString name) const

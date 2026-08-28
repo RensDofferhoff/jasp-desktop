@@ -17,7 +17,7 @@
 //
 
 #include "term.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 
 const char * Term::separator =
 #ifdef _WIN32

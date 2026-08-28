@@ -30,6 +30,7 @@ private slots:
 	void cleanup();
 	void scopedContextsDecodeInterleavedAndRestoreLiveState();
 	void malformedContextDoesNotMutateLiveState();
+	void currentEncoderReTargetsOnSwitchAndClearsOnDestruction();
 };
 
 #endif // TESTCOLUMNENCODERCONTEXT_H

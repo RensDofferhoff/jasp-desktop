@@ -21,6 +21,7 @@
 #define LISTMODELFILTEREDDATAENTRY_H
 
 #include "listmodeltableviewbase.h"
+#include <QPointer>
 
 class Filter;
 class ListModelFilteredDataEntry : public ListModelTableViewBase
@@ -36,7 +37,7 @@ public:
 
 	QVariant					data(	const QModelIndex &index, int role = Qt::DisplayRole)	const	override;
 	Qt::ItemFlags				flags(	const QModelIndex &index)								const	override;
-	void						filterDoneHandler(const QString & name, const QString & error)			override;
+	void						filterDoneHandler(int dataSetID, const QString & name, const QString & error)			override;
 	const QString		&		filter()														const				{ return _tableTerms.filter;	}
 	const std::string	&		filterName()													const				{ return _filterName;			}
 	const QString		&		colName()														const				{ return _tableTerms.colName;	}
@@ -85,7 +86,7 @@ private:
 	QStringList					_dataColumns,
 								_extraColsStr;
 	std::string					_filterName;
-	Filter					*	_filter			= nullptr;
+	QPointer<Filter>			_filter			= nullptr;
 	bool						_informOnce		= false;
 };
 

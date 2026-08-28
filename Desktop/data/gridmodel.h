@@ -4,7 +4,7 @@
 #include <QAbstractTableModel>
 
 #include "dataviewbuffer.h"
-#include "datasetpackageenums.h"
+#include "dataenums.h"
 #include "columntype.h"
 
 class DataModel;
@@ -29,10 +29,17 @@ class GridModel : public QAbstractTableModel
 	Q_OBJECT
 
 	Q_PROPERTY(int	columnsFilteredCount	READ columnsFilteredCount					NOTIFY columnsFilteredCountChanged	)
-	Q_PROPERTY(bool showInactive			READ showInactive	WRITE setShowInactive	NOTIFY showInactiveChanged			)
+	Q_PROPERTY(bool showInactive			READ showInactive	WRITE setShowInactive	NOTIFY showInactiveChanged		)
 	/// Status line for the grid's status bar: "" while the fill is in progress or complete;
 	/// a note when the fill stopped early (buffer budget exhausted / lane failure).
-	Q_PROPERTY(QString viewStatus			READ viewStatus							NOTIFY viewStatusChanged			)
+	Q_PROPERTY(QString viewStatus		READ viewStatus							NOTIFY viewStatusChanged		)
+	/// Column-name filter typed in the status bar's "Columnfilter" box (multi-dataset PR QML).
+	/// Stored + notified; actual column filtering is edit-era (the header view must learn to skip
+	/// non-matching columns — until then setting it logs once so the no-op is visible, not silent.
+	Q_PROPERTY(QString columnFilter	READ columnFilter	WRITE setColumnFilter	NOTIFY columnFilterChanged		)
+	/// Type icons of the currently selected columns (status-bar type toggle row). Selection is
+	/// view-side state GridModel does not track — stays empty until the edit era wires it.
+	Q_PROPERTY(QVariantList currentTypeIcons	READ currentTypeIcons				NOTIFY currentTypeIconsChanged	)
 
 public:
 	explicit GridModel(QObject * parent = nullptr);
@@ -50,11 +57,16 @@ public:
 	Q_INVOKABLE QString		columnName(int column) const;
 	Q_INVOKABLE void		setColumnName(int col, QString name);			///< no-op until data_edit
 	Q_INVOKABLE QVariant	getColumnTypesWithIcons() const;
+	Q_INVOKABLE QVariant	columnTypesWithIcons() const { return getColumnTypesWithIcons(); }///< multi-dataset PR QML renamed the call (no "get")
 	Q_INVOKABLE bool		columnUsedInEasyFilter(int column) const;		///< false until filters
 	Q_INVOKABLE void		resetAllFilters();							///< no-op until filters
 	Q_INVOKABLE bool		isColumnNameFree(QString name) const;
+	Q_INVOKABLE void		toggleColType(int column, bool next = true);	///< edit-era: logged no-op (fail loudly, merge-multidataset.md §6)
 
 	int					columnsFilteredCount() const { return 0; }		///< no filters in v1
+	QString				columnFilter() const { return _columnFilter; }
+	void				setColumnFilter(const QString & filter);
+	QVariantList		currentTypeIcons() const { return QVariantList(); }	///< empty until selection is wired (edit era)
 	bool				showInactive() const { return _showInactive; }
 	void				setShowInactive(bool showInactive);
 	QString				viewStatus() const { return _viewStatus; }
@@ -63,6 +75,8 @@ signals:
 	void				columnsFilteredCountChanged();
 	void				showInactiveChanged(bool showInactive);
 	void				viewStatusChanged(const QString & status);
+	void				columnFilterChanged(const QString & filter);
+	void				currentTypeIconsChanged();
 	void				renameColumnDialog(int columnIndex);			///< RenameColumnDialog listens; never emitted in v1
 
 private slots:
@@ -86,6 +100,7 @@ private:
 	ViewFiller		*	_filler			= nullptr;	///< active dataset's fill driver (nullable)
 	bool				_showInactive	= true;
 	QString				_viewStatus;	///< grid status-bar note (windowed-mode note / fill failure)
+	QString				_columnFilter;	///< status-bar column filter text (stored; filtering is edit-era)
 
 	// Per-cell role fan-out cache: the grid's viewport loop asks ~6 roles per cell,
 	// column-major — compute the cell once and reuse it across the role calls.

@@ -59,7 +59,7 @@ endif()
 
 project(
   JASP
-  VERSION 0.98.1.0 # <major>[.<minor>[.<patch>[.<tweak>]]]
+  VERSION 0.99.0.0 # <major>[.<minor>[.<patch>[.<tweak>]]]
   LANGUAGES CXX C
   HOMEPAGE_URL "http://jasp-stats.org/"
   DESCRIPTION "A fresh way to do statistics")
@@ -127,13 +127,6 @@ endif()
 include(Programs)
 
 # Looking for libraries, e.g., Boost, Qt
-# When dependencies are built in Release but the consumer is RelWithDebInfo,
-# CMake needs to know to fall back to Release properties on imported targets.
-if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-  set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release "")
-elseif(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
-  set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL Release "")
-endif()
 include(Libraries)
 
 # Preparing irregular dependencies, e.g., ReadStat

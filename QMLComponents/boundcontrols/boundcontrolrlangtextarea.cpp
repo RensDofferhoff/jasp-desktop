@@ -22,6 +22,9 @@
 #include "variableinfo.h"
 #include "stringutils.h"
 #include "analysisform.h"
+#include "variableinfo.h"
+#include "filter.h"
+#include "columnencoder.h"
 #include <QQuickTextDocument>
 #include <algorithm>
 #include <cctype>
@@ -84,6 +87,18 @@ namespace
 	}
 }
 
+ColumnEncoder * BoundControlRlangTextArea::_encoder() const
+{
+	//Desktop-only: never use the process-global ColumnEncoder (that is only meaningful inside the engine's
+	//request context). Resolve the encoder for the data this control's form is bound to instead.
+	if (VariableInfo * vi = _textArea->form()->varInfo())
+		if (VariableInfoProvider * provider = vi->provider())
+			if (ColumnEncoder * encoder = provider->columnEncoder())
+				return encoder;
+
+	return ColumnEncoder::fallbackEncoder();
+}
+
 BoundControlRlangTextArea::BoundControlRlangTextArea(TextAreaBase *textArea, RLangType type)
 	: BoundControlTextArea(textArea), _langType(type)
 {
@@ -92,7 +107,8 @@ BoundControlRlangTextArea::BoundControlRlangTextArea(TextAreaBase *textArea, RLa
 	if (textDocumentQQuick)
 	{
 		QTextDocument* doc = textDocumentQQuick->textDocument();
-        _rLangHighlighter = new RSyntaxHighlighter(doc);
+        _rLangHighlighter = new RSyntaxHighlighter(doc, textArea->form()->varInfo());
+		
 		//connect(doc, &QTextDocument::contentsChanged, this, &BoundQMLTextArea::contentsChangedHandler);
 	}
 	else
@@ -157,7 +173,11 @@ void BoundControlRlangTextArea::_extractUsedColumnNames(const std::string & text
 	_prefixedUsedColumnNames.clear();
 	_noPrefixUsedColumnNames.clear();
 
-	VariableInfoProvider * provider = VariableInfo::info() ? VariableInfo::info()->provider() : nullptr;
+	//Dataset-aware: resolve the provider through this form's varInfo (the analysis' own filter),
+	//never the old process-global VariableInfo::info() — that singleton is gone.
+	VariableInfoProvider * provider = nullptr;
+	if (VariableInfo * vi = _textArea->form()->varInfo())
+		provider = vi->provider();
 	if (!provider)
 	{
 		Log::log() << "BoundControlRlangTextArea: no variable-info provider, skipping column extraction" << std::endl;
@@ -165,7 +185,7 @@ void BoundControlRlangTextArea::_extractUsedColumnNames(const std::string & text
 	}
 
 	stringvec columnNames;
-	for (const QString & name : provider->provideInfo(VariableInfo::VariableNames).toStringList())
+	for (const QString & name : provider->provideInfo(varInfoType::VariableNames).toStringList())
 		columnNames.push_back(fq(name));
 	if (columnNames.empty()) return;
 
@@ -222,7 +242,7 @@ void BoundControlRlangTextArea::_setBoundValues(bool setModel)
 	for (const std::string& column : _noPrefixUsedColumnNames)
 	{
 		terms.add(Term(column, _textArea->getVariableType(tq(column))));
-		columns.append(column);
+		columns.append(column);	// NEO: raw names on the wire; the runner aliases (§3.7)
 		value.append(column);
 	}
 
@@ -237,7 +257,7 @@ void BoundControlRlangTextArea::_setBoundValues(bool setModel)
 	for(auto& prefixSet : _prefixedUsedColumnNames) {
 		prefixedColumns[prefixSet.first] = Json::Value(Json::arrayValue);
 		for (const std::string& column : prefixSet.second) {
-			prefixedColumns[prefixSet.first].append(column);
+			prefixedColumns[prefixSet.first].append(column);	// NEO: raw names; the runner aliases (§3.7)
 		}
 	}
 	boundValue["prefixedColumns"] = prefixedColumns;

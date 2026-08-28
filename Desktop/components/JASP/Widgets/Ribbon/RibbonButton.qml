@@ -51,6 +51,7 @@ Item
 
 	ToolTip.text:				ribbonButton.toolTip
 	ToolTip.visible:			ribbonButton.toolTip !== "" && mice.containsMouse && !ribbonButton.showPressed
+	ToolTip.toolTip.background:		Rectangle { color: jaspTheme.tooltipBackgroundColor; radius: jaspTheme.borderRadius }
 	
 	Keys.onPressed: (event) =>
 	{

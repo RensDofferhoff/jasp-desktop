@@ -182,6 +182,7 @@ void Analyses::bindAnalysisHandler(Analysis* analysis)
 	connect(analysis,	&Analysis::sendRScriptSignal,					this, &Analyses::sendRScriptHandler					);
 	connect(analysis,	&Analysis::sendFilterSignal,					this, &Analyses::sendFilterHandler					);
 	connect(analysis,	&Analysis::titleChanged,						this, &Analyses::setChangedAnalysisTitle			);
+	connect(analysis,	&AnalysisBase::dataSpecChanged,					this, &Analyses::setChangedAnalysisDataSpec			);
 	connect(analysis,	&Analysis::imageSavedSignal,					this, &Analyses::analysisImageSaved					);
 	connect(analysis,	&Analysis::imageEditedSignal,					this, &Analyses::analysisImageEdited				);
 	connect(analysis,	&Analysis::requestColumnCreation,				this, &Analyses::requestColumnCreation				);
@@ -416,6 +417,13 @@ void Analyses::reloadQmlAnalysesDynamicModule(Modules::DynamicModule * module)
 			idAnalysis.second->analysisQMLFileChanged();
 }
 
+void Analyses::refreshAllAnalysesOfFilter(Filter * f)
+{
+	for(auto idAnalysis : _analysisMap)
+		if(idAnalysis.second->filter() == f)
+			idAnalysis.second->refresh();
+}
+
 void Analyses::refreshAllAnalyses()
 {
 	for(auto idAnalysis : _analysisMap)
@@ -622,11 +630,11 @@ void Analyses::rCodeReturned(QString result, int requestId, bool hasError)
 		Log::log()  << "Unknown Returned Rcode request ID " << requestId << std::endl;
 }
 
-void Analyses::filterByNameDone(QString name, QString error)
+void Analyses::filterByNameDone(int dataSetId, QString name, QString error)
 {
 	applyToAll([&](Analysis * a)
 	{
-		a->filterByNameDone(name, error);
+		a->filterByNameDone(dataSetId, name, error);
 	});
 }
 
@@ -635,12 +643,21 @@ void Analyses::sendRScriptHandler(QString script, QString controlName, bool whit
 	Analysis* analysis = qobject_cast<Analysis*>(sender());
 	_scriptIDMap[_scriptRequestID] = qMakePair(analysis, controlName);
 
-	emit sendRScript(script, _scriptRequestID++, whiteListedVersion, module);
+	//An analysis can exist without a filter (created before any dataset, or via RPC): resolve the
+	//dataset id defensively rather than dereferencing a possibly-null filter/DataSet.
+	Filter * filter = analysis ? analysis->filter() : nullptr;
+	int dsId = filter ? filter->data()->id() : -1;
+
+	emit sendRScript(dsId, script, _scriptRequestID++, whiteListedVersion, module);
 }
 
 void Analyses::sendFilterHandler(QString name, QString module)
 {
-	emit sendFilterByName(name, module);
+	Analysis* analysis = qobject_cast<Analysis*>(sender());
+	Filter * filter = analysis ? analysis->filter() : nullptr;
+	int dsId = filter ? filter->data()->id() : -1;
+
+	emit sendFilterByName(dsId, name, module);
 }
 
 void Analyses::selectAnalysis(Analysis * analysis)
@@ -652,6 +669,12 @@ void Analyses::selectAnalysis(Analysis * analysis)
 			emit showAnalysisInResults(analysis->id());
 			return;
 		}
+}
+
+void Analyses::selectAnalysisById(int analysisId)
+{
+	if(_analysisMap.count(analysisId))
+		selectAnalysis(_analysisMap.at(analysisId));
 }
 
 void Analyses::setCurrentAnalysisIndex(int currentAnalysisIndex)
@@ -823,6 +846,14 @@ void Analyses::setChangedAnalysisTitle()
 		emit analysisTitleChanged(analysis);
 }
 
+void Analyses::setChangedAnalysisDataSpec()
+{
+	Analysis * analysis = dynamic_cast<Analysis*>(QObject::sender());
+
+	if (analysis != nullptr)
+		emit analysisDataSpecChanged(analysis);
+}
+
 Analysis* Analyses::duplicateAnalysis(size_t id, bool isReport)
 {
 	if(!get(id)) return nullptr;
@@ -877,7 +908,9 @@ void Analyses::languageChangedHandler()
 		a->setRefreshBlocked(false);
 		emit a->form()->languageChanged();
 	});
+	
 	refreshAllAnalyses();
+	
 	emit setResultsMeta(tq(_resultsMeta.toStyledString()));
 }
 
@@ -918,6 +951,7 @@ void Analyses::_rpcWriteIdentity(Json::Value& response, Analysis* a)
 	response["analysisId"] = static_cast<int>(a->id());
 	response["module"]     = a->module();
 	response["analysis"]   = a->name();
+	response["dataSetId"]  = a->dataSet() ? a->dataSet()->id() : -1;
 }
 
 void Analyses::_rpcWriteStatus(Json::Value& response, Analysis* a)
@@ -1251,11 +1285,32 @@ void Analyses::registerRpcHandlers()
 		QString module   = QString::fromStdString(params["module"].asString());
 		QString analysis = QString::fromStdString(params["analysis"].asString());
 
+		// Resolve and validate the target dataset up front so we never create (and register) an
+		// analysis and then delete it, which would leave a dangling pointer in the inventory.
+		Filter * bindFilter = nullptr;
+		if (params.isMember("dataSetId"))
+		{
+			Workspace * ws = DataSetPackage::pkg() ? DataSetPackage::pkg()->workspace() : nullptr;
+			DataSet   * ds = ws ? ws->dataSetById(params["dataSetId"].asInt()) : nullptr;
+			if (!ds)
+				return JaspRpcDispatcher::errorResult(
+					"Dataset not found for dataSetId: " + std::to_string(params["dataSetId"].asInt()));
+
+			bindFilter = ds->defaultFilter() ? ds->defaultFilter() : ds->shownFilter();
+			if (!bindFilter)
+				return JaspRpcDispatcher::errorResult(
+					"Dataset has no filter to bind analysis to (dataSetId: " + std::to_string(params["dataSetId"].asInt()) + ")");
+		}
+
 		Analysis* a = Analyses::analyses()->createAnalysis(module, analysis);
 		if (!a)
 			return JaspRpcDispatcher::errorResult(
 				"Failed to create analysis: " + module.toStdString() +
 				"::" + analysis.toStdString());
+
+		// If the caller explicitly targets a dataset, associate the new analysis with it.
+		if (bindFilter)
+			a->setFilterId(bindFilter->id());
 
 		// Mark AI-created analyses in the title
 		a->setTitle(a->title() + " (AI)");
@@ -1661,20 +1716,26 @@ void Analyses::registerRpcHandlers()
 		return result;
 	});
 
-	disp->registerMethodByName("analyses_list", [](const Json::Value&) -> Json::Value
+	disp->registerMethodByName("analyses_list", [](const Json::Value& params) -> Json::Value
 	{
 		auto* ans = Analyses::analyses();
+		int   filterDataSetId = params.isMember("dataSetId") ? params["dataSetId"].asInt() : -1;
 		Json::Value analysesArr(Json::arrayValue);
 
-		ans->applyToAll([&analysesArr](Analysis* a)
+		ans->applyToAll([&analysesArr, filterDataSetId](Analysis* a)
 		{
 			if (a->isReport()) return; // skip reports — they have no module to reference
 
+			int dataSetId = a->dataSet() ? a->dataSet()->id() : -1;
+			if (filterDataSetId >= 0 && dataSetId != filterDataSetId)
+				return;
+
 			Json::Value entry;
-			entry["id"]       = static_cast<int>(a->id());
-			entry["module"]   = a->module();
-			entry["analysis"] = a->name();
-			entry["title"]    = a->title();
+			entry["id"]         = static_cast<int>(a->id());
+			entry["module"]     = a->module();
+			entry["analysis"]   = a->name();
+			entry["title"]      = a->title();
+			entry["dataSetId"]  = dataSetId;
 			analysesArr.append(entry);
 		});
 
@@ -1783,5 +1844,28 @@ void Analyses::registerRpcHandlers()
 		response["reportId"] = static_cast<int>(report->id());
 		response["title"]    = report->title();
 		return response;
+	});
+}
+
+void Analyses::checkForDependentAnalyses(Column * column)
+{
+	applyToAll([&](Analysis * analysis)
+	{
+		stringset	usedCols	= analysis->usedVariables(),
+					createdCols = analysis->createdVariables();
+
+		//Dont create an infinite loop please, but do this only for non-computed columns created by an analysis (aka distributions, because otherwise it breaks things like planning from audit)
+		if(usedCols.count(column->name()) && (!createdCols.count(column->name()) || column->codeType() != computedColumnType::analysisNotComputed))
+		{
+			bool allColsValidated = true;
+
+			for(DataSet * dataSet : column->data()->workspace()->dataSets())
+				for(Column * col : dataSet->computedColumns())
+					if(usedCols.count(col->name()) > 0 && col->invalidated())
+						allColsValidated = false;
+
+			if(allColsValidated)
+				analysis->refresh();
+		}
 	});
 }

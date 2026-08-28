@@ -20,8 +20,7 @@
 
 #include "log.h"
 #include "dynamicmodules.h"
-#include "dynamicmodules.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include <QRegularExpression>
 #include <QUrl>
 #include <QUrlQuery>
@@ -755,6 +754,28 @@ void DynamicModules::insertCommonModuleNames(std::set<std::string> commonModules
 			dynamicModule(common)->setIsCommon(true);
 	}
 
+}
+
+void DynamicModules::clearCommonModules()
+{
+	_commonModuleNames.clear();
+	
+	for(auto & module : _modules)
+		module.second->setIsCommon(false);
+}
+
+void DynamicModules::refreshCommonModules(const QStringList& overrideCommon)
+{
+	clearCommonModules();
+	
+	for(const std::string & modStr : fql(overrideCommon))
+		if(dynamicModule(modStr))
+		{
+			_commonModuleNames.insert(modStr);
+			dynamicModule(modStr)->setIsCommon(true);
+		}
+	
+	RibbonModel::singleton()->setCommonOrder(overrideCommon);
 }
 
 ///This function says it's copying something, and maybe it did that before, but it doesn't seem to be doing so now.

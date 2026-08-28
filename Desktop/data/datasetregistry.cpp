@@ -2,8 +2,10 @@
 #include "datamodel.h"
 #include "dataviewbuffer.h"
 #include "viewfiller.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "log.h"
+#include "datasetpackage.h"
+#include "dataset.h"
 
 DatasetRegistry::DatasetRegistry(QObject * parent)
 	: QObject(parent)
@@ -29,6 +31,28 @@ DataModel * DatasetRegistry::openFromResult(const JaspClient::Result & result, c
 	if (isNew)
 	{
 		Log::log() << "DatasetRegistry: dataset " << result.datasetId << " opened (" << result.rows << " rows, " << model->columnCount() << " columns)" << std::endl;
+
+		// Multi-dataset merge bridge: their per-dataset UI (analysis forms, filter dropdowns,
+		// headers' variable info) reads column metadata through the shown dataset's Filter —
+		// i.e. through the legacy DataSet, which the NEO open leaves as an EMPTY skeleton.
+		// Mirror the wire schema (names/types/levels; no row data) into it so that whole
+		// provider chain serves real data. The fold commit moves this onto DataSet proper
+		// (DataSet gains the orchestrator id and does this itself).
+		if (DataSetPackage * pkg = DataSetPackage::pkg())
+			if (DataSet * skeleton = pkg->dataSet())
+			{
+				const size_t cols = model->columnCount();
+				for (size_t i = 0; i < cols; i++)
+					if (const ColumnInfo * ci = model->columnAt(i))
+						skeleton->createColumn(ci->name, ci->type);
+				// Levels/labels are NOT mirrored: their label store is value-indexed (labels belong to
+				// data values) and wiring it by hand would corrupt the by-value/by-display maps. The
+				// label editor stays inert for lane datasets until the edit era (same policy as the
+				// label-filter guard, data-model-design decision 11).
+				skeleton->setRowCount(result.rows, false);	// metadata only — never load row data
+				Log::log() << "DatasetRegistry: mirrored " << cols << " column meta into the legacy skeleton for their provider chain" << std::endl;
+			}
+
 		emit datasetOpened(tq(result.datasetId));
 	}
 

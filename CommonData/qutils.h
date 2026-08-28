@@ -35,6 +35,7 @@
 #include <string>
 #include <vector>
 #include <json/json.h>
+#include "columntype.h"
 #include <QItemSelection>
 
 /// This file collect a set of useful functions for interop between Qt and stdlib, like `fq` and `tq` for easily converting to and fro normal strings and whatnot
@@ -60,6 +61,7 @@ inline	QString								tq (const std::string						 & from)	{ return QString::from
 inline	QStringList							tql(const std::set<std::string>				 & from)	{ return tq(std::vector<std::string>(from.begin(), from.end())); }
 inline	QList<int>							tql(const std::set<int>						 & from)	{ return QList<int>(from.begin(), from.end()); }
 		std::set<std::string>				fql(const QStringList						 & from);
+		QVariantList						tvl(const QStringList						 & from);
 
 		//These need to have a different name because otherwise the default Json::Value(const std::string & str) constructor steals any fq(std::string()) call...
 		Json::Value							fqj(const QJSValue							 & jsVal);
@@ -78,6 +80,9 @@ QString encrypt(const QString &input);
 QString decrypt(const QString &input);
 QString getSortableTimestamp();
 QString QJSErrorToString(QJSValue::ErrorType errorType);
+
+QVariant getColumnTypesWithIcons();
+QString getIconFilename(columnType colType, varIconType type);
 
 
 void	copyQDirRecursively(QDir copyThis, QDir toHere);
@@ -98,8 +103,10 @@ void set##WHAT_TO_SET(TYPE new##WHAT_TO_SET)								\
 	}																		\
 }
 
-class QColumnUtils
+class QColumnUtils : public QObject
 {
+	Q_OBJECT
+	
 public:	
 	static bool					getIntValue(	const QString		& value, int	& intValue);
 	static bool					getIntValue(	const QVariant		& value, int	& intValue);
@@ -118,10 +125,10 @@ public:
 	static QString				doubleToString(			double dbl, bool sepas = true, int precision = 10);
 	static QString				doubleToStringMaxPrec(	double dbl, bool sepas = true);
 	static QString				currencyString(			double money, const QString &symbol = QString());
+	static QString				getTypeFriendly(columnType colType);
 	
     static void					setOmitGroupSeparatorOnQLocale(QLocale & locale);
 	static void					setCallbacksAndDefaultLocale(const QLocale & locale, bool useThousandSeps);
-	
 
 private:
 	static QString				_lastQLocaleId;

@@ -125,7 +125,7 @@ Item
 	Image
 	{
 		id:				colIcon
-		source:			filterConstructor.forceColumnInputs === "" ? columnIcon : computedColumnsInterface.computeColumnIconSource
+		source:			columnIcon
 		width:			height
 		scale:			iconMouseArea.containsMouse ? jaspTheme.columnTypeScaleHovered : 1
 		sourceSize

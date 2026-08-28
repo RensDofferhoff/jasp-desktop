@@ -26,6 +26,8 @@ void CurrentFileListModel::setCurrentFilePath(const QString &newcurrent)
 	endResetModel();	
 }
 
+#ifdef NOT_IGNORING_SYNCHING
+
 void CurrentFileListModel::openFile(const QString &path)
 {
 	if (path.isEmpty())
@@ -36,3 +38,4 @@ void CurrentFileListModel::openFile(const QString &path)
 
 	emit syncCurrentFile(event);
 }
+#endif

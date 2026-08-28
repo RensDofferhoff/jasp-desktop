@@ -56,7 +56,8 @@ MenuButton
 	activeFocusOnTab:	true
 	visible:			helpMD || helpPage
 	toolTip:			qsTr("Open Documentation")
-
+	radius:				height
+	
 	onClicked:			if (typeof jaspAnalysis !== "undefined" && helpPage)
 							helpModel.showOrToggleParticularPageForAnalysis(jaspAnalysis, helpPage)
 						else if (helpPage)

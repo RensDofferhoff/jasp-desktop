@@ -103,16 +103,18 @@ void AgentStateTracker::connectHooks()
 	}
 
 	// Data changes
-	auto * pkg = DataSetPackage::pkg();
-	if (pkg)
+	auto * ws = DataSetPackage::pkg() ? DataSetPackage::pkg()->workspace() : nullptr;
+	if (ws)
 	{
-		connect(pkg, &DataSetPackage::datasetChanged, this,
-			[this](QStringList changedColumns,
+		connect(ws, &Workspace::datasetChanged, this,
+			[this](int dataSetId,
+			       QStringList changedColumns,
 			       QStringList missingColumns,
 			       QMap<QString, QString> changeNameColumns,
 			       bool rowCountChanged,
 			       bool hasNewColumns)
 		{
+			(void)dataSetId;
 			(void)rowCountChanged;
 
 			QStringList added;
@@ -266,22 +268,24 @@ bool AgentStateTracker::isUserDiverged() const
 // Snapshot building
 // ------------------------------------------------------------------
 
-Json::Value AgentStateTracker::buildDataSnapshot() const
+Json::Value AgentStateTracker::buildDataSnapshot(int dataSetId) const
 {
 	Json::Value data(Json::objectValue);
 
-	auto * pkg = DataSetPackage::pkg();
-	if (!pkg || !pkg->hasDataSet())
+	auto * ws = DataSetPackage::pkg() ? DataSetPackage::pkg()->workspace() : nullptr;
+	DataSet * ds = ws ? (dataSetId >= 0 ? ws->dataSetById(dataSetId) : ws->shownDataSet()) : nullptr;
+	if (!ds)
 	{
 		data["loaded"] = false;
 		return data;
 	}
 
 	data["loaded"]   = true;
-	data["rowCount"] = static_cast<int>(pkg->dataRowCount());
+	data["dataSetId"]= ds->id();
+	data["rowCount"] = static_cast<int>(ds->rowCount());
 
 	Json::Value columns(Json::arrayValue);
-	auto colTypes = pkg->getColumnTypesMap();
+	auto colTypes = ds->getColumnTypesMap();
 	for (const auto & [name, type] : colTypes)
 	{
 		Json::Value col;
@@ -314,6 +318,7 @@ Json::Value AgentStateTracker::buildSingleAnalysis(int analysisId,
 	entry["name"]   = a->name();
 	entry["module"] = a->module();
 	entry["status"] = Analysis::statusToString(a->status());
+	entry["dataSetId"] = a->dataSet() ? a->dataSet()->id() : -1;
 
 	if (includeOptions)
 		// writeOptionsDelta writes both "options" and the optionMeta delta/full.
@@ -336,7 +341,28 @@ Json::Value AgentStateTracker::buildWorkspaceSnapshot(bool includeResults) const
 	Json::Value snapshot(Json::objectValue);
 
 	// --- Data ---
+	// Backward-compatible alias for the shown/active dataset.
 	snapshot["data"] = buildDataSnapshot();
+
+	// --- All datasets (workspace-aware) ---
+	Workspace * ws = DataSetPackage::pkg() ? DataSetPackage::pkg()->workspace() : nullptr;
+	if (ws)
+	{
+		Json::Value datasets(Json::arrayValue);
+		DataSet * shown = ws->shownDataSet();
+		for (DataSet * ds : ws->dataSets())
+		{
+			Json::Value d = buildDataSnapshot(ds->id());
+			d["dataSetId"]   = ds->id();
+			d["title"]       = ds->title().toStdString();
+			d["name"]        = ds->name().toStdString();
+			d["isComputed"]  = ds->isComputed();
+			d["active"]      = (ds == shown);
+			datasets.append(d);
+		}
+		snapshot["datasets"] = datasets;
+		snapshot["activeDataSetId"] = shown ? shown->id() : Json::nullValue;
+	}
 
 	// --- Analyses (all) ---
 	Json::Value analyses(Json::arrayValue);

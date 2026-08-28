@@ -16,7 +16,7 @@
 // <http://www.gnu.org/licenses/>.
 //
 #include "importer.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "log.h"
 #include <QVariant>
 #include "../datasetpackage.h"
@@ -105,14 +105,12 @@ void Importer::importColumnFinished(ImportColumn * column, bool doCallback)
 
 }
 
-void Importer::loadDataSet(const std::string &locator, std::function<void(int)> progressCallback)
+void Importer::loadDataSet(const std::string &locator, DataSet * dataSet, std::function<void(int)> progressCallback)
 {
 	int64_t timeBeginS = Utils::currentSeconds();
 	_progressCallback=progressCallback;
 	
-	DataSetPackage::pkg()->beginLoadingData();
-	DataSetPackage::pkg()->createDataSet();
-	
+
 	_synching = false;
 
 	JASPTIMER_RESUME(Importer::loadDataSet loadFile);
@@ -148,14 +146,15 @@ void Importer::loadDataSet(const std::string &locator, std::function<void(int)> 
 		};
 		
 
-		DataSetPackage::pkg()->dataSet()->beginBatchedToDB();
-		DataSetPackage::pkg()->dataSet()->setDescription(_importDataSet->description());
-		DataSetPackage::pkg()->setDataSetSize(columnCount, rowCount);
+		dataSet->beginBatchedToDB();
+		dataSet->setDescription(_importDataSet->description());
+		dataSet->setColumnCount(columnCount);
+		dataSet->setRowCount(rowCount);
 		
 		for(int colNo=0; colNo<columnCount; colNo++)
 		{
 			ImportColumn	* importColumn	= _importDataSet->getColumn(colNo);
-			Column			* dataSetColumn	= DataSetPackage::pkg()->dataSet()->column(colNo);
+			Column			* dataSetColumn	= dataSet->column(colNo);
 			InitColumnTask	* task			= new InitColumnTask(importColumn, dataSetColumn, totalCellsCallback);
 			
 			connect(importColumn, &ImportColumn::finished, this, &Importer::importColumnFinished, Qt::DirectConnection);
@@ -172,11 +171,9 @@ void Importer::loadDataSet(const std::string &locator, std::function<void(int)> 
 			_serialFinishing.unlock();
 		}
 		
-		DataSetPackage::pkg()->dataSet()->endBatchedToDB([&](float f){ progressCallback(75 + f * 25); });
+		dataSet->endBatchedToDB([&](float f){ progressCallback(75 + f * 25); });
 	}
 	JASPTIMER_STOP(Importer::loadDataSet createDataSetAndLoad);
-	
-	DataSetPackage::pkg()->endLoadingData();
 	
 	_importDataSet->clearColumns();
 	delete _importDataSet;
@@ -186,31 +183,36 @@ void Importer::loadDataSet(const std::string &locator, std::function<void(int)> 
 	Log::log() << "Loading '" << locator << "' took " << totalS << "s or " << (totalS / 60) << "m" << std::endl;
 }
 
-void Importer::syncDataSet(const std::string &locator, std::function<void(int)> progress)
+void Importer::syncDataSet(const std::string &locator, DataSet * dataSet, std::function<void(int)> progress)
 {
+	Log::log() << "[Importer::syncDataSet] START: locator=" << locator << ", dataSetId=" << (dataSet ? dataSet->id() : -1) << std::endl;
+
 					_synching			= true;
 					_progressCallback	= progress;
 	int64_t			timeBeginS		= Utils::currentSeconds();
 					_importDataSet	= loadFile(locator, progress);
-	bool			rowCountChanged	= _importDataSet->rowCount() != DataSetPackage::pkg()->dataRowCount();
+	Log::log() << "[Importer::syncDataSet] loadFile returned, _importDataSet=" << _importDataSet << std::endl;
+	bool			rowCountChanged	= _importDataSet->rowCount() != dataSet->rowCount();
+	Log::log() << "[Importer::syncDataSet] rowCountChanged=" << rowCountChanged << std::endl;
 	ColumnSet		oldColumns;
 	
-	for(Column * c : DataSetPackage::pkg()->dataSet()->columns())
+	for(Column * c : dataSet->columns())
 		if(!c->isComputed())
 			oldColumns.insert(c);
 	
+	Log::log() << "[Importer::syncDataSet] Calling checkDoSync" << std::endl;
 	if(! emit DataSetPackage::pkg()->checkDoSync())
+	{
+		Log::log() << "[Importer::syncDataSet] checkDoSync returned false, aborting" << std::endl;
 		return;
+	}
+	Log::log() << "[Importer::syncDataSet] checkDoSync returned true, continuing" << std::endl;
 	
 	stringvec       changedColumns,
 					newOrder,
 					missingColumns,
 					newColumnOrder;
 	strstrmap		changeNameColumns; //origname -> newname
-	
-	
-
-	DataSetPackage::pkg()->beginSynchingData();
 		
 	int		rowCount		= _importDataSet->rowCount(),
 			totalCells		= rowCount * _importDataSet->columnCount(),
@@ -232,10 +234,10 @@ void Importer::syncDataSet(const std::string &locator, std::function<void(int)> 
 		processed += cells;
 	};
 	
-	DataSetPackage::pkg()->dataSet()->beginBatchedToDB();
+	dataSet->beginBatchedToDB();
 
 	
-	DataSetPackage::pkg()->dataSet()->setRowCount(_importDataSet->rowCount());
+	dataSet->setRowCount(_importDataSet->rowCount());
 	
 	_waitingFor.clear();
 	InitColumnTasks tasks;
@@ -246,7 +248,7 @@ void Importer::syncDataSet(const std::string &locator, std::function<void(int)> 
 	{
 		newColumnOrder.push_back(importColumn->name());
 		
-		Column			* dataSetColumn	= DataSetPackage::pkg()->dataSet()->column(importColumn->name());
+		Column			* dataSetColumn	= dataSet->column(importColumn->name());
 		
 		if(dataSetColumn)
 		{
@@ -279,14 +281,15 @@ void Importer::syncDataSet(const std::string &locator, std::function<void(int)> 
 	
 	//lets make sure to replace any changed columns by going through the columns in a predictable order:
 	std::queue<Column*> oldColQ;
-	for(Column * col : DataSetPackage::pkg()->dataSet()->columns())
+	for(Column * col : dataSet->columns())
 		if(oldColumns.count(col))
 			oldColQ.push(col);
 	
 	for(ImportColumn * newColumn : newColumns)
 	{
 		Log::log() << "New column " << newColumn->name() << std::endl;
-		Column			* dataSetColumn	= oldColQ.size() > 0 ? oldColQ.front() : DataSetPackage::pkg()->dataSet()->newColumn(newColumn->name());
+		
+		Column			* dataSetColumn	= oldColQ.size() > 0 ? oldColQ.front() : dataSet->createColumn(newColumn->name());
 		InitColumnTask	* task			= new InitColumnTask(newColumn, dataSetColumn, totalCellsCallback);
 		
 		connect(newColumn, &ImportColumn::finished, this, &Importer::importColumnFinished, Qt::DirectConnection);
@@ -316,24 +319,25 @@ void Importer::syncDataSet(const std::string &locator, std::function<void(int)> 
 	
 	tasks.clear();
 	
-	DataSetPackage::pkg()->dataSet()->endBatchedToDB([&](float f){ progress(75 + f * 25); });
+	dataSet->endBatchedToDB([&](float f){ progress(75 + f * 25); });
 
 	for (Column * oldCol : oldColumns) //already checked for not being computed column at creation list
 	{
 		Log::log() << "Column deleted " << oldCol->name() << std::endl;
 
 		missingColumns.push_back(oldCol->name());
-		DataSetPackage::pkg()->dataSet()->removeColumn(oldCol->name());
+		dataSet->removeColumn(oldCol->name());
 	}
 	
-	DataSetPackage::pkg()->endSynchingData(changedColumns, missingColumns, changeNameColumns, rowCountChanged, newColumns.size() > 0);
+	emit dataSet->datasetChanged(dataSet->id(), tq(changedColumns), tq(missingColumns), tq(changeNameColumns), rowCountChanged, newColumns.size() > 0);
 	
 	if(newColumnOrder.size() > 0)
-		DataSetPackage::pkg()->columnsReorder(newColumnOrder);
+		dataSet->columnsReorder(newColumnOrder);
 	
 	DataSetPackage::pkg()->setManualEdits(false);
 	delete _importDataSet;
 	
 	int64_t totalS = (Utils::currentSeconds() - timeBeginS);
-	Log::log() << "Synching '" << locator << "' took " << totalS << "s or " << (totalS / 60) << "m" << std::endl;
+	Log::log() << "[Importer::syncDataSet] Synching '" << locator << "' took " << totalS << "s or " << (totalS / 60) << "m" << std::endl;
+	Log::log() << "[Importer::syncDataSet] END" << std::endl;
 }

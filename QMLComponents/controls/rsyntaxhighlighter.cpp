@@ -18,18 +18,20 @@
 
 #include "rsyntaxhighlighter.h"
 #include "r_functionwhitelist.h"
+#include "workspace.h"
 
 #include <QSet>
 #include <algorithm>
 
-RSyntaxHighlighter::RSyntaxHighlighter(QTextDocument *parent)
-	: QSyntaxHighlighter(parent), VariableInfoConsumer(), _textDocument(parent)
+RSyntaxHighlighter::RSyntaxHighlighter(QTextDocument *parent, VariableInfo * varInfo)
+	: QSyntaxHighlighter(parent), VariableInfoConsumer(varInfo), _textDocument(parent)
 {
-	if(VariableInfo::info())
+	if(!varInfo)
 	{
-		connect(VariableInfo::info(), &VariableInfo::variableNamesChanged,		this, &RSyntaxHighlighter::handleNamesChanged);
-		connect(VariableInfo::info(), &VariableInfo::rowCountChanged,	this, &RSyntaxHighlighter::handleRowCountChanged);
+		DataSet * shownDataSet = Workspace::singleton() ? Workspace::singleton()->shownDataSet() : nullptr;
+		varInfo = shownDataSet ? shownDataSet->shownFilter()->varInfo() : nullptr; //may stay null if no live dataset: VariableInfoConsumer guards on it
 	}
+	setVarInfo(varInfo);
 
 	HighlightingRule rule;
 	// most of these R regExp are copied from: https://github.com/PrismJS/prism/blob/master/components/prism-r.js
@@ -97,6 +99,9 @@ RSyntaxHighlighter::RSyntaxHighlighter(QTextDocument *parent)
 	_columnFormat.setFontItalic(true);
 }
 
+
+
+
 void RSyntaxHighlighter::highlightBlock(const QString &text)
 {
 	setStringsFormat(text, '"');
@@ -105,7 +110,7 @@ void RSyntaxHighlighter::highlightBlock(const QString &text)
 	
 	for (const HighlightingRule & rule : _highlightingRules)
 		applyRule(text, rule);
-	
+
 	//Do columns — ONE cached combined regex for all column names, rebuilt only when the
 	//names change (rebuildColumnsRule). The old code compiled+ran one regex per column per
 	//block: O(columns) compilations per highlight pass — a UI freeze at 10k columns.
@@ -122,7 +127,7 @@ void RSyntaxHighlighter::rebuildColumnsRule()
 	_columnsRule		= QRegularExpression();	// invalid -> skipped by highlightBlock
 	_columnsRuleDirty	= false;
 
-	QStringList names = requestInfo(VariableInfo::InfoType::VariableNames).toStringList();
+	QStringList names = requestInfo(varInfoType::VariableNames).toStringList();
 	if (names.isEmpty())
 		return;
 
@@ -175,6 +180,28 @@ void RSyntaxHighlighter::applyRule(const QString & text, const QRegularExpressio
 	}
 }
 
+void RSyntaxHighlighter::setVarInfo(VariableInfo *info)
+{
+	_varInfo = info;
+	//Keep the VariableInfoConsumer base in sync too: this derived setter shadows the base's
+	//setVarInfo (same signature, non-virtual), and requestInfo() — used by rebuildColumnsRule —
+	//reads the base's _varInfo. Without this, the QML WRITE path (RSyntaxHighlighterQuick::setVarInfo)
+	//would desync the two and column highlighting would query a stale provider.
+	VariableInfoConsumer::setVarInfo(info);
+
+	if(_varInfo)
+	{
+		connect(_varInfo, &VariableInfo::variableNamesChanged,		this, &RSyntaxHighlighter::handleNamesChanged,		Qt::UniqueConnection);
+		connect(_varInfo, &VariableInfo::rowCountChanged,			this, &RSyntaxHighlighter::handleRowCountChanged,	Qt::UniqueConnection);
+	}	
+}
+
+RSyntaxHighlighterQuick::RSyntaxHighlighterQuick(QQuickItem *parent)
+	: QQuickItem(parent)	
+{
+
+}
+
 void RSyntaxHighlighterQuick::setTextDocument(QQuickTextDocument *textDocument) 
 {
 	if(_textDocument == textDocument)	
@@ -183,7 +210,35 @@ void RSyntaxHighlighterQuick::setTextDocument(QQuickTextDocument *textDocument)
 	_textDocument = textDocument;
 	
 	if(_textDocument)
-		_highlighter = new RSyntaxHighlighter(_textDocument->textDocument());
+	{
+		_highlighter = new RSyntaxHighlighter(_textDocument->textDocument(), _varInfo);
+		connect(_highlighter, &RSyntaxHighlighter::varInfoChanged,	this, &RSyntaxHighlighterQuick::varInfoChanged);
+	}
 	
 	emit textDocumentChanged();
+}
+
+VariableInfo *RSyntaxHighlighterQuick::varInfo() const
+{
+	return !_highlighter ? _varInfo : _highlighter->varInfo();
+}
+
+void RSyntaxHighlighterQuick::setVarInfo(VariableInfo *newVarInfo)
+{
+	if(_highlighter)
+	{
+		if(_highlighter->varInfo() == newVarInfo)
+			return;
+
+		_highlighter->setVarInfo(newVarInfo);
+		return;
+	}
+	
+	if (_varInfo == newVarInfo)
+		return;
+
+	_varInfo = newVarInfo;
+	emit varInfoChanged();
+	
+	
 }

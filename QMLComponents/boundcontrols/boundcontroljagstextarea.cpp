@@ -20,6 +20,8 @@
 #include "controls/textareabase.h"
 #include "variableinfo.h"
 #include "stringutils.h"
+#include "analysisform.h"		// _encoder(): _textArea->form()->varInfo()
+#include "columnencoder.h"		// _encoder(): ColumnEncoder::fallbackEncoder()
 #include <algorithm>
 #include <cctype>
 #include <vector>
@@ -78,6 +80,18 @@ namespace
 	}
 }
 
+ColumnEncoder * BoundControlJAGSTextArea::_encoder() const
+{
+	//Desktop-only: never use the process-global ColumnEncoder (that is only meaningful inside the engine's
+	//request context). Resolve the encoder for the data this control's form is bound to instead.
+	if (VariableInfo * vi = _textArea->form()->varInfo())
+		if (VariableInfoProvider * provider = vi->provider())
+			if (ColumnEncoder * encoder = provider->columnEncoder())
+				return encoder;
+
+	return ColumnEncoder::fallbackEncoder();
+}
+
 void BoundControlJAGSTextArea::bindTo(const Json::Value &value)
 {
 	if (value.type() != Json::objectValue)	return;
@@ -124,10 +138,14 @@ void BoundControlJAGSTextArea::checkSyntax()
 	_usedColumnNames.clear();
 	std::string stripped = stringUtils::stripRComments(fq(text));
 
-	VariableInfoProvider * provider = VariableInfo::info() ? VariableInfo::info()->provider() : nullptr;
+	//Dataset-aware: resolve the provider through this form's varInfo (the analysis' own filter),
+	//never the old process-global VariableInfo::info() — that singleton is gone.
+	VariableInfoProvider * provider = nullptr;
+	if (VariableInfo * vi = _textArea->form()->varInfo())
+		provider = vi->provider();
 	stringvec columnNames;
 	if (provider)
-		for (const QString & name : provider->provideInfo(VariableInfo::VariableNames).toStringList())
+		for (const QString & name : provider->provideInfo(varInfoType::VariableNames).toStringList())
 			columnNames.push_back(fq(name));
 
 	std::vector<bool> consumed(stripped.size(), false);

@@ -75,12 +75,15 @@ void DataSetLoader::loadPackage(const string &locator, const string &extension, 
 
 	if (importer)
 	{
-		importer->loadDataSet(locator, progress);
+		DataSet * dataSet = DataSetPackage::pkg()->createDataSet();
+		importer->loadDataSet(locator, dataSet, progress);
 		char chosenDelimiter = DesktopCommunicator::singleton()->knownCsvDelimiter();
-		if (chosenDelimiter != '\0' && DataSetPackage::pkg()->dataSet())
-			DataSetPackage::pkg()->dataSet()->setCsvDelimiter(chosenDelimiter);
+		if (chosenDelimiter != '\0' && dataSet)
+			dataSet->setCsvDelimiter(chosenDelimiter);
 		DesktopCommunicator::singleton()->setKnownCsvDelimiter('\0');
 		delete importer;
+		DataSetPackage::pkg()->workspace()->setShownDataSet(dataSet);
+		DataSetPackage::pkg()->workspace()->refresh();
 	}
 	else if(extension == ".jasp" || extension == "jasp")
 		JASPImporter::loadDataSet(locator, progress);
@@ -91,16 +94,28 @@ void DataSetLoader::loadPackage(const string &locator, const string &extension, 
 
 }
 
-void DataSetLoader::syncPackage(const string &locator, const string &extension, std::function<void(int)> progress)
+void DataSetLoader::syncPackage(const string &locator, const string &extension, DataSet * dataSet, std::function<void(int)> progress)
 {
+	Log::log() << "[DataSetLoader::syncPackage] START: locator=" << locator << ", extension=" << extension << ", dataSetId=" << (dataSet ? dataSet->id() : -1) << std::endl;
+
 	Importer* importer = getImporter(locator, extension);
 
 	if (importer)
 	{
-		if (DataSetPackage::pkg()->dataSet())
-			DesktopCommunicator::singleton()->setKnownCsvDelimiter(DataSetPackage::pkg()->dataSet()->csvDelimiter());
-		importer->syncDataSet(locator, progress);
+		Log::log() << "[DataSetLoader::syncPackage] Importer found, calling importer->syncDataSet()" << std::endl;
+		if (dataSet)
+		{
+			Log::log() << "[DataSetLoader::syncPackage] dataSet->csvDelimiter()=" << dataSet->csvDelimiter() << std::endl;
+			DesktopCommunicator::singleton()->setKnownCsvDelimiter(dataSet->csvDelimiter());
+		}
+		importer->syncDataSet(locator, dataSet, progress);
 		DesktopCommunicator::singleton()->setKnownCsvDelimiter('\0');
 		delete importer;
+		Log::log() << "[DataSetLoader::syncPackage] importer->syncDataSet() returned" << std::endl;
 	}
+	else
+	{
+		Log::log() << "[DataSetLoader::syncPackage] No importer found for extension=" << extension << std::endl;
+	}
+	Log::log() << "[DataSetLoader::syncPackage] END" << std::endl;
 }

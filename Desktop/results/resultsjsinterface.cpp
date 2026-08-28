@@ -26,7 +26,7 @@
 #include <QPainter>
 #endif
 
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "gui/aboutmodel.h"
 #include "tempfiles.h"
 #include "utilities/appdirs.h"
@@ -281,6 +281,14 @@ void ResultsJsInterface::changeTitle(Analysis *analysis)
 	Log::log() << " void ResultsJsInterface::changeTitle(Analysis *analysis)" << std::endl;
 
     runJavaScript("window.changeTitle(" + QString::number(id) + ", '" + escapeJavascriptString(title) + "')");
+}
+
+void ResultsJsInterface::changeDataSpec(Analysis *analysis)
+{
+	int		id			= analysis->id();
+	QString	dataSpec	= analysis->dataSpec();
+
+	runJavaScript("window.changeDataSpec(" + QString::number(id) + ", '" + escapeJavascriptString(dataSpec) + "')");
 }
 
 void ResultsJsInterface::overwriteUserdata(Analysis *analysis)

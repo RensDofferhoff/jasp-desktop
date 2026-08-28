@@ -1,33 +1,72 @@
 #ifndef UNDOSTACK_H
 #define UNDOSTACK_H
 
+#include "utils.h"
 #include <QUndoStack>
-#include <QAbstractItemModel>
+#include <QPointer>
 #include <json/json.h>
-#include "stringutils.h"
+#include "columntype.h"
+#include <QAbstractItemModel>
 
-class ColumnModel;
-class FilterModel;
-class ComputedColumnModel;
+class Column;
+class Filter;
+class DataSet;
+class Workspace;
 
 class UndoModelCommand : public QUndoCommand
 {
 public:
-	UndoModelCommand(QAbstractItemModel* model = nullptr);
+						UndoModelCommand(DataSet * dataSet = nullptr);
 
-	QString		columnName(int colIndex = -1)		const;
-	QString		rowName(int rowIndex)				const;
+	virtual QString		columnName(int colIndex = -1)		const;
+	QString				rowName(int rowIndex)				const;
+	
+	bool				dataSetStillExists()				const;
+	DataSet		*		dataSet()							const;
+	Column		*		column(int index)					const;
 
 protected:
-	QAbstractItemModel*	_model = nullptr;
+	int					_dataSetID	= -1;
 };
 
-class SetColumnPropertyCommand: public UndoModelCommand
+
+class UndoModelCommandMultipleColumns : public UndoModelCommand
+{
+public:
+	UndoModelCommandMultipleColumns(DataSet * dataSet, stringset cols, bool serialize = true);
+
+	void undo()					override;
+
+protected:
+	stringset						_cols;
+
+private:
+	std::map<std::string, Json::Value>	_serializedColumns;
+};
+
+class UndoModelCommandSingleColumn : public UndoModelCommandMultipleColumns
+{
+public:
+    UndoModelCommandSingleColumn(Column * column, bool serialize = true);
+
+	Column	* column();
+	Column	* column() const;
+	
+	QString	columnName(int colIndex = -1)		const override;
+	
+    void    redo() override;
+    void    undo() override;
+	
+protected:
+	QString			_colId		= "";
+};
+
+class SetColumnPropertyCommand: public UndoModelCommandSingleColumn
 {
 public:
 	enum class ColumnProperty { Name, Title, Description, ComputedColumnType, ComputeFilter, DropLevels, HasLabels };
 
-	SetColumnPropertyCommand(QAbstractItemModel *model, QVariant newValue, ColumnProperty prop);
+	SetColumnPropertyCommand(Column * column, QVariant newValue, ColumnProperty prop);
 
 	void undo()					override;
 	void redo()					override;
@@ -35,8 +74,7 @@ public:
 private:
 	QString friendlyColumnType(int tyoe);
 
-	ColumnProperty			_prop	= ColumnProperty::Name;
-	int						_colId	= -1;
+	ColumnProperty			_prop		= ColumnProperty::Name;
 	QVariant				_newValue,
 							_oldValue;
 };
@@ -46,7 +84,7 @@ class SetWorkspacePropertyCommand: public UndoModelCommand
 public:
 	enum class WorkspaceProperty { Name, Description };
 
-	SetWorkspacePropertyCommand(QAbstractItemModel *model, QVariant newValue, WorkspaceProperty prop);
+	SetWorkspacePropertyCommand(DataSet * data, QVariant newValue, WorkspaceProperty prop);
 
 	void undo()					override;
 	void redo()					override;
@@ -58,44 +96,39 @@ private:
 							_oldValue;
 };
 
-class FilterLabelCommand: public UndoModelCommand
+class FilterLabelCommand: public UndoModelCommandSingleColumn
 {
 public:
-	FilterLabelCommand(QAbstractItemModel *model, int labelIndex, bool checked);
+	FilterLabelCommand(Column * column, int labelIndex, bool checked);
 
 	void redo()					override;
 	void undo()					override;
 
 private:
-	ColumnModel*			_columnModel = nullptr;
-	int						_colId		= -1,
-							_labelIndex = -1;
+	int						_labelIndex = -1;
 	bool					_checked	= false;
 };
 
-class ReverseLabelCommand: public UndoModelCommand
+class ReverseLabelCommand: public UndoModelCommandSingleColumn
 {
 public:
-	ReverseLabelCommand(QAbstractItemModel *model);
+	ReverseLabelCommand(Column * column);
 
 	void redo()					override;
 	void undo()					override;
-	
-private:
-	ColumnModel*			_columnModel = nullptr;
-	int						_colId		= -1;
+
 };
 
 class SetJsonFilterCommand: public UndoModelCommand
 {
 public:
-	SetJsonFilterCommand(QAbstractItemModel *model, FilterModel* filterModel, const QString& newJsonValue);
+	SetJsonFilterCommand(Filter * filter, const QString& newJsonValue);
 
 	void undo()					override;
 	void redo()					override;
 
 private:
-	FilterModel*			_filterModel = nullptr;
+	QPointer<Filter>			_filter;
 	QString					_oldJsonValue,
 							_newJsonValue;
 };
@@ -103,13 +136,13 @@ private:
 class SetRFilterCommand: public UndoModelCommand
 {
 public:
-	SetRFilterCommand(QAbstractItemModel *model, FilterModel* filterModel, const QString& newRValue);
+	SetRFilterCommand(Filter* filter, const QString& newRValue);
 
 	void undo()					override;
 	void redo()					override;
 
 private:
-	FilterModel*			_filterModel = nullptr;
+	QPointer<Filter>			_filter;
 	QString					_oldRFilter,
 							_newRFilter;
 };
@@ -117,29 +150,28 @@ private:
 class CreateComputedColumnCommand: public UndoModelCommand
 {
 public:
-	CreateComputedColumnCommand(const QString& name, int columnType, int computedColumnType);
+	CreateComputedColumnCommand(DataSet * dataSet, const QString& name, columnType colType, computedColumnType codeType);
 
 	void undo()					override;
 	void redo()					override;
 
 private:
-	QString					_name;
-	int						_columnType				= -1;
-	int						_computedColumnType		= -1;
+	QString					_name					= "";
+	columnType				_columnType				= columnType::unknown;
+	computedColumnType		_computedColumnType		= computedColumnType::notComputed;
 };
 
-class SetComputedColumnCodeCommand: public UndoModelCommand
+class SetComputedColumnCodeCommand: public UndoModelCommandSingleColumn
 {
 public:
-	SetComputedColumnCodeCommand(QAbstractItemModel *model, const std::string& name, const QString& rCode, const QString& jsonCode);
+	SetComputedColumnCodeCommand(Filter * f, Column * column, const QString& rCode, const QString& jsonCode);
 
 	void undo()					override;
 	void redo()					override;
 
 private:
-	ComputedColumnModel*	_computedColumnModel = nullptr;
-	std::string				_name;
-	QString					_oldRCode,
+	QString					_filterName,
+							_oldRCode,
 							_newRCode,
 							_oldJsonCode,
 							_newJsonCode;
@@ -148,7 +180,7 @@ private:
 class SetDataCommand : public UndoModelCommand
 {
 public:
-	SetDataCommand(QAbstractItemModel *model, int row, int col, const QVariant &newData, int role);
+	SetDataCommand(DataSet * dataset, int row, int col, const QVariant &newData, int role);
 
 	void undo()					override;
 	void redo()					override;
@@ -162,37 +194,11 @@ private:
 							_role		= -1;
 };
 
-class UndoModelCommandMultipleColumns : public UndoModelCommand
-{
-public:
-	UndoModelCommandMultipleColumns(QAbstractItemModel *model, intset cols);
-
-	void undo()					override;
-
-protected:
-	intset						_cols;
-
-private:
-	std::map<int, Json::Value>	_serializedColumns;
-};
-
-class UndoModelCommandSingleColumn : public UndoModelCommandMultipleColumns
-{
-public:
-    UndoModelCommandSingleColumn(QAbstractItemModel * model);
-
-    void    redo() override;
-    void    undo() override;
-	
-protected:
-    int						_colId		= -1;
-	ColumnModel * _columnModel = nullptr;
-};
 
 class DeleteLabelCommand: public UndoModelCommandSingleColumn
 {
 public:
-	DeleteLabelCommand(QAbstractItemModel *model, int labelIndex);
+	DeleteLabelCommand(Column * column, int labelIndex);
 	
 	void redo()					override;
 	
@@ -203,7 +209,7 @@ private:
 class AddLabelCommand: public UndoModelCommandSingleColumn
 {
 public:
-	AddLabelCommand(QAbstractItemModel *model, QString value, QString label);
+	AddLabelCommand(Column * column, QString value, QString label);
 
 	void redo()					override;
 
@@ -216,20 +222,20 @@ private:
 class SetLabelCommand: public UndoModelCommandSingleColumn
 {
 public:
-    SetLabelCommand(QAbstractItemModel *model, int labelIndex, QString newLabel);
+    SetLabelCommand(Column * column, int labelIndex, QString newLabel);
 
     void redo()					override;
 
 private:
     int						_labelIndex = -1;
     QString					_newLabel,
-        _oldLabel;
+							_oldLabel;
 };
 
 class SetLabelOriginalValueCommand: public UndoModelCommandSingleColumn
 {
 public:
-    SetLabelOriginalValueCommand(QAbstractItemModel *model, int labelIndex, QString originalValue);
+    SetLabelOriginalValueCommand(Column * column, int labelIndex, QString originalValue);
 
     void redo()					override;
 
@@ -244,30 +250,30 @@ private:
 class MoveLabelCommand: public UndoModelCommandSingleColumn
 {
 public:
-    MoveLabelCommand(QAbstractItemModel *model, const std::vector<size_t>& indexes, bool up);
+    MoveLabelCommand(Column * column, const std::vector<size_t>& indexes, bool up);
 
     void redo()					override;
 
 private:
 
-    std::vector<size_t>     _getIndexes();
+    std::vector<qsizetype>  _getIndexes();
     void					_moveLabels(bool up);
 
     QStringList				_labels;
+	QStringList				_originalValues; //unique-ish handles to re-locate labels after reordering
     bool					_up			= false;
 };
 
-class DataSetTableModel;
 class PasteSpreadsheetCommand : public UndoModelCommand
 {
 public:
-	PasteSpreadsheetCommand(QAbstractItemModel *model, int row, int col, const std::vector<std::vector<QString>>& values, const std::vector<std::vector<QString>>& labels, const std::vector<boolvec> & selected, const QStringList & colNames);
+	PasteSpreadsheetCommand(DataSet * dataset, int row, int col, const std::vector<std::vector<QString>>& values, const std::vector<std::vector<QString>>& labels, const std::vector<boolvec> & selected, const QStringList & colNames);
 
 	void undo()					override;
 	void redo()					override;
 
 private:
-	DataSetTableModel					*	_dataSetTableModel;
+	
 	std::vector<std::vector<QString>>		_newValues,
 											_newLabels,
 											_oldValues,
@@ -282,7 +288,7 @@ private:
 class SetColumnTypeCommand : public UndoModelCommandMultipleColumns
 {
 public:
-	SetColumnTypeCommand(QAbstractItemModel *model, intset cols, int colType);
+	SetColumnTypeCommand(DataSet * dataset, stringset cols, int colType);
 
 	void redo()					override;
 
@@ -293,30 +299,27 @@ private:
 class ColumnToggleAutoSortByValuesCommand : public UndoModelCommandMultipleColumns
 {
 public:
-	ColumnToggleAutoSortByValuesCommand(QAbstractItemModel *model, intset cols);
+	ColumnToggleAutoSortByValuesCommand(DataSet * dataset, stringset cols);
 
 	void redo()					override;
 	
 private:
-	std::map<int, bool>			_colsNewAutoSort;
+	std::map<std::string, bool>			_colsNewAutoSort;
 };
 
-class ColumnReverseValuesCommand : public UndoModelCommand
+class ColumnReverseValuesCommand : public UndoModelCommandMultipleColumns
 {
 public:
-	ColumnReverseValuesCommand(QAbstractItemModel *model, intset cols);
+	ColumnReverseValuesCommand(DataSet * dataset, stringset cols);
 
 	void undo()					override { redo(); }
 	void redo()					override;
-	
-private:
-	intset			_cols;
 };
 
 class InsertColumnCommand : public UndoModelCommand
 {
 public:
-	InsertColumnCommand(QAbstractItemModel *model, int col, const QMap<QString, QVariant>& props = {});
+	InsertColumnCommand(DataSet * dataset, int col, const QMap<QString, QVariant>& props = {});
 
 	void undo()					override;
 	void redo()					override;
@@ -329,7 +332,7 @@ private:
 class InsertColumnsCommand : public UndoModelCommand
 {
 public:
-	InsertColumnsCommand(QAbstractItemModel *model, int col, int count = 1);
+	InsertColumnsCommand(DataSet * dataset, int col, int count = 1);
 
 	void undo()					override;
 	void redo()					override;
@@ -342,7 +345,7 @@ private:
 class InsertRowsCommand : public UndoModelCommand
 {
 public:
-	InsertRowsCommand(QAbstractItemModel *model, int row, int count = 1);
+	InsertRowsCommand(DataSet * dataset, int row, int count = 1);
 
 	void undo()					override;
 	void redo()					override;
@@ -355,7 +358,7 @@ private:
 class RemoveColumnsCommand : public UndoModelCommand
 {
 public:
-	RemoveColumnsCommand(QAbstractItemModel *model, int start, int count);
+	RemoveColumnsCommand(DataSet * dataset, int start, int count);
 
 	void undo()					override;
 	void redo()					override;
@@ -370,7 +373,7 @@ private:
 class RemoveRowsCommand : public UndoModelCommand
 {
 public:
-	RemoveRowsCommand(QAbstractItemModel *model, int start, int count);
+	RemoveRowsCommand(DataSet * dataset, int start, int count);
 
 	void undo()					override;
 	void redo()					override;
@@ -386,7 +389,7 @@ private:
 class CopyColumnsCommand : public UndoModelCommand
 {
 public:
-	CopyColumnsCommand(QAbstractItemModel* model, int startCol, const std::vector<Json::Value>& copiedColumns);
+	CopyColumnsCommand(DataSet * dataset, int startCol, const std::vector<Json::Value>& copiedColumns);
 
 	void undo()					override;
 	void redo()					override;
@@ -398,10 +401,10 @@ private:
 
 };
 
-class SetUseCustomEmptyValuesCommand: public UndoModelCommand
+class SetUseCustomEmptyValuesCommand: public UndoModelCommandSingleColumn
 {
 public:
-	SetUseCustomEmptyValuesCommand(QAbstractItemModel* model, bool useCustom);
+	SetUseCustomEmptyValuesCommand(Column * column, bool useCustom);
 
 	void undo()					override;
 	void redo()					override;
@@ -411,10 +414,10 @@ private:
 	bool						_useCustom = false;
 };
 
-class SetCustomEmptyValuesCommand: public UndoModelCommand
+class SetCustomEmptyValuesCommand: public UndoModelCommandSingleColumn
 {
 public:
-	SetCustomEmptyValuesCommand(QAbstractItemModel* model, const QStringList& emptyValues);
+	SetCustomEmptyValuesCommand(Column * column, const QStringList& emptyValues);
 
 	void undo()					override;
 	void redo()					override;
@@ -428,7 +431,7 @@ private:
 class SetWorkspaceEmptyValuesCommand: public UndoModelCommand
 {
 public:
-	SetWorkspaceEmptyValuesCommand(QAbstractItemModel* model, const QStringList& emptyValues);
+	SetWorkspaceEmptyValuesCommand(DataSet * dataSet, const QStringList& emptyValues);
 
 	void undo()					override;
 	void redo()					override;
@@ -459,7 +462,8 @@ class UndoStack : public QUndoStack
 public:
 	UndoStack(QObject* parent = nullptr);
 
-	static UndoStack*	singleton() { return _undoStack; }
+	static UndoStack*	singleton() { return _currentUndoStack; }
+	static void			setCurrent(UndoStack* stack) { _currentUndoStack = stack; }
 
 	void				pushCommand(UndoModelCommand* command);
 	void				startMacro(const QString& text = QString());
@@ -470,7 +474,7 @@ private:
 
 	UndoModelCommand*			_parentCommand			= nullptr;
 
-	static UndoStack*			_undoStack;
+	static UndoStack*			_currentUndoStack;
 
 };
 

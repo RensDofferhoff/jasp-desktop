@@ -1,7 +1,7 @@
 #include "aiconfigmodel.h"
 #include "utilities/settings.h"
 #include "utilities/secretstore.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "log.h"
 #include "dirs.h"
 

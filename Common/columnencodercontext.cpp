@@ -138,7 +138,7 @@ Json::Value decodeColumnJson(const char * payloadJson, const char * encoderConte
 	ColumnEncoderContext context = ColumnEncoderContext::fromJsonString(encoderContextJson);
 	ScopedColumnEncoderContext scopedContext(context, extraEncoder);
 
-	ColumnEncoder::decodeJson(payload, replaceNames);
+	ColumnEncoder::columnEncoder()->decodeJson(payload, replaceNames);
 
 	return payload;
 }

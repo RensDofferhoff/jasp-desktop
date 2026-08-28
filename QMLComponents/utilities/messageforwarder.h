@@ -5,6 +5,8 @@
 #include <qmessagebox.h>
 #include <string>
 
+class DatabaseConnectionInfo;
+
 ///
 /// Singleton class for shwoing warnings, messages, etc
 /// Can be accessed through the static function anywhere in Desktop
@@ -49,7 +51,8 @@ public:
 	static QString browseSaveFileDocuments(	QString caption,						QString filter);
     static QString queryTextInput(const QString& caption, const QString& elementName, const QString& defaultValue, bool& passwordGiven, bool password = true);
 
-	static QString askPassword(QString title, QString message);
+	static QString	askPassword(QString title, QString message);
+	static void		linkWithDatabaseConnectionInfo(DatabaseConnectionInfo * info);
 
 	//Some non-static links to have QML handle it. Without figuring out how qmlRegisterSingletonType() works :p
 public slots:
@@ -65,6 +68,11 @@ public slots:
 	QString			browseOpenFolderQML(QString caption)																			{ return constrainToSandboxResult(browseOpenFolder(caption), false);}
 
 	void			log(QString msg);
+	
+	QString			askPasswordSlot(QString title, QString message) { return askPassword(title, message); }
+	bool			showYesNoSlot(	QString title, QString message) { return showYesNo(title, message);			}
+	
+	
 
 private:
 	static		bool				useNativeFileDialogs();

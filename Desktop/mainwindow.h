@@ -29,12 +29,11 @@
 #include "data/asyncloader.h"
 #include "data/asyncloaderthread.h"
 #include "data/columnsmodel.h"
-#include "data/computedcolumnmodel.h"
-#include "data/datasettablemodel.h"
+#include "datasettablemodel.h"
 #include "data/fileevent.h"
 #include "data/filtermodel.h"
 #include "data/columnmodel.h"
-#include "data/labelfiltergenerator.h"
+
 #include "gui/aboutmodel.h"
 #include "gui/encryptionsettingsmodel.h"
 #include "models/columntypesmodel.h"
@@ -131,8 +130,8 @@ public:
 	bool				checkAutomaticSync()	const	{ return _checkAutomaticSync;	}
 	bool				contactVisible()		const;
 	bool				communityVisible()		const;
-    bool            aiChatVisible()     const   {return _aiChatVisible; }
-	bool			chatWindowActive()	const	{ return _chatWindowActive; }
+    bool				aiChatVisible()     const   {return _aiChatVisible; }
+	bool				chatWindowActive()	const	{ return _chatWindowActive; }
 	QString				downloadNewJASPUrl()	const	{ return _downloadNewJASPUrl;	}
 	const QStringList & commThankYou()			const;
 	const QString &		commGold()				const;
@@ -150,6 +149,7 @@ public:
 	bool				hadFatalError() const;
 	
 public slots:
+	void addNewDataSet();
 	void setImageBackgroundHandler(QString value);
 	void plotPPIChangedHandler(int ppi, bool wasUserAction);
 	void setProgressBarProgress(int progressBarProgress);
@@ -161,6 +161,7 @@ public slots:
 	void setScreenPPI(int screenPPI);
 	void setContactVisible(bool newContactVisible);
 	void setCommunityVisible(bool newCommunityVisible);
+	void onWorkspaceChanged();
 	void setDefaultWorkspaceEmptyValues();
     void setAiChatVisible(bool visible) { if(_aiChatVisible != visible) { _aiChatVisible = visible; emit aiChatVisibleChanged(); } }
 
@@ -205,6 +206,7 @@ public slots:
 	void	setCheckAutomaticSync(bool check)									{  _checkAutomaticSync = check;	}
 	void	openGitHubBugReport() const;
 	void	reloadResults() const;
+	void	updateShownFilterInQmlContext();
 
 private slots:
 	void _setProgressBarVisible(bool progressBarVisible);
@@ -278,7 +280,7 @@ signals:
 	void qmlLoadedChanged();
     void aiChatVisibleChanged();
 	void chatWindowActiveChanged();
-
+	void resetVariableTypes();
 	void hadFatalErrorChanged();
 	
 private slots:
@@ -332,12 +334,9 @@ private:
 	ResultsJsInterface			*	_resultsJsInterface		= nullptr;
 	MessageForwarder			*	_msgForwarder			= nullptr;
 	DataSetPackage				*	_package				= nullptr;
-	DataSetTableModel			*	_datasetTableModel		= nullptr,
-								*	_dataSetModelVarInfo	= nullptr;
+	DataSetTableModel			*	_datasetTableModel		= nullptr;
 	GridModel					*	_gridModel				= nullptr;	///< NEO: the grid's model, registered as `dataSetModel` (data-view-design §7.3)
-	labelFilterGenerator		*	_labelFilterGenerator	= nullptr;
 	ColumnsModel				*	_columnsModel			= nullptr;
-	ComputedColumnModel			*	_computedColumnsModel	= nullptr;
 	FilterModel					*	_filterModel			= nullptr;
 	OnlineDataManager			*	_odm					= nullptr;
 	DynamicModules				*	_dynamicModules			= nullptr;

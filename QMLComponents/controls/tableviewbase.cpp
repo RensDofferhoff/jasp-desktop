@@ -187,10 +187,10 @@ void TableViewBase::rScriptDoneHandler(const QString & result)
 		_tableModel->rScriptDoneHandler(result);
 }
 
-void TableViewBase::filterDoneHandler(const QString &name, const QString & error)
+void TableViewBase::filterDoneHandler(int dataSetID, const QString &name, const QString & error)
 {
 	if(_tableModel)
-		_tableModel->filterDoneHandler(name, error);
+		_tableModel->filterDoneHandler(dataSetID, name, error);
 }
 
 JASPControl::ItemType TableViewBase::itemTypePerItem(int col, int row) const

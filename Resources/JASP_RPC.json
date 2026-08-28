@@ -2,7 +2,7 @@
 	"openrpc": "1.2.6",
 	"info": {
 		"title": "JASP RPC API",
-		"version": "1.0.0"
+		"version": "1.1.0"
 	},
 	"methods": [
 		{
@@ -25,6 +25,14 @@
 					"description": "Analysis name within the module, e.g. 'TTestIndependent'.",
 					"schema": {
 						"type": "string"
+					}
+				},
+				{
+					"name": "dataSetId",
+					"required": false,
+					"description": "Optional id of the dataset the analysis should belong to. Omit (or -1) to use the currently shown/active dataset.",
+					"schema": {
+						"type": "integer"
 					}
 				}
 			],
@@ -447,7 +455,16 @@
 			"name": "analyses_list",
 			"summary": "List all analyses currently in the workspace.",
 			"x-displayName": "List Active Analyses",
-			"params": [],
+			"params": [
+				{
+					"name": "dataSetId",
+					"required": false,
+					"description": "Optional id of the dataset to filter analyses by. Omit (or -1) to list analyses across all datasets.",
+					"schema": {
+						"type": "integer"
+					}
+				}
+			],
 			"result": {
 				"name": "analyses_list_result",
 				"schema": {
@@ -478,13 +495,18 @@
 									"title": {
 										"type": "string",
 										"description": "Current (possibly user-edited) analysis title."
+									},
+									"dataSetId": {
+										"type": "integer",
+										"description": "Id of the dataset this analysis belongs to."
 									}
 								},
 								"required": [
 									"id",
 									"module",
 									"analysis",
-									"title"
+									"title",
+									"dataSetId"
 								]
 							}
 						}
@@ -681,9 +703,18 @@
 		},
 		{
 			"name": "data_info",
-			"summary": "Retrieve metadata about the currently loaded dataset. Same shape as data_load (on success) and data_load_status (on complete), but requires no jobId.",
+			"summary": "Retrieve metadata about a dataset in the workspace. Defaults to the currently shown/active dataset. Same shape as data_load (on success) and data_load_status (on complete), but requires no jobId.",
 			"x-displayName": "Get Data Info",
-			"params": [],
+			"params": [
+				{
+					"name": "dataSetId",
+					"required": false,
+					"description": "Optional id of the dataset to inspect. Omit (or -1) to use the currently shown/active dataset.",
+					"schema": {
+						"type": "integer"
+					}
+				}
+			],
 			"result": {
 				"name": "data_info_result",
 				"description": "Metadata about the loaded dataset, or loaded=false if none.",

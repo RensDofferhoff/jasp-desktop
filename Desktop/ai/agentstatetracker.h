@@ -134,7 +134,7 @@ public:
 	                                  bool useDelta = true) const;
 
 	/// Current dataset column schema (name + type per column).
-	Json::Value buildDataSnapshot() const;
+	Json::Value buildDataSnapshot(int dataSetId = -1) const;
 
 private:
 	explicit AgentStateTracker(QObject * parent = nullptr);

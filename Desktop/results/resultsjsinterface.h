@@ -48,6 +48,7 @@ public:
 
 	void setStatus(			Analysis *	analysis);
 	void changeTitle(		Analysis *	analysis);
+	void changeDataSpec(	Analysis *	analysis);
 	void analysisChanged(	Analysis *	analysis);
 	void overwriteUserdata(	Analysis *	analysis);
 	void showAnalysis(		int			id);

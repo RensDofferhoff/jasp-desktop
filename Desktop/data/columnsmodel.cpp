@@ -1,7 +1,9 @@
-#include "columnsmodel.h"
 #include "log.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
+#include "jasptheme.h"
+#include "dataenums.h"
 #include "mainwindow.h"
+#include "columnsmodel.h"
 
 ColumnsModel * ColumnsModel::_singleton = nullptr;
 
@@ -11,23 +13,17 @@ ColumnsModel::ColumnsModel(DataSetTableModel *tableModel)
 	assert(!_singleton);
 	_singleton = this;
 	
-	connect(_tableModel, &DataSetTableModel::columnTypeChanged,		this, [&](QString col, int) { emit columnTypeChanged(col); });
-	connect(_tableModel, &DataSetTableModel::labelChanged,			this, [&](QString col, QString orgLabel, QString newLabel) { emit labelsChanged(col, {std::make_pair(orgLabel, newLabel) }); } );
+	connect(_tableModel, &DataSetTableModel::columnTypeChanged,		this, &ColumnsModel::columnTypeChanged	);
+	connect(_tableModel, &DataSetTableModel::labelChanged,			this, [&](const Column * col, QString orgLabel, QString newLabel) { emit labelsChanged(col->nameQ(), QMap<QString, QString>{std::make_pair(orgLabel, newLabel) }); } );
 	connect(_tableModel, &DataSetTableModel::labelsReordered,		this, &ColumnsModel::labelsReordered	);
 	connect(_tableModel, &DataSetTableModel::emptyValuesChanged,	this, &ColumnsModel::dataSetChanged		);
 	connect(_tableModel, &DataSetTableModel::modelReset,			this, &ColumnsModel::refresh			);
 	connect(_tableModel, &DataSetTableModel::dataChanged,			this, &ColumnsModel::refresh			);
 	
-
 	auto * info = new VariableInfo(_singleton);
 
 	connect(this, &ColumnsModel::columnNamesChanged,					info, &VariableInfo::variableNamesChanged	);
 	connect(this, &ColumnsModel::columnsChanged,						info, &VariableInfo::variablesChanged		);
-	connect(this, &ColumnsModel::columnTypeChanged,						this, [this] (QString colName)
-		{
-			Term term(colName, columnType(data(index(getColumnIndex(fq(colName)), 0), ColumnsModel::ColumnTypeRole).toInt()));
-			emit VariableInfo::info()->variableTypeChanged(term);
-		} );
 
 	connect(this,						&ColumnsModel::labelsChanged,				info, &VariableInfo::labelsChanged			);
 	connect(this,						&ColumnsModel::labelsReordered,				info, &VariableInfo::labelsReordered		);
@@ -105,12 +101,12 @@ QString ColumnsModel::getColumnIcon(int colType, bool isTransformed) const
 
 QString ColumnsModel::getColumnIcon(columnType colType) const
 {
-	return VariableInfo::getIconFile(colType, VariableInfo::DefaultIconType);
+	return JaspTheme::currentIconPath() + "/"+ getIconFilename(colType, varIconType::DefaultIconType);
 }
 
 QString ColumnsModel::getColumnDescription(const QString &name) const
 {
-	return provideInfo(VariableInfo::ColumnDescription, name).toString().trimmed();
+	return provideInfo(varInfoType::ColumnDescription, name).toString().trimmed();
 }
 
 QString ColumnsModel::getColumnIconTransform(int colType) const
@@ -120,7 +116,7 @@ QString ColumnsModel::getColumnIconTransform(int colType) const
 
 QString ColumnsModel::getColumnIconTransform(columnType colType) const
 {
-	return VariableInfo::getIconFile(colType, VariableInfo::TransformedIconType);
+	return JaspTheme::currentIconPath() + "/"+ getIconFilename(colType, varIconType::TransformedIconType);
 }
 
 int ColumnsModel::getColumnType(const QString & columnName) const
@@ -145,13 +141,13 @@ QString ColumnsModel::getColumnTransformedToolTip(const QString &name, columnTyp
 	if(ColumnsModel::singleton()->getColumnIndex(fq(name)) == -1 || chosenType == realType)
 		return "";
 	
-	VariableInfo::InfoType		previewType;
+	varInfoType		previewType;
 	
 	switch(chosenType)
 	{
-	default:					previewType = VariableInfo::PreviewScale;		break;
-	case columnType::ordinal:	previewType	= VariableInfo::PreviewOrdinal;		break;
-	case columnType::nominal:	previewType	= VariableInfo::PreviewNominal;		break;
+	default:					previewType = varInfoType::PreviewScale;		break;
+	case columnType::ordinal:	previewType	= varInfoType::PreviewOrdinal;		break;
+	case columnType::nominal:	previewType	= varInfoType::PreviewNominal;		break;
 	}
 	
 	return provideInfo(previewType, name).toString();
@@ -177,9 +173,9 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 	}
 	else
 	{
-		colName		=									 _tableModel->headerData(index.row(), Qt::Horizontal, int(DataSetPackage::specialRoles::name				)).toString();
-		colType		= static_cast<columnType>			(_tableModel->headerData(index.row(), Qt::Horizontal, int(DataSetPackage::specialRoles::columnType			)).toInt());
-		codeType	= static_cast<computedColumnType>	(_tableModel->headerData(index.row(), Qt::Horizontal, int(DataSetPackage::specialRoles::computedColumnType	)).toInt());
+		colName		=										 _tableModel->headerData(index.row(), Qt::Horizontal, int(dataPkgRoles::name				)).toString();
+		colType		= static_cast<columnType>			(_tableModel->headerData(index.row(), Qt::Horizontal, int(dataPkgRoles::columnType			)).toInt());
+		codeType	= static_cast<computedColumnType>	(_tableModel->headerData(index.row(), Qt::Horizontal, int(dataPkgRoles::computedColumnType	)).toInt());
 	}
 
 	switch(role)
@@ -188,7 +184,7 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 	case TypeRole:					return "column";
 	case ColumnTypeRole:			return int(colType);
 	case ComputedColumnTypeRole:	return int(codeType);
-	case IconSourceRole:			return VariableInfo::getIconFile(colType, VariableInfo::DefaultIconType);
+	case IconSourceRole:			return JaspTheme::currentIconPath() + "/"+ getIconFilename(colType, varIconType::DefaultIconType);
 	case ToolTipRole:
 	{
 		QString		usedIn	= colType == columnType::scale		? tr("which can be used in numerical comparisons and mathematical operations.")
@@ -198,8 +194,8 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 		return tr("The '") + colName + tr("'-column ") + usedIn;
 	}
 	}
-
-	return QVariant();
+	
+	return _tableModel->data(_tableModel->index(index.column(), index.row()), role);
 }
 
 int ColumnsModel::rowCount(const QModelIndex &) const
@@ -212,7 +208,7 @@ int ColumnsModel::columnCount(const QModelIndex &) const
 	return 1;
 }
 
-QVariant ColumnsModel::provideInfo(VariableInfo::InfoType info, const QString& colName, int row) const
+QVariant ColumnsModel::provideInfo(varInfoType info, const QString& colName, int row) const
 {
 	ColumnsModel* colModel = ColumnsModel::singleton();
 
@@ -223,7 +219,7 @@ QVariant ColumnsModel::provideInfo(VariableInfo::InfoType info, const QString& c
 	{
 		// Wide-data fast path (2026-08-16): the full (name, type) Terms of the active dataset,
 		// cached — one request + one copy instead of k per-name roundtrips per reset pass.
-		if (info == VariableInfo::DataSetTerms)
+		if (info == varInfoType::DataSetTerms)
 			return QVariant::fromValue(colModel->dataSetTerms());
 
 		int colIndex = colName.isEmpty() ? 0 : colModel->getColumnIndex(fq(colName));
@@ -243,28 +239,28 @@ QVariant ColumnsModel::provideInfo(VariableInfo::InfoType info, const QString& c
 
 			switch(info)
 			{
-			case VariableInfo::VariableType:		return int(col->type);
-			case VariableInfo::NameRole:			return ColumnsModel::NameRole;
-			case VariableInfo::VariableNames:		return getColumnNames();
-			case VariableInfo::DataAvailable:		return MainWindow::singleton()->dataAvailable();
-			case VariableInfo::DataSetRowCount:	return qulonglong(neo->rows());
-			case VariableInfo::Labels:
+			case varInfoType::VariableType:		return int(col->type);
+			case varInfoType::NameRole:			return ColumnsModel::NameRole;
+			case varInfoType::VariableNames:		return getColumnNames();
+			case varInfoType::DataAvailable:		return MainWindow::singleton()->dataAvailable();
+			case varInfoType::DataSetRowCount:	return qulonglong(neo->rows());
+			case varInfoType::Labels:
 			{
 				QStringList levels;
 				for (const std::string & level : col->levels)
 					levels.append(tq(level));
 				return levels;
 			}
-			case VariableInfo::TotalLevels:			return qulonglong(col->distinctCount);	// distinct_count is the single source of truth for counts — wire levels are a capped UI prefix (design doc §2, decision 15)
-			case VariableInfo::TotalNumericValues:
+			case varInfoType::TotalLevels:			return qulonglong(col->distinctCount);	// distinct_count is the single source of truth for counts — wire levels are a capped UI prefix (design doc §2, decision 15)
+			case varInfoType::TotalNumericValues:
 				if (col->type == columnType::scale)
 					return qulonglong(col->distinctCount);	// scale: every value is numeric — the same number legacy's O(N log N) nonFilteredNumericsCount scan produced, without any scan
 				// Categoricals (e.g. jaspReliability SEM gates minNumericLevels:2 on nominal/
 				// ordinal items): the lane computes the distinct NUMERIC level count locale-aware
 				// (numeric_levels) — the frontend never parses wire values (design doc §2).
 				return col->numericLevels;
-			case VariableInfo::ColumnDescription:	return tq(col->description);
-			case VariableInfo::DataSetPointer:		return QVariant::fromValue<void*>(nullptr);	// deliberately no raw handout (design decision 8)
+			case varInfoType::ColumnDescription:	return tq(col->description);
+			case varInfoType::DataSetPointer:		return QVariant::fromValue<void*>(nullptr);	// deliberately no raw handout (design decision 8)
 			default:								return QVariant();	// values/previews: nothing in the frontend until data_view
 			}
 		}
@@ -277,27 +273,27 @@ QVariant ColumnsModel::provideInfo(VariableInfo::InfoType info, const QString& c
 
 		switch(info)
 		{
-		case VariableInfo::VariableType:				return					data(qColIndex, ColumnsModel::ColumnTypeRole).toInt();
-		case VariableInfo::NameRole:					return					ColumnsModel::NameRole;
+		case varInfoType::VariableType:				return					data(qColIndex, ColumnsModel::ColumnTypeRole).toInt();
+		case varInfoType::NameRole:					return					data(qColIndex, ColumnsModel::NameRole);
 		
-		case VariableInfo::DoubleValues:				return	_tableModel->	data(tableCIndex,						int(DataSetPackage::specialRoles::valuesDblList));
-		case VariableInfo::TotalNumericValues:			return	_tableModel->	data(tableCIndex,						int(DataSetPackage::specialRoles::nonFilteredNumericValuesCount));
-		case VariableInfo::TotalLevels:					return	_tableModel->	data(tableCIndex,						int(DataSetPackage::specialRoles::nonFilteredLevels)).toStringList().length();
-		case VariableInfo::Labels:						return	_tableModel->	data(tableCIndex,						int(DataSetPackage::specialRoles::nonFilteredLevels));
-		case VariableInfo::DataSetValues:				return	_tableModel->	data(tableCIndex,						int(DataSetPackage::specialRoles::valuesStrList));
-		case VariableInfo::DataSetRowCount:				return  _tableModel->	rowCount();
-		case VariableInfo::SignalsBlocked:				return	_tableModel->	synchingData();
-		case VariableInfo::DataSetValue:				return	_tableModel->	data(tableVIndex,						int(DataSetPackage::specialRoles::value));
+		case varInfoType::DoubleValues:				return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::valuesDblList));
+		case varInfoType::TotalNumericValues:		return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::nonFilteredNumericValuesCount));
+		case varInfoType::TotalLevels:				return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::nonFilteredLevels)).toStringList().length();
+		case varInfoType::Labels:					return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::nonFilteredLevels));
+		case varInfoType::DataSetValues:			return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::valuesStrList));
+		case varInfoType::DataSetRowCount:			return  _tableModel->	rowCount();
+		case varInfoType::SignalsBlocked:			return	_tableModel->	synchingData();
+		case varInfoType::DataSetValue:				return	_tableModel->	data(tableVIndex,						int(dataPkgRoles::value));
 		
-		case VariableInfo::VariableNames:				return	getColumnNames();
-		case VariableInfo::DataAvailable:				return	MainWindow::singleton()->dataAvailable();
+		case varInfoType::VariableNames:			return	getColumnNames();
+		case varInfoType::DataAvailable:			return	MainWindow::singleton()->dataAvailable();
 		
-		case VariableInfo::MaxWidth:					return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(DataSetPackage::specialRoles::maxColString)).toInt();
-		case VariableInfo::PreviewScale:				return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(DataSetPackage::specialRoles::previewScale));
-		case VariableInfo::PreviewOrdinal:				return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(DataSetPackage::specialRoles::previewOrdinal));
-		case VariableInfo::PreviewNominal:				return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(DataSetPackage::specialRoles::previewNominal));
-		case VariableInfo::ColumnDescription:			return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(DataSetPackage::specialRoles::description));
-		case VariableInfo::DataSetPointer:				return	QVariant::fromValue<void*>(DataSetPackage::pkg()->dataSet());
+		case varInfoType::MaxWidth:					return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::maxColString)).toInt();
+		case varInfoType::PreviewScale:				return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::previewScale));
+		case varInfoType::PreviewOrdinal:			return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::previewOrdinal));
+		case varInfoType::PreviewNominal:			return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::previewNominal));
+		case varInfoType::ColumnDescription:		return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::description));
+		case varInfoType::DataSetPointer:			return	QVariant::fromValue<void*>(DataSetPackage::pkg()->dataSet());
 		}
 	}
 	catch(std::exception & e)
@@ -309,7 +305,7 @@ QVariant ColumnsModel::provideInfo(VariableInfo::InfoType info, const QString& c
 	return QVariant();
 }
 
-bool ColumnsModel::absorbInfo(VariableInfo::InfoType info, const QString &colName, int row, QVariant value)
+bool ColumnsModel::absorbInfo(varInfoType info, const QString &colName, int row, QVariant value)
 {
 	ColumnsModel* colModel = ColumnsModel::singleton();
 
@@ -331,8 +327,8 @@ bool ColumnsModel::absorbInfo(VariableInfo::InfoType info, const QString &colNam
 		switch(info)
 		{
 		default:										return	false;
-		case VariableInfo::DataSetValue:				return	_tableModel->setData(qValIndex, value,	int(DataSetPackage::specialRoles::value));
-		case VariableInfo::DataSetValues:				return	_tableModel->setData(qColIndex, value,	int(DataSetPackage::specialRoles::valuesStrList));
+		case varInfoType::DataSetValue:					return	_tableModel->setData(qValIndex, value,	int(dataPkgRoles::value));
+		case varInfoType::DataSetValues:				return	_tableModel->setData(qColIndex, value,	int(dataPkgRoles::valuesStrList));
 		}
 	}
 	catch(std::exception & e)
@@ -352,7 +348,7 @@ QHash<int, QByteArray> ColumnsModel::roleNames() const
 		{ TypeRole,					"type"					},
 		{ ColumnTypeRole,			"columnType"			},
 		{ ComputedColumnTypeRole,	"computedColumnType"	},
-		{ IconSourceRole,			"columnIcolumnTypeUsercon"			},
+		{ IconSourceRole,			"columnIcon"			},
 		{ ToolTipRole,				"toolTip"				}
 	};
 
@@ -396,12 +392,19 @@ const Terms & ColumnsModel::dataSetTerms() const
 	return _dataSetTermsCache;
 }
 
-void ColumnsModel::datasetChanged(  QStringList                             changedColumns,
+void ColumnsModel::datasetChanged(  int																						dataSetID,
+												QStringList                             changedColumns,
 									QStringList                             missingColumns,
 									QMap<QString, QString>					changeNameColumns,
 									bool                                    rowCountChanged,
 									bool                                    hasNewColumns)
 {
+	//Only the shown dataset drives the visible column list (and the VariableInfo provider bound to it);
+	//ignore column changes coming from background datasets.
+	DataSet * shown = DataSetPackage::pkg()->dataSet();
+	if(!shown || dataSetID != shown->id())
+		return;
+
 	   if(! (missingColumns.size() > 0 || hasNewColumns))
 	   {
 			   if (changeNameColumns.size() > 0)

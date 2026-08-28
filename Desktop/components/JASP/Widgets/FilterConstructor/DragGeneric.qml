@@ -31,6 +31,7 @@ MouseArea
 	
 	ToolTip.visible:	shownToolTipText != "" && containsMouse
 	ToolTip.text:		shownToolTipText
+	ToolTip.toolTip.background:		Rectangle { color: jaspTheme.tooltipBackgroundColor; radius: jaspTheme.borderRadius }
 
 	objectName: "DragGeneric"
 	property var shownChild: null

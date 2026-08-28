@@ -100,6 +100,19 @@ $(document).ready(function () {
     analysis.toolbar.render();
   };
 
+  window.changeDataSpec = function (id, dataSpec) {
+    var analysis = analyses.getAnalysis(id);
+    if (analysis === undefined) return;
+
+    analysis.model.set("dataSpec", dataSpec);
+
+    //Without a heading yet there is nothing to update, rendering the results will pick the dataSpec up
+    if (analysis.toolbar.titleTag === undefined) return;
+
+    analysis._setTitle(analysis.model.get("title"), analysis.toolbar.titleTag, dataSpec);
+    analysis.toolbar.render();
+  };
+
   window.overwriteUserdata = function (id, userData) {
     var analysis = analyses.getAnalysis(id);
     if (analysis === undefined) return;

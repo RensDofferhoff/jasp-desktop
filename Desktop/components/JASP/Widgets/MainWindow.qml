@@ -329,10 +329,10 @@ Window
 
 		anchors
 		{
-			right:		parent.right
-			bottom:		parent.bottom
-			rightMargin:	jaspTheme.scrollbarBoxWidthBig + 3 * preferencesModel.uiScale
-			bottomMargin:	mainWindow.welcomePageVisible ? 85 * preferencesModel.uiScale : jaspTheme.scrollbarBoxWidthBig + 3 * preferencesModel.uiScale
+			right:			parent.right
+			bottom:			parent.bottom
+			rightMargin:	jaspTheme.scrollbarBoxWidthBig + 15 * preferencesModel.uiScale
+			bottomMargin:	mainWindow.welcomePageVisible ?  85 * preferencesModel.uiScale : jaspTheme.scrollbarBoxWidthBig + 3 * preferencesModel.uiScale
 		}
 
 		MouseArea

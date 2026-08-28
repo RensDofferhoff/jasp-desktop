@@ -111,6 +111,7 @@ PrefsScrollView
 							target:					preferencesModel
 							function onCustomEditorChanged(customEditor) { customEditorText.text = customEditor; }
 						}
+						
 					}
 				}
 			}

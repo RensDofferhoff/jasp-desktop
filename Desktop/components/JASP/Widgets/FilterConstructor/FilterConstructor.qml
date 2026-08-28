@@ -20,7 +20,6 @@ Item
 				property bool	lastCheckPassed:		true
 				property bool	showStartupMsg:			true
 				property alias	functionModel:			functieLijst.model
-				property string forceColumnInputs:		""
 
 	signal rCodeChanged(string rScript)
 
@@ -32,7 +31,7 @@ Item
 			hints.filterText = ""
 	}
 
-	onVisibleChanged: if(visible && JSON.stringify(filterConstructor.returnFilterJSON()) != filterModel.constructorJson)	initializeFromJSON(filterModel.constructorJson)
+	onVisibleChanged: if(visible && JSON.stringify(filterConstructor.returnFilterJSON()) != filterModel.filter.constructorJson)	initializeFromJSON(filterModel.filter.constructorJson)
 
 	function checkAndApplyFilter()
 	{
@@ -79,8 +78,8 @@ Item
 	{
 		id:				background
 		color:			jaspTheme.white
-		border.width:	1
-		border.color:	jaspTheme.uiBackground
+		//border.width:	1
+		//border.color:	jaspTheme.uiBackground
 		anchors.fill:	parent
 		z:				-3
 
@@ -273,9 +272,9 @@ Item
 				property string filterText: qsTr("Welcome to the drag and drop filter!\n")
 
 				id:						hints
-				text:					filterModel.filterErrorMsg === "" ? filterText : filterModel.filterErrorMsg
+				text:					filterModel.filter.filterErrorMsg === "" ? filterText : filterModel.filter.filterErrorMsg
 
-				color:					filterModel.filterErrorMsg === "" ? jaspTheme.textEnabled : jaspTheme.redDarker
+				color:					filterModel.filter.filterErrorMsg === "" ? jaspTheme.textEnabled : jaspTheme.redDarker
 
                 wrapMode:				Text.WordWrap
                 horizontalAlignment:	Text.AlignHCenter
@@ -356,19 +355,23 @@ Item
 	{
 		id: jsonConverter
 		objectName: "jsonConverter"
-		property string jaspsFilterConstructorJSON:  filterModel.constructorJson
+		property string jaspsFilterConstructorJSON:  filterModel.filter.constructorJson
 		property string lastProperlyconstructorJson: "{\"formulas\":[]}"
 
 		onJaspsFilterConstructorJSONChanged:
 		{
 			if(jsonConverter.jaspsFilterConstructorJSON !== JSON.stringify(parent.returnFilterJSON()))
 			{
+				//messages.log("onJaspsFilterConstructorJSONChanged!");
 				parent.initializeFromJSON()
-				filterConstructor.checkAndApplyFilter()
+				//Only re-apply (and push an undo step / send the filter to R again) for genuine
+				//pending user edits; pure reloads from the model must not pollute the undo stack.
+				if(filterConstructor.somethingChanged)
+					filterConstructor.checkAndApplyFilter()
 			}
 
 			parent.rememberCurrentconstructorJson()
-			filterModel.constructorR = scriptColumn.convertToR()
+			filterModel.filter.constructorR = scriptColumn.convertToR()
 
 		}
 
@@ -379,12 +382,12 @@ Item
 
 	function initializeFromJSON()
 	{
-		if(filterModel.constructorJson !== JSON.stringify(returnFilterJSON()))
+		if(filterModel.filter.constructorJson !== JSON.stringify(returnFilterJSON()))
 		{
 			trashCan.destroyAll(false);
 
-			if(filterModel.constructorJson !== "")
-				jsonConverter.convertJSONtoFormulas(filterModel.constructorJson)
+			if(filterModel.filter.constructorJson !== "")
+				jsonConverter.convertJSONtoFormulas(filterModel.filter.constructorJson)
 		}
 	}
 

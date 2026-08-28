@@ -4,7 +4,7 @@
 #include "dataviewbuffer.h"
 #include "jaspclient/jaspclient.h"
 #include "gui/preferencesmodel.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "log.h"
 
 #include <QLocale>

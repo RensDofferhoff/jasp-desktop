@@ -153,8 +153,7 @@ TextInputBase
 		control.textEdited.connect(textEdited);
 		control.pressed.connect(pressed);
 		control.released.connect(released);
-		if (control.text)
-			lastValidValue = control.text;
+		lastValidValue = control.text !== "" ? control.text : defaultValue
 	}
 
 	// The value should be checked only when the control is initialized.
@@ -164,10 +163,11 @@ TextInputBase
 
 	function checkValue(resetLastValidValue, addErrorIfNotFocussed)
 	{
-		if (!initialized && isBound) return false
+		if (!initialized || !isBound) return false
 
 		if (control.acceptableInput)
 		{
+			lastValidValue = value
 			if (!hasScriptError)
 				clearControlError();
 			return true;
@@ -260,6 +260,9 @@ TextInputBase
 		QTC.ToolTip.text		: control.text
 		QTC.ToolTip.visible		: tooLongText && (hovered || control.activeFocus) && control.echoMode != TextInput.Password
 
+		//QTC.ToolTip.text		: control.text
+		//QTC.ToolTip.visible		: contentWidth > width - leftPadding - rightPadding && (hovered || control.activeFocus)
+		
 		// The acceptableInput is checked even if the user is still typing in the TextField.
 		// In this case, the error should not appear immediately (only when the user is pressing the return key, or going out of focus),
 		// so the checkValue is called with addErrorIfNotFocussed set to true: it should not display an error if in focus.

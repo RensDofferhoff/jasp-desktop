@@ -2,9 +2,10 @@
 #include "utilities/desktopcommunicator.h"
 #include <QMessageBox>
 #include <QPushButton>
-#include <QFileDialog>
-#include <QInputDialog>
+#include "databaseconnectioninfo.h"
 #include <QRegularExpression>
+#include <QInputDialog>
+#include <QFileDialog>
 #include <QString>
 #include "qutils.h"
 #include "appdirs.h"
@@ -23,6 +24,13 @@ MessageForwarder::MessageForwarder(QObject *main) : QQuickItem(nullptr)
 void MessageForwarder::log(QString msg)
 {
 	Log::log() << msg << std::endl;
+}
+
+void MessageForwarder::linkWithDatabaseConnectionInfo(DatabaseConnectionInfo *info)
+{
+	connect(info,		&DatabaseConnectionInfo::showYesNo,			_singleton,		&MessageForwarder::showYesNoSlot			);
+	connect(info,		&DatabaseConnectionInfo::askPassword,		_singleton,		&MessageForwarder::askPasswordSlot			);
+	connect(info,		&DatabaseConnectionInfo::showWarning,		_singleton,		&MessageForwarder::showWarningQML			);
 }
 
 bool MessageForwarder::useNativeFileDialogs()

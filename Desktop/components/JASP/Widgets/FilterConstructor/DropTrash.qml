@@ -36,6 +36,7 @@ DropArea
 		ToolTip.delay:		500
 		ToolTip.visible:	containsMouse
 		ToolTip.text:		qsTr("Dump unwanted snippets here; double-click to erase the entire slate")
+		ToolTip.toolTip.background:		Rectangle { color: jaspTheme.tooltipBackgroundColor; radius: jaspTheme.borderRadius }
 		hoverEnabled:		true
 		cursorShape:		Qt.PointingHandCursor
 	}

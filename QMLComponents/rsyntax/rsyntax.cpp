@@ -353,7 +353,7 @@ bool RSyntax::parseRSyntaxOptions(Json::Value &options) const
 				FormulaParser::ParsedTerms parsedTerms;
 				QString error;
 
-				if (!FormulaParser::parse(option["rhs"], false, parsedTerms, error))
+				if (!FormulaParser::parse(option["rhs"], false, parsedTerms, error, form()->varInfo()->provider()))
 				{
 					addError(error);
 					return false;
@@ -452,7 +452,7 @@ QString RSyntax::transformJsonToR(const Json::Value &json)
 
 bool RSyntax::_areTermsVariables(ListModel* model, const Terms& terms) const
 {
-	QStringList variables = model->requestInfo(VariableInfo::VariableNames).toStringList();
+	QStringList variables = model->requestInfo(varInfoType::VariableNames).toStringList();
 
 	for (const Term& term : terms)
 		for (const QString& comp : term.components())

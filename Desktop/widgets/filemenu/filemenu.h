@@ -91,9 +91,6 @@ public:
 	QString			getDefaultOutFileName();
 
 	void			showPreferences();
-	
-	void			syncDataFile(const QString& path, bool waitForExistence = false);
-
 
 	FileOperation						fileoperation()				const	{ return _fileoperation;			}
 	DataLibrary						*	datalibrary()				const	{ return _dataLibrary;				}
@@ -136,7 +133,6 @@ public slots:
 	void resourceButtonClicked(const int buttonType);
 	void showAboutRequest();
 	void showContactRequest();
-	void dataColumnAdded(QString columnName);
 	void analysesExportResults();
 	void refresh();
 	void close();
@@ -167,7 +163,7 @@ private:
 	ResourceButtons				*	_resourceButtons			= nullptr;
 	ResourceButtonsVisible		*	_resourceButtonsVisible		= nullptr;
 
-	QFileSystemWatcher				_watcher;
+	
 	FileEvent::FileMode				_mode						= FileEvent::FileOpen;
 	QString							_currentFilePath;
 	Utils::FileType					_currentFileType			= Utils::FileType::unknown;

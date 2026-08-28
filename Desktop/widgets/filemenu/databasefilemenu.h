@@ -3,7 +3,7 @@
 
 #include "filemenuobject.h"
 #include "utilenums.h"
-#include "data/databaseconnectioninfo.h"
+#include "databaseconnectioninfo.h"
 
 class DatabaseFileMenu : public FileMenuObject
 {
@@ -92,8 +92,9 @@ signals:
 private:
 	QString						_runQuery();
 	void						loadFromSettings();
-	void						loadFromDataSetPackage();
-	bool						useDataSetPackage() { return mode() == FileEvent::FileSyncData; }
+	void						loadFromDataSetPackage();	 
+bool						useDataSetPackage() {			return mode() == FileEvent::FileSyncData;	}
+
 
 private:
 	Info						_info;

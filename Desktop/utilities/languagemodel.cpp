@@ -1,5 +1,5 @@
 #include "languagemodel.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "utilities/settings.h"
 #include "resultstesting/compareresults.h"
 #include "results/resultsjsinterface.h"
@@ -34,9 +34,12 @@ QMap<QString, bool> LanguageModel::LanguageInfo::_allowedLanguages =
 	{ "ta"		,	true	},
 	{ "tr"		,	true	},
 	{ "eu"		,	true	},
+	{ "ar"		,	true	},
 	{ "id"		,	false	},
 	{ "ru"		,	false	},
-	{ "it"		,	false	},{ "hu"		,	false	},{ "ar"		,	false	}
+	{ "it"		,	false	},
+	{ "hu"		,	false	},
+	{ "bo"		,	false	}
 };
 
 QString LanguageModel::LanguageInfo::_incompleteFlag = "(incomplete)";

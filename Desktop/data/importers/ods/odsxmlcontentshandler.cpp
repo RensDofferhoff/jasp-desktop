@@ -1,6 +1,6 @@
 #include "odsxmlcontentshandler.h"
 #include "odsimportcolumn.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 
 
 const QString ods::ODSXmlContentsHandler::_nameDocContent("document-content");

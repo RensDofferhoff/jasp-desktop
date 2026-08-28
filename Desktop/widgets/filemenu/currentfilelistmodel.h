@@ -15,14 +15,15 @@ public:
 	explicit CurrentFileListModel(QObject *parent = nullptr);
 	
 	CurrentFileFileSystem*		getCurrentFileFSBModel();
-	void					setCurrentFilePath(const QString &newcurrent);
+	void						setCurrentFilePath(const QString &newcurrent);
 	
 signals:
 	void syncCurrentFile(FileEvent *event);
 
+#ifdef NOT_IGNORING_SYNCHING
 public slots:
 	void openFile(const QString& path) override;
-
+#endif
 	
 	
 private:

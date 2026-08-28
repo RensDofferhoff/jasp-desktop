@@ -219,4 +219,46 @@ void TestColumnEncoderContext::malformedContextDoesNotMutateLiveState()
 	QVERIFY2(extraEncoder.currentNames() == liveContext.extra(), "Extra-option context changed after malformed context errors.");
 }
 
+void TestColumnEncoderContext::currentEncoderReTargetsOnSwitchAndClearsOnDestruction()
+{
+	ColumnEncoder * defaultEncoder = ColumnEncoder::columnEncoder();
+	QVERIFY(defaultEncoder != nullptr);
+
+	ColumnEncoder first("firstGroup_");
+	ColumnEncoder second("secondGroup_");
+
+	first .setCurrentNames(names({{"first score",	columnType::scale}}));
+	second.setCurrentNames(names({{"second score",	columnType::scale}}));
+
+	//The indirection must follow whichever encoder is marked "current" (the multi-dataset path
+	//points it at the shown dataset's encoder on setShownDataSet / provideAndUpdateDataSet).
+	ColumnEncoder::setCurrentEncoder(&first);
+	QCOMPARE(ColumnEncoder::currentEncoder(), &first);
+	QVERIFY2(ColumnEncoder::isColumnName("first score"),		"Current encoder (first) should know 'first score'.");
+	QVERIFY2(!ColumnEncoder::isColumnName("second score"),	"Non-current encoder's column must not be seen.");
+
+	ColumnEncoder::setCurrentEncoder(&second);
+	QCOMPARE(ColumnEncoder::currentEncoder(), &second);
+	QVERIFY2(ColumnEncoder::isColumnName("second score"),	"Current encoder (second) should know 'second score'.");
+	QVERIFY2(!ColumnEncoder::isColumnName("first score"),	"Switching away must drop the first encoder's columns.");
+
+	//Destroying the encoder that is currently pointed-at must clear the indirection so a later use
+	//cannot dereference a dangling encoder (the ~ColumnEncoder guard for the per-dataset case).
+	auto * transient = new ColumnEncoder("transient_");
+	transient->setCurrentNames(names({{"transient score", columnType::scale}}));
+	ColumnEncoder::setCurrentEncoder(transient);
+	QCOMPARE(ColumnEncoder::currentEncoder(), transient);
+	delete transient;
+	QCOMPARE(ColumnEncoder::currentEncoder(), nullptr);
+
+	//Next use falls back to the default instance rather than the destroyed one.
+	ColumnEncoder * fallback = ColumnEncoder::columnEncoder();
+	QVERIFY(fallback != nullptr);
+	QVERIFY2(fallback != transient, "Fallback must not return the destroyed encoder.");
+	QCOMPARE(fallback, defaultEncoder);
+
+	//Leave the global pointing at the default so init/cleanup expectations hold for later tests.
+	ColumnEncoder::setCurrentEncoder(defaultEncoder);
+}
+
 QTEST_MAIN(TestColumnEncoderContext)

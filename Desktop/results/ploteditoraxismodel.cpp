@@ -1,6 +1,6 @@
 #include "ploteditoraxismodel.h"
 #include "ploteditormodel.h"
-#include "utilities/qutils.h"
+#include "qutils.h"
 #include "jsonutilities.h"
 #include "log.h"
 #include "columnutils.h"

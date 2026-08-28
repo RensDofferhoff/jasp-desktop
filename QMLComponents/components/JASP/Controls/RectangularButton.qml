@@ -105,6 +105,7 @@ Rectangle
 
 	ToolTip.text:						toolTip
 	ToolTip.visible:					toolTip !== "" && buttonMouseArea.containsMouse
+	ToolTip.toolTip.background:			Rectangle { color: jaspTheme.tooltipBackgroundColor; radius: jaspTheme.borderRadius }
 
 	Keys.onSpacePressed:				clicked();
 	Keys.onEnterPressed:				clicked();

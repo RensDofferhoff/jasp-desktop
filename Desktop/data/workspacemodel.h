@@ -37,9 +37,6 @@ public slots:
 
 private:
 	static WorkspaceModel* _singleton;
-
-	UndoStack*	_undoStack		= nullptr;
-
 };
 
 #endif // WORKSPACEMODEL_H

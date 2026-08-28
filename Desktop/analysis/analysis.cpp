@@ -16,8 +16,14 @@
 //
 
 #include "log.h"
+#include "utils.h"
+#include "analysis.h"
+#include "tempfiles.h"
+#include "appinfo.h"
+#include "filter.h"
 #include "dirs.h"
 #include "utils.h"
+#include "qutils.h"
 #include "appinfo.h"
 #include "analysis.h"
 #include "analyses.h"
@@ -25,7 +31,7 @@
 #include "tempfiles.h"
 #include "analysisform.h"
 #include "columnencoder.h"
-#include "utilities/qutils.h"
+#include "utilities/settings.h"
 #include "utilities/reporter.h"
 #include "gui/preferencesmodel.h"
 #include "results/resultsjsinterface.h"
@@ -35,15 +41,15 @@
 #include <QAccessible>
 #include <QScopeGuard>
 
-Analysis::Analysis(size_t id, Modules::AnalysisEntry * analysisEntry, const std::string & title, const Version & optionsVersion, const Json::Value & options) :
-	  AnalysisBase(Analyses::analyses()),
-		_id(				id),
-		_name(			analysisEntry->function()),
-		_qml(			analysisEntry->qml().empty() ? _name : analysisEntry->qml()),
-		_titleDefault(	analysisEntry->title()),
-		_title(			title == "" ? _titleDefault : title),
-		_moduleData(		analysisEntry),
-		_dynamicModule(	_moduleData ? _moduleData->dynamicModule() : nullptr)
+Analysis::Analysis(size_t id, Modules::AnalysisEntry * analysisEntry, const std::string & title, const Version & optionsVersion, const Json::Value & options) 
+	: AnalysisBase(		Analyses::analyses())
+	, _id(				id)
+	, _name(				analysisEntry->function())
+	, _qml(				analysisEntry->qml().empty() ? _name : analysisEntry->qml())
+	, _titleDefault(		analysisEntry->title())
+	, _title(				title == "" ? _titleDefault : title)
+	, _moduleData(		analysisEntry)
+	, _dynamicModule(		_moduleData ? _moduleData->dynamicModule() : nullptr)
 {
 	// If the optionsVersion parameter is given, this is the version this analysis was stored with (in a JASP file).
 	// This version might be not the same as the current module version: in this case, the analysis will have to be refreshed.
@@ -83,6 +89,8 @@ Analysis::Analysis(size_t id, Analysis * duplicateMe)
 	, _rSources(						duplicateMe->_rSources			)
 	, _datasetId(						duplicateMe->_datasetId			)
 {
+	_filter = duplicateMe->_filter;
+	
 	initAnalysis();
 }
 
@@ -118,7 +126,31 @@ void Analysis::initAnalysis()
 
 	if(!_isDuplicate && isNewAnalysis)
 		_status = Empty;
+	
+	if(!_filter && DataSetPackage::filter())
+		_filter = DataSetPackage::filter();
+	
+	if(_filter)
+	{
+		//Make sure we have some sort of filter if the one the analysis is using is deleted
+		_filterDataSet = _filter->data();
+		connect(_filter->data(), &DataSet::filterRemoved, this, &Analysis::filterRemoved, Qt::UniqueConnection);
+	}
+}
 
+
+void Analysis::filterRemoved(Filter * f)
+{
+	if(_filter == f) 
+	{
+		_filter = _filterDataSet ? _filterDataSet->defaultFilter() : nullptr;
+		refresh();
+	}
+}
+
+DataSet * Analysis::dataSet() const
+{
+	return _filterDataSet;
 }
 
 Analysis::~Analysis()
@@ -129,14 +161,15 @@ Analysis::~Analysis()
 
 	if(DataSetPackage::pkg() && DataSetPackage::pkg()->hasDataSet())
 	{
-		for(Column * col : DataSetPackage::pkg()->dataSet()->columns())
-			if(col->analysisId() == id())
-			{
-				if(col->codeType() == computedColumnType::analysisNotComputed)
-					DataSetPackage::pkg()->setColumnComputedType(DataSetPackage::pkg()->dataSet()->columnIndex(col), computedColumnType::notComputed);
-				else
-					emit requestComputedColumnDestruction(col->name(), this);
-			}
+		for(DataSet * data : DataSetPackage::pkg()->workspace()->dataSets())
+			for(Column * col : data->columns())
+				if(col->analysisId() == id())
+				{
+					if(col->codeType() == computedColumnType::analysisNotComputed)
+						col->setCodeType(computedColumnType::notComputed);
+					else
+						emit requestComputedColumnDestruction(col->name(), this);
+				}
 	}
 }
 
@@ -551,7 +584,7 @@ Json::Value Analysis::loadPlotlyJsonInResults(Json::Value  results) const
 		return tq(base + "/" + path);
 	};
 
-	auto loadFile = [&resolveAssetPath](const std::string & path)
+	auto loadFile = [&resolveAssetPath, this](const std::string & path)
 	{
 		QFile plotlyJsonFile(resolveAssetPath(path));
 
@@ -562,7 +595,10 @@ Json::Value Analysis::loadPlotlyJsonInResults(Json::Value  results) const
 
 			jsonReader.parse(plotlyJsonFile.readAll().toStdString(),plotlyJson, false);
 
-			ColumnEncoder::decodeJson(plotlyJson);
+			//Decode against this analysis' own dataset encoder: the process-global encoder is only
+			//populated in the engine, so the static ColumnEncoder::decodeJson would be a no-op here.
+			if(DataSet * ds = dataSet())
+				ds->encoder().decodeJson(plotlyJson);
 
 			return plotlyJson;
 		}
@@ -611,9 +647,15 @@ Json::Value Analysis::asJSON(bool withRSource) const
 	analysisAsJson["name"]			= _name;
 	analysisAsJson["title"]			= _title;
 	analysisAsJson["titleDef"]		= _titleDefault;
+	analysisAsJson["filterId"]		= filterId();
+	analysisAsJson["dataSetId"]		= dataSet() ? dataSet()->id()			: -1;
+	analysisAsJson["dataSet"]		= dataSet() ? fq(dataSet()->title())	: "";
+	analysisAsJson["dataSpec"]		= fq(dataSpec());
+	analysisAsJson["filter"]		= fq(filterName());
+	analysisAsJson["filterTitle"]	= filter() ? fq(filter()->title())		: "";
 	analysisAsJson["rfile"]			= _rfile;
-	analysisAsJson["hasReport"]		= _hasReport;
 	analysisAsJson["isReport"]		= _isReport;
+	analysisAsJson["hasReport"]		= _hasReport;
 	analysisAsJson["progress"]		= _progress;
 	analysisAsJson["results"]		= loadPlotlyJsonInResults(_results);
 	analysisAsJson["status"]		= statusToString(_status);
@@ -621,6 +663,7 @@ Json::Value Analysis::asJSON(bool withRSource) const
 	analysisAsJson["userdata"]		= userData();
 	analysisAsJson["dynamicModule"] = _moduleData ? _moduleData->asJsonForJaspFile() : Json::objectValue;
 	analysisAsJson["saveState"]     = (_dynamicModule && _dynamicModule->descriptionQml()) ? (_dynamicModule->descriptionQml()->alwaysSaveState()  ? "always" : _dynamicModule->descriptionQml()->neverSaveState() ? "never" : "default") : "default";
+	
 
 	if (withRSource)
 		analysisAsJson["rSources"]	= rSources();
@@ -732,7 +775,14 @@ stringset Analysis::usedVariables()
 
 stringset Analysis::createdVariables()
 {
-	return DataSetPackage::pkg()->columnsCreatedByAnalysis(this);
+	stringset names;
+	
+	if(dataSet())
+		for(Column * col : dataSet()->columns())
+			if(col->analysisId() == id())
+				names.insert(col->name());
+	
+	return names;
 }
 
 void Analysis::runScriptRequestDone(const QString& result, const QString& controlName, bool hasError)
@@ -741,10 +791,13 @@ void Analysis::runScriptRequestDone(const QString& result, const QString& contro
 		_analysisForm->runScriptRequestDone(result, controlName, hasError);
 }
 
-void Analysis::filterByNameDone(const QString &name, const QString &error)
+void Analysis::filterByNameDone(int dataSetId, const QString &name, const QString &error)
 {
 	if (_analysisForm)
-		_analysisForm->filterByNameDone(name, error);
+		_analysisForm->filterByNameDone(dataSetId, name, error);
+	
+	if(name == filter()->name())
+		run();
 }
 
 void Analysis::emitDuplicationSignals()
@@ -1233,7 +1286,7 @@ void Analysis::setRSyntaxTextInResult(bool show)
 
 void Analysis::onUsedVariablesChanged()
 {
-	DataSetPackage::pkg()->checkComputedColumnDependenciesForAnalysis(this);
+	DataSetPackage::pkg()->workspace()->updateComputedColumnDependenciesForAnalysis(id(), usedVariables());
 }
 
 void Analysis::checkForRSources()
@@ -1349,12 +1402,13 @@ std::string Analysis::qmlFormPath(bool addFileProtocol, bool ignoreReadyForUse) 
 
 bool Analysis::isColumnFreeOrMine(const QString & columnName) const
 {
-	if(DataSetPackage::pkg()->isColumnNameFree(columnName))
+	//An analysis without a filter/dataset is not "mine": treat every column as free.
+	if(!_filter || !_filter->data())
 		return true;
 
-	Column * col = DataSetPackage::pkg()->getColumn(columnName.toStdString());
+	Column * col = _filter->data()->column(columnName);
 
-	return col && col->analysisId() == id();	// NEO guard: lane datasets have no legacy columns
+	return !col || col->analysisId() == id();
 }
 
 

@@ -76,6 +76,7 @@ In addition to these libraries, you need to manually download and install the Re
 To build ReadStat:
 ```
 git clone https://github.com/WizardMac/ReadStat.git
+git checkout a000e9c
 cd ReadStat
 export CFLAGS=-Wno-error; export CXXFLAGS=-Wno-error; # I couldnt build 1.1.7 nor 1.1.8 without setting these
 autoreconf -i -f
@@ -87,6 +88,7 @@ make install
 To build librdata
 ```
 git clone https://github.com/WizardMac/librdata.git
+git checkout 33bd276
 cd librdata
 ./autogen.sh
 ./configure
