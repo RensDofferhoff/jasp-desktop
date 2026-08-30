@@ -3,6 +3,8 @@
 #include "dataenums.h"
 #include "qutils.h"
 #include "workspace.h"
+#include "gridmodel.h"
+#include "jaspclient/dataedit.h"
 #include <algorithm>
 #include <climits>
 
@@ -103,15 +105,24 @@ QVariant ExpandDataProxyModel::headerData(int section, Qt::Orientation orientati
 	return QVariant();
 }
 
+DataSet * ExpandDataProxyModel::gridSourceDataSet() const
+{
+	GridModel * grid = qobject_cast<GridModel*>(sourceModel());
+	if (!grid || !grid->dataSet() || !grid->dataSet()->isOpen())
+		return nullptr;
+	return grid->dataSet();
+}
+
 Qt::ItemFlags ExpandDataProxyModel::flags(const QModelIndex &index) const
 {
 	if (!sourceModel())
 		return Qt::NoItemFlags;
 
-	// NEO read-only guard (data-view-design §7.5): a non-DataSetTableModel source (the NEO
-	// GridModel) has no editing surface — strip ItemIsEditable everywhere, virtual cells
-	// included, so no edit can start (typing, pasting, double-click).
-	const bool editableSource = dataSetSourceModel() != nullptr;
+	// The editing gate (data-edit-design §7): a LEGACY source (DataSetTableModel) or a LIVE
+	// NEO dataset (the GridModel holding an open one) — both are editable surfaces; the
+	// virtual area past the source is editable in expand mode exactly as legacy allowed
+	// (an edit anchored beyond the extent GROWS the dataset: insert_block's design).
+	const bool editableSource = dataSetSourceModel() != nullptr || gridSourceDataSet() != nullptr;
 
 	if (index.column() < sourceModel()->columnCount() && index.row() < sourceModel()->rowCount())
 	{
@@ -406,12 +417,24 @@ bool ExpandDataProxyModel::setData(const QModelIndex &index, const QVariant &val
 {
 	if (!sourceModel() || index.row() < 0 || index.column() < 0)
 		return false;
-	
-	// NEO read-only guard: without a DataSetTableModel source (the NEO GridModel case) there is
-	// no undo/edit surface — pass through to the source and let it refuse.
-	if(!dataSetSourceModel())
+
+	// NEO edit surface: ONE insert_block per commit boundary — the cell's escaped text is
+	// the §1.2 tail, the anchor is the shown index (identity: the NEO view has no filter
+	// compaction; an anchor past the extent GROWS the dataset remotely — data_changed
+	// restarts the view, no local resize). Labels/roles stay the label editor's business.
+	if (!dataSetSourceModel())
 	{
-		return sourceModel()->setData(sourceModel()->index(index.row(), index.column()), value, role);	
+		DataSet * ds = gridSourceDataSet();
+		if (!ds)
+			return false;
+
+		const QString cell = DataEdit::escapeCell(value);
+		undoStack()->endMacro(new DataEditCommand(
+			ds,
+			DataEdit::insertBlockOp(uint64_t(index.row()), uint64_t(index.column())),
+			DataEdit::tsvFromCells({ { cell } }),
+			tr("Edit cell")));
+		return true;
 	}
 
 	resize(index.row(), index.column());
@@ -430,7 +453,31 @@ void ExpandDataProxyModel::pasteSpreadsheet(int row, int col, const std::vector<
 
 	DataSet * ds = dataSetSourceModel();
 	if (!ds)
+	{
+		// NEO paste: ONE insert_block over the whole rectangle (the commit-boundary rule —
+		// one wire trip, one revision bump, one undo entry). Identity mapping (no filter
+		// compaction in the NEO view); an anchor past the extent grows the dataset, holes
+		// null. Cells escape once, here, per §1.2. Labels/colNames are the label editor's
+		// and the header-rename surfaces' business — not this op.
+		DataSet * grid = gridSourceDataSet();
+		if (!grid)
+			return;
+
+		std::vector<std::vector<QString>> escaped(values.size());
+		for (size_t c = 0; c < values.size(); ++c)
+		{
+			escaped[c].reserve(values[c].size());
+			for (size_t r = 0; r < values[c].size(); ++r)
+				escaped[c].push_back(DataEdit::escapeCell(QVariant(values[c][r])));
+		}
+
+		undoStack()->endMacro(new DataEditCommand(
+			grid,
+			DataEdit::insertBlockOp(uint64_t(row), uint64_t(col)),
+			DataEdit::tsvFromCells(escaped),
+			tr("Paste %1×%2").arg(values.size()).arg(values[0].size())));
 		return;
+	}
 
 	const int shownRowCount	= sourceModel()->rowCount(),
 			  shownColCount	= sourceModel()->columnCount();

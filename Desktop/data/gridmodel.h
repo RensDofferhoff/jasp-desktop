@@ -63,6 +63,9 @@ public:
 	Q_INVOKABLE void		toggleColType(int column, bool next = true);	///< edit-era: logged no-op (fail loudly, merge-multidataset.md §6)
 
 	int					columnsFilteredCount() const { return 0; }		///< no filters in v1
+	/// The SHOWN dataset — identity + schema holder (nullptr = nothing shown). The edit
+	/// surface (the proxy's commands) needs it for datasetId/laneRevision at submit time.
+	DataSet			*	dataSet() const { return _dataSet; }
 	/// The grid's current viewport row range [firstRow, lastRow) — forwarded to the shown
 	/// dataset's fill scheduler (MainWindow wires DataSetViewBase::viewportRowsChanged here).
 	/// No-op without a live lane.

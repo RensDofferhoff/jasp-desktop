@@ -385,8 +385,11 @@ Qt::ItemFlags GridModel::flags(const QModelIndex & index) const
 {
 	if (!index.isValid())
 		return Qt::NoItemFlags;
-	// Read-only increment (design §7.5): selectable + enabled, NEVER editable — the editing
-	// surface returns with data_edit.
+	// Edit era (design §7): a live dataset is editable — typing/pasting funnels through the
+	// proxy into a DataEditCommand (one wire edit per commit boundary). The proxy ORs its
+	// own gate on top (virtual cells included, exactly like the legacy source's flags).
+	if (_dataSet && _dataSet->isOpen())
+		return Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsEditable;
 	return Qt::ItemIsSelectable | Qt::ItemIsEnabled;
 }
 

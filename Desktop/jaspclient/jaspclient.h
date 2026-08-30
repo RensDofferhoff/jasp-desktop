@@ -81,6 +81,12 @@ public:
 		bool        truncated = false;	///< the lane stopped at max_bytes before row_limit/end
 		QByteArray  binary;				///< the binary payload part ("" when the frame was JSON-only)
 
+		// kind:"data" — data_edit additions (data-edit-design §5, D10): the undo material of a
+		// completed edit. `inverseMeta` mirrors the payload's `inverse` object ({format,
+		// base_revision, ops}); the IPC BYTES ride the frame tail — i.e. `binary` — and are
+		// stored + resubmitted VERBATIM by the undo command. The client never interprets either.
+		Json::Value inverseMeta;	///< null when the result carried no inverse
+
 		std::string message;	///< human-readable detail on failure (payload error_message / result message)
 	};
 
@@ -110,7 +116,20 @@ public:
 	/// within the session — two distinct work units must never share a `work_id`. The client cannot
 	/// enforce this (a re-submission and a collision are indistinguishable to it), so uniqueness is
 	/// the caller's responsibility. Returns the `work_id`.
-	std::string submit(const Json::Value & work, ResultHandler handler);
+	///
+	/// `binary` (§18.1) rides the frame verbatim after the JSON — a `data_edit` submits its §1.2
+	/// TSV cells there, an `apply_inverse` its inverse IPC bytes (bulk bytes never go through
+	/// the JSON parser; the mirror image of the result-tail path).
+	std::string submit(const Json::Value & work, ResultHandler handler, const QByteArray & binary = QByteArray());
+
+	/// Submit a `data_edit` work unit against a lane dataset (data-edit-design §2/§3): builds the
+	/// payload envelope — `op:"data_edit"`, `dataset_ids:[datasetId]`, `revision = baseRevision`
+	/// (the D11 echo: the caller reads `DataSet::laneRevision()` AT SUBMIT TIME; the
+	/// orchestrator checks it against the dataset entry) — frames the binary tail verbatim,
+	/// and routes results to `handler`. `editOp` is the adjacently-tagged op object
+	/// (`{op:"insert_block", row, col}` / `{op:"apply_inverse", inverse:{…}}` / …).
+	/// Returns the `work_id`.
+	std::string submitDataEdit(const QString & datasetId, uint64_t baseRevision, const Json::Value & editOp, const QByteArray & tail, ResultHandler handler);
 
 	/// Cancel a work unit and drop its handler.
 	void abort(const std::string & workId);
@@ -153,10 +172,10 @@ private:
 	// Main (GUI) thread.
 	void handleMessage(const QByteArray & body);	///< parse + dispatch
 	static ModuleCatalog parseCatalog(const Json::Value & modulesJson);	///< `modules` array → typed entries (tolerant)
-	void sendFrame(const Json::Value & envelope);	///< frame + send (under _socketMutex)
+	void sendFrame(const Json::Value & envelope, const QByteArray & binary = QByteArray());	///< frame + send (under _socketMutex)
 	void logIo(const char * dir, const Json::Value & env) const;	///< log one message per _verbosity
 	// Framing (§18.1).
-	static QByteArray frameEnvelope(const Json::Value & env);
+	static QByteArray frameEnvelope(const Json::Value & env, const QByteArray & binary = QByteArray());
 	/// Split a frame into its JSON envelope and trailing binary payload (§18.1). View
 	/// results carry their escaped-TSV cells in the tail — consumers get raw bytes that
 	/// never went through the JSON parser. The tail is empty on JSON-only frames.

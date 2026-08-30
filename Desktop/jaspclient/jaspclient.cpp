@@ -5,6 +5,7 @@
 
 #include <QMetaObject>
 #include <QMetaType>
+#include <QLocale>
 #include <QtGlobal>
 
 #include <chrono>
@@ -260,7 +261,7 @@ void JaspClient::recvLoop()
 
 // ── public API (main thread) ─────────────────────────────────────────────────
 
-std::string JaspClient::submit(const Json::Value & work, ResultHandler handler)
+std::string JaspClient::submit(const Json::Value & work, ResultHandler handler, const QByteArray & binary)
 {
 	std::string workId = work.get("work_id", "").asString();
 	if (workId.empty())
@@ -272,8 +273,47 @@ std::string JaspClient::submit(const Json::Value & work, ResultHandler handler)
 	// No abort dance and no separate per-analysis map: this revision is the high-water mark (§23).
 	_slots[workId] = Slot{ revision, work.get("kind", "analysis_r_classic_jaspbase").asString(), std::move(handler) };
 
-	sendFrame(work);
+	sendFrame(work, binary);
 	return workId;
+}
+
+std::string JaspClient::submitDataEdit(const QString & datasetId, uint64_t baseRevision, const Json::Value & editOp, const QByteArray & tail, ResultHandler handler)
+{
+	// The wire shape mirrors ViewFiller's data_view envelope (one home for C++ data work) with
+	// the edit family's payload: op data_edit + the adjacently-tagged edit object. `revision` is
+	// the D11 echo — the caller reads DataSet::laneRevision() at submit time; the orchestrator
+	// checks it against the dataset entry (stale → visible validationError, nothing applied).
+	// The ingest rides empty except the locale separators: the lane parses pasted numbers under
+	// them, everything else takes its defaults.
+	Json::Value payload(Json::objectValue);
+	payload["op"]			= "data_edit";
+	payload["source"]		= "";		// orchestrator injects the pre-edit cache at dispatch
+	payload["cache_path"]	= "";		// …and assigns the next revision's path
+	payload["format"]		= "";		// edits are format-agnostic (they read the cache)
+	Json::Value ingest(Json::objectValue);
+	const QString decimal = QLocale::system().decimalPoint();
+	if (decimal == QLatin1String(","))		// the lane default is '.'; only a comma-decimal locale overrides
+		ingest["decimal_sep"]	= ",";
+	payload["ingest"]		= ingest;
+	payload["row_offset"]	= Json::UInt64(0);
+	payload["row_limit"]		= Json::nullValue;
+	payload["columns"]		= Json::nullValue;
+	payload["max_bytes"]		= Json::UInt64(0);	// unused by edits (a view knob); explicit for the typed parse
+	payload["render"]		= Json::nullValue;
+	payload["edit"]			= editOp;
+
+	Json::Value datasetIds(Json::arrayValue);
+	datasetIds.append(datasetId.toStdString());
+
+	Json::Value work(Json::objectValue);
+	work["v"]			= 1;
+	work["type"]		= "work";
+	work["revision"]	= Json::UInt64(baseRevision);
+	work["dataset_ids"]	= datasetIds;
+	work["kind"]		= "data";
+	work["payload"]	= payload;
+
+	return submit(work, std::move(handler), tail);
 }
 
 void JaspClient::abort(const std::string & workId)
@@ -391,6 +431,9 @@ void JaspClient::handleMessage(const QByteArray & body)
 		result.rowCount			= payload.get("row_count", 0).asUInt64();
 		result.truncated		= payload.get("truncated", false).asBool();
 		result.binary			= binary;
+		// data_edit additions (§5/D10): the inverse meta rides the payload; the IPC bytes ride the
+		// frame tail (= `binary`). Stored verbatim by the undo command, never interpreted here.
+		result.inverseMeta		= payload.get("inverse", Json::nullValue);
 	}
 	if (result.message.empty())
 		result.message = env.get("message", "").asString();
@@ -425,7 +468,7 @@ ModuleCatalog JaspClient::parseCatalog(const Json::Value & modulesJson)
 	return catalog;
 }
 
-void JaspClient::sendFrame(const Json::Value & envelope)
+void JaspClient::sendFrame(const Json::Value & envelope, const QByteArray & binary)
 {
 	logIo("TX", envelope);
 
@@ -436,7 +479,7 @@ void JaspClient::sendFrame(const Json::Value & envelope)
 		return;
 	}
 
-	QByteArray frame	= frameEnvelope(envelope);
+	QByteArray frame	= frameEnvelope(envelope, binary);
 	const int		 rv		= nng_send(_socket, frame.data(), static_cast<size_t>(frame.size()), 0);
 	if (rv != 0)
 		Log::log() << "JaspClient: send failed: " << nng_strerror(rv) << std::endl;
@@ -444,19 +487,21 @@ void JaspClient::sendFrame(const Json::Value & envelope)
 
 // ── framing (§18.1) ──────────────────────────────────────────────
 
-QByteArray JaspClient::frameEnvelope(const Json::Value & env)
+QByteArray JaspClient::frameEnvelope(const Json::Value & env, const QByteArray & binary)
 {
 	const std::string json	= env.toStyledString();
 	const quint32		len	= static_cast<quint32>(json.size());
 
 	QByteArray frame;
-	frame.resize(static_cast<int>(4 + json.size()));
+	frame.resize(static_cast<int>(4 + json.size() + binary.size()));
 	char * d = frame.data();
 	d[0] = static_cast<char>((len >> 24) & 0xff);
 	d[1] = static_cast<char>((len >> 16) & 0xff);
 	d[2] = static_cast<char>((len >> 8)  & 0xff);
 	d[3] = static_cast<char>( len        & 0xff);
 	std::memcpy(d + 4, json.data(), json.size());
+	if (!binary.isEmpty())
+		std::memcpy(d + 4 + json.size(), binary.constData(), size_t(binary.size()));
 	return frame;
 }
 

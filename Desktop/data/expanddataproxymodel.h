@@ -64,7 +64,13 @@ protected:
 	const int	EXTRA_ROWS				= 20;
 
 private:
-	void						connectUndoStack();
+	void					connectUndoStack();
+
+	/// The NEO GridModel source's SHOWN dataset, when the source is a GridModel holding a
+	/// LIVE (open) dataset — nullptr for a legacy DataSetTableModel source or nothing shown.
+	/// The edit surface's gate: legacy edits flow through dataSetSourceModel(), NEO edits
+	/// through this — both funnel into commands on the same stack.
+	DataSet			*	gridSourceDataSet() const;
 
 	// Convert a shown (filtered/compacted) index into the raw DataSet index for that dimension.
 	// Indexes past the shown region map to the end of the raw table (for appends).

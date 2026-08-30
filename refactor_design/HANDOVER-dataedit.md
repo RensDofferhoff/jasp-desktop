@@ -17,14 +17,14 @@ clean on both bins. Release binaries rebuilt WITH d8.
 
 - **Resume pointer**: everything through **d8** is landed and green (146 tests, real
   sockets; release binaries current) — the lane ADVERTISES `data_edit` and the e2e
-  crown proves the full rail. The Rust side of the data-edit era is DONE. **(c) is now
-  DONE too** (2026-08-29): five `applyRevision` scenarios in `Tests/testall.*`
-  (§1c below). Next: **(e)** — the frontend seam (HANDOVER-multidataset-fold §3
-  checklist: proxy `setData` → commit-boundary batching → `QUndoCommand{opSubmitted,
-  inverse}` stack, `ItemIsEditable` flip, un-stub `toggleColType`/`setColumnName`,
-  dynamic `GridModel::rowCount`, the ~250MB undo-stack cap). Environment note:
-  ipc-dependent Rust suites need `unsandboxed` runs in this dev sandbox (the user
-  grants it); the C++ suite has PRE-EXISTING environment breakage (§5).
+  crown proves the full rail. **(c) is DONE** (five `applyRevision` scenarios in
+  `Tests/testall.*`). **(e)'s first UI slice is LANDED** (2026-08-29, §1e): cell edits +
+  paste + Ctrl+Z run end-to-end through the real UI — `DataEditCommand` + the client's
+  edit vocabulary (`Desktop/jaspclient/dataedit.*`), outbound frame tails, and the
+  proxy/GridModel editable surface. Remaining (e) slices: `toggleColType`/
+  `setColumnName` un-stubs (schema_change), row/col structural commands, the ~250MB
+  undo-stack cap, range-aware invalidation. Environment note: ipc-dependent Rust suites
+  need `unsandboxed`; the C++ suite's PRE-EXISTING breakage is §5.
 - `data-edit-design.md` — the contract. §2 wire shape, §3 ops + atomicity, §4 type/label
   resolution, §5 undo, §6 `data_changed` + build order, §10 lane notes.
 - `data-view-format.md` §1.2 — the TSV grammar (escape INTO and now parse BACK from).
@@ -494,6 +494,51 @@ advertise honestly.
   `scale` entry on it is a covered type-change → P13 refusal (the first draft of the
   crown hit it; the refusal message was exactly right).
 - Tests: +1 e2e (11 total). Suite: 146 green.
+
+### (e) The frontend seam — slice 1: cell edits, paste, and Ctrl+Z live in the UI
+
+The wire vocabulary lives with the client (the architecture rule: the rest of the
+frontend never sees a wire format) — `Desktop/jaspclient/dataedit.{h,cpp}`:
+
+- **`DataEdit::` builders**: `insertBlockOp(row, col)` (undeclared — D4's absent path,
+  absorption/promotion), `applyInverseOp(meta)`, `escapeCell` (§1.2's mirror of
+  `DataViewBuffer::unescapeCell`: `\\`/`\t`/`\n`/`\r`, `\N` for null cells, an empty
+  string stays empty — the lane's null spellings null it, I3), `tsvFromCells`
+  ([col][row] rectangle → tab-separated, LF-terminated rows).
+- **`DataEditCommand : UndoModelCommand`** — ONE command wraps ONE wire edit.
+  `redo()` SUBMITS the op (`revision = laneRevision()` read at call time — D11);
+  the result's inverse (`Result.inverseMeta` + the frame-tail bytes) is stored
+  VERBATIM (D10); `undo()` resubmits it via `apply_inverse`. Redo re-submits the OP
+  (the design's pin — sound under strict LIFO, and the stored blob stays the one
+  thing undo ever needs: undo→redo→undo reuses the ORIGINAL blob every time).
+  Failures log loudly (v1 surfacing); a refused edit changed nothing (§3 atomicity).
+- **`JaspClient`**: `submit(work, handler, binary)` — outbound frame tails (§18.1,
+  the mirror of the result-tail path); `submitDataEdit(datasetId, baseRevision, op,
+  tail, handler)` builds the envelope (ViewFiller's data_view shape with `op
+  data_edit` + the adjacently-tagged edit; ingest carries the system decimal only
+  when comma — the lane default is `.`); `Result.inverseMeta` parsed beside the
+  existing tail handling.
+- **The surface**: `GridModel::flags` gains `ItemIsEditable` when the dataset
+  `isOpen()` (+ a public `dataSet()` accessor); `ExpandDataProxyModel` — the editing
+  gate becomes "legacy source OR live NEO dataset" (`gridSourceDataSet()`), `setData`
+  builds ONE 1×1 `insert_block` per commit boundary, `pasteSpreadsheet`'s NEO branch
+  (previously a silent drop!) builds ONE `insert_block` over the whole rectangle —
+  identity mapping (the NEO view has no filter compaction; an anchor past the extent
+  GROWS the dataset remotely — `data_changed` restarts the view, no local resize).
+  Labels/colNames are deliberately not this op's business (the label editor /
+  header-rename surfaces own them).
+- **The loop as it runs**: type/paste → proxy command → `JaspClient::submitDataEdit`
+  → lane applies → result (D6-stripped) files the inverse in the command →
+  `data_changed` → `applyRevision` (the (c)-tested contract) → `schemaChanged` →
+  GridModel restarts the view at the new revision (the v1 whole-buffer drop).
+  Ctrl+Z → `undo()` → `apply_inverse` with the stored blob → same return leg.
+- Validation: JASPDesktopLib + JASP app build clean; the runnable JASPTest set
+  (15: savLabels + 7 syncer + 5 lane scenarios) green with the new code linked in.
+  The interactive UI smoke test (open a CSV, type in a cell, Ctrl+Z) is the user's
+  manual step — the rail beneath it is the Rust e2e crown's proven path.
+- NOT yet (later slices): `toggleColType`/`setColumnName` un-stubs (schema_change),
+  row/col insert-delete gestures → their ops, the ~250MB byte-based undo-stack cap,
+  range-aware invalidation, the paste dialog's `target_schema` declarations.
 
 ### (c) The C++ harness scenarios — `applyRevision`'s contract pinned
 
