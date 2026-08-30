@@ -1356,5 +1356,210 @@ bool TestAll::_checkDoSyncFake()
 	return true;
 }
 
+// ---------- Lane data_changed / applyRevision scenarios (data-edit-design §6) ----------
+
+// Wire-schema builders for the scenarios below — the lane's column-info JSON exactly as
+// column_info_json emits it (name / type / levels).
+static Json::Value laneColumn(const std::string & name, const std::string & type, std::initializer_list<const char *> levels = {})
+{
+	Json::Value col;
+	col["name"]	= name;
+	col["type"]	= type;
+	if (levels.size())
+	{
+		col["levels"] = Json::Value(Json::arrayValue);
+		for (const char * level : levels)
+			col["levels"].append(level);
+	}
+	return col;
+}
+
+static Json::Value laneSchema(std::initializer_list<Json::Value> columns)
+{
+	Json::Value schema(Json::arrayValue);
+	for (const Json::Value & col : columns)
+		schema.append(col);
+	return schema;
+}
+
+DataSet * TestAll::_newLaneDataSet(const Json::Value & schema, uint64_t rows)
+{
+	if (_pkg)	delete _pkg;
+	_pkg = nullptr;
+
+	_pkg = new DataSetPackage(this);
+	DataSet * dataSet = _pkg->createDataSet();
+	dataSet->applySchema("ds-test-lane", rows, schema, "");
+	return dataSet;
+}
+
+void TestAll::testLaneRevisionLandsRowsAndSchema()
+{
+	const Json::Value schemaA = laneSchema({
+		laneColumn("score", "scale"),
+		laneColumn("group", "nominal", {"A", "B"}),
+	});
+	DataSet * dataSet = _newLaneDataSet(schemaA, 3);
+
+	// The open landed: lane-bound, revision space at 0, schema + rows in place.
+	QVERIFY(dataSet->isOpen());
+	QCOMPARE(dataSet->datasetId(),		std::string("ds-test-lane"));
+	QCOMPARE(dataSet->laneRevision(),	uint64_t(0));
+	QCOMPARE(dataSet->schemaRows(),		uint64_t(3));
+	QCOMPARE(dataSet->schema().size(),	size_t(2));
+	QVERIFY(dataSet->schemaColumn("score") != nullptr);
+	QCOMPARE(int(dataSet->schemaColumn("score")->type),	int(columnType::scale));
+	QCOMPARE(int(dataSet->schemaColumn("group")->type),	int(columnType::nominal));
+	QCOMPARE(dataSet->schemaColumn("group")->levels.size(),	size_t(2));	// levels verbatim from the wire
+
+	QSignalSpy restarts(dataSet, &DataSet::schemaChanged);
+	QCOMPARE(restarts.count(), 0);
+
+	// A schema-carrying push (a paste that absorbed a level): revision adopts, the new
+	// levels land, and the restart signal fires — that is where GridModel restarts the
+	// view lane at the new revision (the v1 whole-buffer drop).
+	Json::Value schemaB = laneSchema({
+		laneColumn("score", "scale"),
+		laneColumn("group", "nominal", {"A", "B", "C"}),
+	});
+	Json::Value allInvalidation;
+	allInvalidation["all"] = true;
+	dataSet->applyRevision(1, 3, true, schemaB, allInvalidation);
+	QCOMPARE(dataSet->laneRevision(),	uint64_t(1));
+	QCOMPARE(dataSet->schemaRows(),		uint64_t(3));
+	QCOMPARE(dataSet->schemaColumn("group")->levels.size(),	size_t(3));
+	QCOMPARE(restarts.count(), 1);
+
+	// A rows-only push (insert_rows: nulls move no count — §4, so the schema never ships):
+	// rows land, the schema stays the last-shipped one, and the restart still fires.
+	dataSet->applyRevision(2, 5, true, Json::Value(), Json::objectValue);
+	QCOMPARE(dataSet->laneRevision(),	uint64_t(2));
+	QCOMPARE(dataSet->schemaRows(),		uint64_t(5));
+	QCOMPARE(dataSet->schema().size(),	size_t(2));
+	QCOMPARE(restarts.count(), 2);
+}
+
+void TestAll::testLaneRevisionIgnoresStalePushes()
+{
+	DataSet * dataSet = _newLaneDataSet(laneSchema({
+		laneColumn("score", "scale"),
+		laneColumn("group", "nominal", {"A", "B"}),
+	}), 4);
+	dataSet->applyRevision(1, 4, true, Json::Value(), Json::objectValue);
+	dataSet->applyRevision(2, 4, true, Json::Value(), Json::objectValue);
+
+	QSignalSpy restarts(dataSet, &DataSet::schemaChanged);
+	QCOMPARE(restarts.count(), 0);	// revisions land silently through this spy (schemaChanged fires inside applyRevision)
+
+	// Replaying the CURRENT revision is a no-op (idempotent §6 ordering rule).
+	dataSet->applyRevision(2, 999, true, Json::Value(), Json::objectValue);
+	QCOMPARE(dataSet->laneRevision(),	uint64_t(2));
+	QCOMPARE(dataSet->schemaRows(),		uint64_t(4));
+	QCOMPARE(restarts.count(), 0);
+
+	// An OLDER push — even one carrying a whole new schema — is superseded state: ignored.
+	dataSet->applyRevision(1, 0, true, laneSchema({laneColumn("ghost", "scale")}), Json::objectValue);
+	QCOMPARE(dataSet->laneRevision(),	uint64_t(2));
+	QCOMPARE(dataSet->schemaRows(),		uint64_t(4));
+	QVERIFY(dataSet->schemaColumn("ghost") == nullptr);
+	QCOMPARE(restarts.count(), 0);
+
+	// A dataset with no lane identity (legacy imports never see a data_changed) takes no
+	// revisions at all. (Same package — a second DataSetPackage within one test would trip
+	// the DatabaseInterface singleton; the workspace holds multiple datasets fine.)
+	DataSet * legacy = _pkg->createDataSet();
+	legacy->applyRevision(1, 7, true, laneSchema({laneColumn("x", "scale")}), Json::objectValue);
+	QCOMPARE(legacy->laneRevision(),	uint64_t(0));
+	QCOMPARE(legacy->schemaRows(),		uint64_t(0));
+	QVERIFY(!legacy->isOpen());
+}
+
+void TestAll::testLaneRevisionSchemaSwap()
+{
+	DataSet * dataSet = _newLaneDataSet(laneSchema({
+		laneColumn("score", "scale"),
+		laneColumn("group", "nominal", {"A", "B"}),
+	}), 3);
+
+	// A schema_change lands as a data_changed carrying the FULL post-edit schema (P4: a
+	// rename derives a new field name; a retype flips the wire type; level lists arrive in
+	// the lane's declared order — the engine never re-sorts them).
+	Json::Value swapped = laneSchema({
+		laneColumn("score", "nominal", {"1.5", "2.5", "3.5"}),	// scale → nominal (a promotion)
+		laneColumn("condition", "nominal", {"B", "A"}),			// renamed + levels reordered
+	});
+	Json::Value allInvalidation;
+	allInvalidation["all"] = true;
+	dataSet->applyRevision(1, 3, true, swapped, allInvalidation);
+
+	QCOMPARE(dataSet->laneRevision(),				uint64_t(1));
+	QCOMPARE(dataSet->schema().size(),				size_t(2));
+	QVERIFY(dataSet->schemaColumn("group")		== nullptr);	// the old name is GONE from the schema
+	QVERIFY(dataSet->schemaColumn("condition")	!= nullptr);
+	QCOMPARE(int(dataSet->schemaColumn("score")->type), int(columnType::nominal));	// the retype landed
+	QCOMPARE(dataSet->schemaColumn("condition")->levels.size(), size_t(2));
+	QCOMPARE(dataSet->schemaColumn("condition")->levels.at(0), std::string("B"));	// wire order, verbatim
+	QCOMPARE(dataSet->schemaColumn("condition")->levels.at(1), std::string("A"));
+}
+
+void TestAll::testLaneRevisionRowGrowthWithoutSchema()
+{
+	DataSet * dataSet = _newLaneDataSet(laneSchema({
+		laneColumn("score", "scale"),
+		laneColumn("group", "nominal", {"A", "B"}),
+	}), 3);
+
+	// insert_rows' return leg: rows grow, the schema is ABSENT (nulls move no count — I7),
+	// and the invalidation descriptor is a plain rows_from.
+	QSignalSpy restarts(dataSet, &DataSet::schemaChanged);
+	Json::Value rowsFrom;
+	rowsFrom["rows_from"] = 3;
+	dataSet->applyRevision(1, 8, true, Json::Value(), rowsFrom);
+
+	QCOMPARE(dataSet->laneRevision(),	uint64_t(1));
+	QCOMPARE(dataSet->schemaRows(),		uint64_t(8));
+	QCOMPARE(dataSet->schema().size(),	size_t(2));	// the schema never shipped — the old one stands
+	QVERIFY(dataSet->schemaColumn("score") != nullptr);
+	QCOMPARE(restarts.count(), 1);
+
+	// A shrink (delete_rows) rides the same shape.
+	Json::Value rowsFrom2;
+	rowsFrom2["rows_from"] = 1;
+	dataSet->applyRevision(2, 2, true, Json::Value(), rowsFrom2);
+	QCOMPARE(dataSet->schemaRows(), uint64_t(2));
+	QCOMPARE(dataSet->schema().size(), size_t(2));
+}
+
+void TestAll::testLaneRevisionOutOfOrderPushes()
+{
+	DataSet * dataSet = _newLaneDataSet(laneSchema({
+		laneColumn("score", "scale"),
+	}), 3);
+	dataSet->applyRevision(1, 3, true, Json::Value(), Json::objectValue);
+
+	QSignalSpy restarts(dataSet, &DataSet::schemaChanged);
+
+	// A gap: revision 3 lands before 2 ever arrives (a dropped/delayed push). The
+	// high-water mark adopts 3 — the dataset is at state 3, which supersedes 2 anyway.
+	Json::Value schema3 = laneSchema({
+		laneColumn("score", "scale"),
+		laneColumn("late", "nominal", {"x"}),
+	});
+	dataSet->applyRevision(3, 6, true, schema3, Json::objectValue);
+	QCOMPARE(dataSet->laneRevision(),	uint64_t(3));
+	QCOMPARE(dataSet->schemaRows(),		uint64_t(6));
+	QVERIFY(dataSet->schemaColumn("late") != nullptr);
+	const int restartsAfter3 = restarts.count();
+	QCOMPARE(restartsAfter3, 1);
+
+	// The delayed revision-2 push now arrives: OLDER than the landed state — dropped,
+	// no matter what it carries (mid-fill interleaves resolve the same way: the stale
+	// push cannot resurrect superseded state).
+	dataSet->applyRevision(2, 42, true, laneSchema({laneColumn("ghost", "scale")}), Json::objectValue);
+	QCOMPARE(dataSet->laneRevision(),	uint64_t(3));
+	QCOMPARE(dataSet->schemaRows(),		uint64_t(6));
+	QVERIFY(dataSet->schemaColumn("ghost") == nullptr);
+	QCOMPARE(restarts.count(), restartsAfter3);
+}
 
 QTEST_MAIN(TestAll)

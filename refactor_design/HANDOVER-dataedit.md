@@ -7,7 +7,8 @@ plus **d1–d8** of the lane slicing — the edit family is COMPLETE and LIVE: a
 serve with their undo programs, `insert_block`'s declared `target_schema` (d6b, P13)
 round-trips, the lane ADVERTISES `data_edit` (d8), and the real-lane e2e crown proves
 the whole rail (edit → undo ×2 → redo, revisions 0→5, views at every state).
-Remaining: step **(e)** (the frontend seam) and step **(c)** (C++ harness scenarios).
+Remaining: step **(e)** (the frontend seam) — **(c)** (the C++ harness scenarios) is
+DONE: five `applyRevision` scenarios green in `JASPTest`.
 
 All Rust tests green on real sockets (146: 91 + 44 + 11) including the e2e suite; clippy
 clean on both bins. Release binaries rebuilt WITH d8.
@@ -16,15 +17,14 @@ clean on both bins. Release binaries rebuilt WITH d8.
 
 - **Resume pointer**: everything through **d8** is landed and green (146 tests, real
   sockets; release binaries current) — the lane ADVERTISES `data_edit` and the e2e
-  crown proves the full rail. The Rust side of the data-edit era is DONE. Next:
-  **(e)** — the frontend seam (HANDOVER-multidataset-fold §3 checklist: proxy `setData`
-  → commit-boundary batching → `QUndoCommand{opSubmitted, inverse}` stack,
-  `ItemIsEditable` flip, un-stub `toggleColType`/`setColumnName`, dynamic
-  `GridModel::rowCount`, the ~250MB undo-stack cap) and/or **(c)** — the C++ harness
-  scenarios against `applyRevision` (mid-fill invalidation, row growth, schema swap,
-  stale-view interleave, idempotent ignore + the schema-absent `data_changed` path).
-  Environment note: ipc-dependent suites need `unsandboxed` runs in this dev sandbox
-  (the user grants it).
+  crown proves the full rail. The Rust side of the data-edit era is DONE. **(c) is now
+  DONE too** (2026-08-29): five `applyRevision` scenarios in `Tests/testall.*`
+  (§1c below). Next: **(e)** — the frontend seam (HANDOVER-multidataset-fold §3
+  checklist: proxy `setData` → commit-boundary batching → `QUndoCommand{opSubmitted,
+  inverse}` stack, `ItemIsEditable` flip, un-stub `toggleColType`/`setColumnName`,
+  dynamic `GridModel::rowCount`, the ~250MB undo-stack cap). Environment note:
+  ipc-dependent Rust suites need `unsandboxed` runs in this dev sandbox (the user
+  grants it); the C++ suite has PRE-EXISTING environment breakage (§5).
 - `data-edit-design.md` — the contract. §2 wire shape, §3 ops + atomicity, §4 type/label
   resolution, §5 undo, §6 `data_changed` + build order, §10 lane notes.
 - `data-view-format.md` §1.2 — the TSV grammar (escape INTO and now parse BACK from).
@@ -495,6 +495,37 @@ advertise honestly.
   crown hit it; the refusal message was exactly right).
 - Tests: +1 e2e (11 total). Suite: 146 green.
 
+### (c) The C++ harness scenarios — `applyRevision`'s contract pinned
+
+Five slots in `Tests/testall.*` (after the syncer section), with a lane-bound fixture
+`_newLaneDataSet` (a fresh `DataSetPackage` + `applySchema` as the open result — no
+import) and wire-schema builders (`laneColumn`/`laneSchema` — the lane's column-info
+JSON shape exactly):
+
+- `testLaneRevisionLandsRowsAndSchema` — the base contract: the open lands
+  (isOpen/datasetId/revision-0/schema-verbatim-levels), a schema-carrying push adopts
+  the revision + new levels + fires `schemaChanged` (the GridModel restart hook), and
+  a rows-only push (I7 — the schema never ships) lands rows with the last schema
+  standing.
+- `testLaneRevisionIgnoresStalePushes` — the §6 ordering rule: replaying the current
+  revision is a no-op; an OLDER push is ignored EVEN schema-carrying; and a dataset
+  with no lane identity (legacy) takes no revisions at all.
+- `testLaneRevisionSchemaSwap` — a `schema_change` return leg: rename (old name GONE
+  from `schemaColumn`, new one present), retype (scale→nominal via the wire type),
+  levels VERBATIM in wire order (the engine never re-sorts — invariant 9 on the C++
+  side).
+- `testLaneRevisionRowGrowthWithoutSchema` — the row-op return leg: rows grow (3→8,
+  `{rows_from}`) and shrink with the schema intact both times.
+- `testLaneRevisionOutOfOrderPushes` — the stale-interleave: a gap (rev 3 lands
+  before 2) adopts the high-water mark; the late rev-2 push is dropped no matter what
+  it carries — mid-fill interleaves resolve identically at the DataSet level.
+
+**Harness gotchas pinned along the way**: (1) a SECOND `new DataSetPackage` within one
+  test trips `DatabaseInterface`'s `!_singleton` assert — the fixture reuses one
+  package (`createDataSet` twice on it; the workspace holds multiple datasets fine);
+  (2) `testall.h` is moc-compiled standalone — `Json::Value` in a signature needs a
+  forward declaration (`namespace Json { class Value; }`).
+
 ## 2. Decisions pinned during implementation (beyond D1–D11)
 
 | # | Decision | Why |
@@ -584,16 +615,23 @@ advertise honestly.
     relay, re-run `edit_undo_redo_crown_over_the_real_lane` — a dropped tail reads as
     "the edit block is empty" at the lane, silently degrading every edit.
 
-## 4. Next: (e) the frontend seam + (c) the C++ harness
+## 4. Next: (e) the frontend seam
 
-- **(e) — seam/surface (frontend)**: proxy `setData` → commit-boundary batching →
-  `QUndoCommand{opSubmitted, inverse}` → JaspClient submission (`redo()` submits the op,
-  `undo()` submits `apply_inverse` with the stored `(meta, bytes)` verbatim; no
-  `mergeWith`). HANDOVER-multidataset-fold §3 checklist: flip `ItemIsEditable` when
-  `isOpen()`, un-stub `toggleColType`/`setColumnName`, route cell edits. JaspClient needs
-  the inverse tail bytes on results (`Result.binary` already carries tails verbatim —
-  AND the work-send side must frame them; the Rust e2e's `edit_dataset` helper is the
-  reference shape).
+- **(c) is DONE** (§1c above — five green scenarios; the fixture vocabulary
+  (`laneSchema`/`laneColumn`/`_newLaneDataSet`) is reusable for (e)'s tests).
+- **(e) — seam/surface (frontend)**, in slices: **e1** JaspClient grows an OUTBOUND
+  binary tail (`sendFrame`/`frameEnvelope` are JSON-only today — edits submit §1.2 TSV
+  cells, `apply_inverse` submits IPC bytes; `Result.binary` already carries INBOUND
+  tails — the Rust e2e's `edit_dataset` helper is the reference framing); **e2** the
+  submission layer (typed `data_edit` envelopes, `revision = laneRevision()` — the D11
+  echo; `Result` gains the inverse fields, stored verbatim per D10); **e3** the
+  QUndoCommand marriage (`redo()` SUBMITS, `undo()` submits `apply_inverse` with the
+  stored (meta, bytes) verbatim, NO `mergeWith` — coalescing at commit boundaries: one
+  paste = one `insert_block`; the ~250MB byte-based stack cap); **e4** the surface flip
+  (`ExpandDataProxyModel::flags` gates on `isOpen()` not legacy-source;
+  un-stub `GridModel::toggleColType`/`setColumnName` → `schema_change`); **e5** model
+  dynamics (rowsInserted/rowsRemoved instead of the whole-model restart — v1 may keep
+  the documented drop).
 - **(e) — seam/surface (frontend)**: proxy `setData` → commit-boundary batching →
   `QUndoCommand{opSubmitted, inverse}` → JaspClient submission (`redo()` submits the op,
   `undo()` submits `apply_inverse` with the stored `(meta, bytes)` verbatim; no
@@ -618,6 +656,15 @@ cargo run --bin jasp-orchestrator -- --schema > messages.schema.json   # regen a
 - 2026-08-29 (d8 session, unsandboxed): full suite green — 91 + 44 + 11 = 146 on real
   sockets; clippy clean; release binaries rebuilt WITH d8 (orchestrator included — the
   tail relay changed).
+- 2026-08-29 ((c) session): C++ `JASPTest` — the five new lane scenarios + sav-labels
+  + all seven syncer tests: **15 passed, 0 failed** (`QT_QPA_PLATFORM=offscreen` — no
+  xvfb on this box; `CCACHE_DISABLE=1 CCACHE_DIR=/tmp/ccache`, build dir
+  `build/Desktop_Qt_6_11_0-Debug`). **PRE-EXISTING environment breakage (verified on the
+  pristine pre-era tree `bfd42a515`): `testDataImport` CSV/TSV hardcoded-JSON
+  mismatches and `testJaspDataImport`/`testFilterLabels` crashing on a
+  `DatabaseInterface::dataSetName(-1)` assert** — the .jasp/DB-loading path is broken
+  in this environment, unrelated to the era. A full-suite run therefore ABORTS at
+  `testJaspDataImport`; run slots individually past it.
 - 2026-08-29 (d6b session, unsandboxed): full suite green — 91 + 44 + 10 = 145 on real
   sockets; clippy clean; release binaries rebuilt WITH d6b.
 - 2026-08-29 (d7b session, unsandboxed): full suite green again — 84 + 44 + 10 = 138 on
