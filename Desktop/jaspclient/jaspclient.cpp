@@ -303,11 +303,21 @@ void JaspClient::handleMessage(const QByteArray & body)
 	const std::string type = env.get("type", "").asString();
 
 	if (type == "data_changed")
-	{	// Dataset mutation broadcast (§19.2, data-view-design §6) — invalidation only; the
-		// frontend refetches via data_view. No producer yet (lands with data_edit/data_update);
-		// the signal exists so the reaction matrix can hook in.
-		emit datasetChanged(QString::fromStdString(env.get("dataset_id", "").asString()),
-							env.get("revision", 0).asUInt64());
+	{	// Dataset revision bump (data-edit-design §6, Increment 4): one uniform
+		// buffer-invalidation push for every revision bump, whatever caused it. It has no
+		// `work_id` — the completion-slot routing does not apply; consumers route by
+		// dataset_id (Workspace → DataSet::applyRevision). Rows is Option on the wire
+		// ("always" in practice — the lane knows the total post-apply); schema is present
+		// IFF it changed; the invalidation descriptor is always an object. `cause` is
+		// diagnostics-only — it rides the envelope (visible in JASP_CLIENT_LOG), never the API.
+		const Json::Value & rowsField = env["rows"];
+		const bool hasRows = rowsField.isNumeric();
+		emit dataChanged(QString::fromStdString(env.get("dataset_id", "").asString()),
+						 env.get("dataset_revision", 0).asUInt64(),
+						 hasRows ? rowsField.asUInt64() : 0,
+						 hasRows,
+						 env.get("schema", Json::nullValue),
+						 env.get("invalidation", Json::Value(Json::objectValue)));
 		return;
 	}
 

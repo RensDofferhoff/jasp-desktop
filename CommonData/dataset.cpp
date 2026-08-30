@@ -2250,6 +2250,14 @@ void DataSet::writeToOStream(std::ostream & out, bool includeComputed)
 void DataSet::applySchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema, const std::string & sourcePath)
 {
 	_laneDatasetId	= datasetId;
+	_laneRevision	= 0;		// a fresh identity starts a fresh revision space (the initial open is revision 0)
+	landWireSchema(datasetId, rows, schema);
+}
+
+/// The shared landing of a wire schema (open via applySchema, revision bump via applyRevision)
+/// — see the header for the contract.
+void DataSet::landWireSchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema)
+{
 	_schemaRows		= rows;
 	_schemaColumns.clear();
 	_schemaColumnIndex.clear();
@@ -2303,6 +2311,38 @@ void DataSet::applySchema(const std::string & datasetId, uint64_t rows, const Js
 
 	Log::log() << "DataSet: lane schema applied for " << datasetId << " (" << rows << " rows, " << _schemaColumns.size() << " columns)" << std::endl;
 	emit schemaChanged();
+}
+
+void DataSet::applyRevision(uint64_t revision, uint64_t rows, bool hasRows, const Json::Value & schema, const Json::Value & invalidation)
+{
+	// §6 ordering rule: per-dataset pushes arrive in revision order; `revision ≤ current`
+	// is a stale/replayed push — ignore (idempotent). And only a lane-bound dataset takes
+	// revisions at all (legacy imports never see a data_changed).
+	if (_laneDatasetId.empty() || revision <= _laneRevision)
+		return;
+
+	_laneRevision = revision;
+
+	// v1 whole-buffer semantics (§6 + §11 open item 2): the invalidation descriptor is
+	// accepted but not range-applied — schemaChanged restarts the view lane, which drops
+	// the whole buffer and refetches at the new revision (sliding mode makes the urgent
+	// viewport refetch cheap). Range-aware invalidation replaces the restart later, in the
+	// same slot, without touching a single caller.
+	if (schema.isArray() && !schema.empty())
+		landWireSchema(_laneDatasetId, hasRows ? rows : _schemaRows, schema);	// schema-iff-changed (the lane decides)
+	else
+	{
+		if (hasRows)
+			_schemaRows = rows;
+		setRowCount(size_t(_schemaRows), false);	// metadata only
+		Json::StreamWriterBuilder w;
+		w["indentation"] = "";
+		Log::log() << "DataSet: lane revision " << revision << " for " << _laneDatasetId
+				   << " (" << _schemaRows << " rows; invalidation "
+				   << (invalidation.isObject() ? Json::writeString(w, invalidation) : std::string("{}"))
+				   << ")" << std::endl;
+		emit schemaChanged();	// rows/revision refreshed — GridModel restarts the view lane at the new identity
+	}
 }
 
 const ColumnInfo * DataSet::schemaColumnAt(size_t index) const

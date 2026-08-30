@@ -23,9 +23,11 @@
 //! * `AnalysisResult.results` is deliberately an opaque `serde_json::Value`: the orchestrator
 //!   forwards the jaspResults tree verbatim and never interprets it.
 //!
-//! Only the messages the alpha needs are fleshed out; the rest of the catalog (data_edit,
-//! dataset_close, data_changed, form_reload, …) follows the identical pattern — one variant +
-//! one struct each.
+//! Only the messages the alpha needs are fleshed out; the rest of the catalog (data_close,
+//! data_update, form_reload, …) follows the identical pattern — one variant + one struct
+//! each. `data_changed` (data-edit-design §6) IS fleshed out: the Increment-4 return leg,
+//! broadcast by the orchestrator at every dataset revision bump. The `data_edit` op family
+//! (§2–§3) is typed too: `DataWork::edit` + `DataResult::inverse`.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -104,6 +106,8 @@ pub enum Message {
     Deregister(Deregister),
     ListModules,
     Modules(ModulesMsg),
+    /// Unsolicited dataset-revision push on the data channel (data-edit-design §6).
+    DataChanged(DataChanged),
     // The remaining catalog messages are added the same way: one variant + one struct each.
 }
 
@@ -182,6 +186,77 @@ pub struct DataWork {
     /// Absent = lane default: `.` decimal, no grouping, precision 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<ViewRender>,
+
+    // ── data_edit additions (data-edit-design §2–§3) ──
+    /// Present iff `op` is `data_edit`: the adjacently-nested edit operation. Defaults keep
+    /// the `data_open`/`data_view` shapes valid (the established pattern — `row_offset`/
+    /// `render` ride the same way). The block's forward cells ride the frame's binary part
+    /// in the §1.2 TSV grammar; for `apply_inverse` the tail is the inverse's Arrow-IPC bytes.
+    /// Boxed: the op family is bigger than the rest of the work combined, and only `data_edit`
+    /// ever carries it — open/view works shouldn't pay its size on every clone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit: Option<Box<EditOp>>,
+}
+
+/// One edit operation inside a `data_edit` work unit (data-edit-design §3), internally
+/// tagged by `op`. The op set (v1): `insert_block`, `insert_rows`, `insert_cols`,
+/// `delete_rows`, `delete_cols`, `schema_change`, plus `apply_inverse` — the undo/redo entry
+/// point (§5), not user-facing.
+///
+/// Semantics in one line each: `insert_block` = paste (overwrite/expand, holes → null,
+/// anchor may name not-yet-existing rows/cols); `insert_rows`/`insert_cols` = shift down/
+/// right with null fill; `delete_rows`/`delete_cols` = shift up/left; `schema_change` =
+/// metadata ONLY (rename, retype, levels, column order) — never the column set or row count,
+/// so there is exactly one way to say "add a column".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum EditOp {
+    /// Paste at anchor `(row, col)`; the cells ride the frame's binary part (§1.2 TSV).
+    /// Overwrites covered cells; the extent grows to `max(current, anchor + shape)`; holes
+    /// → null; overflow columns are created (inferred per D5 unless declared, named per
+    /// `jasp_column_names`, overridable via `target_schema`).
+    InsertBlock {
+        row: u64,
+        col: u64,
+        /// The declarative postcondition (D4): absent/null → the lane recomputes
+        /// (absorption/promotion, §4); present → adhere-or-error (`schema_mismatch`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_schema: Option<Value>,
+    },
+    /// Shift rows down at `at` by `count`; null fill.
+    InsertRows { at: u64, count: u64 },
+    /// Shift rows up: removes `[at, at+count)`. `at+count ≤ rows` else `range` error.
+    DeleteRows { at: u64, count: u64 },
+    /// Insert columns at `at` (shift right). One entry per column — an open-schema column
+    /// spec; `type: null` (absent) = the lane infers (D5, the csv2arrow path).
+    InsertCols {
+        at: u64,
+        columns: Vec<NewColumnSpec>,
+    },
+    /// Shift left: removes `count` columns at `at`.
+    DeleteCols { at: u64, count: u64 },
+    /// Metadata only: rename, retype, set/reorder levels, reorder columns — the complete
+    /// post-edit column list as the frontend intends it. **Never changes the column set or
+    /// row count.**
+    SchemaChange { target_schema: Value },
+    /// Undo/redo entry point (§5): submits a previously returned inverse blob VERBATIM —
+    /// `inverse` echoes the result's meta; the blob's Arrow-IPC bytes ride the frame's
+    /// binary part. The lane validates (format known, embedded base revision acceptable)
+    /// and applies atomically; the result carries its own inverse (redo material) — symmetric.
+    ApplyInverse { inverse: InverseMeta },
+}
+
+/// One column of an `insert_cols` edit (data-edit-design §3): an open-schema entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct NewColumnSpec {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// `"scale" | "ordinal" | "nominal"`; absent/null = the lane infers (D5).
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub column_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<Vec<String>>,
 }
 
 /// Locale rendering spec for `data_view` requests (data-view-format.md §1.2): explicit
@@ -343,6 +418,134 @@ pub struct DataResult {
     /// Stopped at `max_bytes` before `row_limit`/end (lane, `data_view`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truncated: Option<bool>,
+
+    // ── data_edit additions (data-edit-design §2–§3) ──
+    /// The lane-computed invalidation descriptor of a completed edit — what `data_changed`
+    /// will tell every holder is stale (§6). Lane → orchestrator transport ONLY: the
+    /// orchestrator moves it into the broadcast and strips it from the forwarded result
+    /// (D6: results carry undo material; `data_changed` carries view-consistency material).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invalidation: Option<Invalidation>,
+    /// Structured detail iff `status` is `validationError` (§3): one entry per failing
+    /// rule, ≤10 example row indices each. Filled by the lane for edit validation failures;
+    /// by the orchestrator for the D11 `stale_edit` dispatch check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation: Option<Vec<ValidationIssue>>,
+    /// The undo material of a completed edit (D1/D10): the BLACK BOX. The `(meta, bytes)`
+    /// pair is ONE inseparable unit — this object plus the frame's Arrow-IPC binary tail.
+    /// The frontend stores it verbatim and resubmits it verbatim via `apply_inverse`; it
+    /// never interprets, merges, or serializes it. Only `format` may be observed (log/size).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inverse: Option<InverseMeta>,
+}
+
+/// The meta half of an inverse blob (data-edit-design §2, §5, D10). Lane-filled on the
+/// edit result; echoed verbatim by the frontend on `apply_inverse`. `base_revision` is the
+/// revision of the state the edit was computed against — lane-embedded provenance, checked
+/// defensively at apply time (the revision itself only ever climbs; §5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InverseMeta {
+    /// The only field the frontend may observe. v1: `"arrow_ipc_v1"` — old cells as
+    /// Arrow-IPC (LZ4_FRAME) in the frame's binary part. Future encodings (lane-side
+    /// tokens, overlay references) are new values in this slot — never a contract change.
+    pub format: String,
+    pub base_revision: u64,
+    /// The restore program (op kinds, anchors, old schema fragment) — lane internals,
+    /// non-contractual JSON.
+    pub ops: Value,
+}
+
+/// The §18.3 envelope `format` naming an inverse tail: Arrow-IPC, LZ4_FRAME — the same
+/// codec stack as the dataset caches (data-edit-design §10). Unused until the edit engine
+/// answers results (d3+), like `RECV_MAX_SIZE` before its consumer landed.
+#[allow(dead_code)]
+pub const FORMAT_ARROW_IPC: &str = "arrow/ipc";
+
+/// One validation failure on a `validationError` data result (data-edit-design §3). Codes:
+/// `anchor` | `range` | `coercion` | `level_unknown` | `level_in_use` | `schema_mismatch` |
+/// `stale_edit`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ValidationIssue {
+    /// Display name of the offending column; absent when the failure is not column-scoped
+    /// (e.g. `stale_edit`, a bad anchor).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<String>,
+    /// One of the codes above.
+    pub code: String,
+    /// Human-readable detail (frontend may surface verbatim).
+    pub message: String,
+    /// How many cells/rows failed (when countable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u64>,
+    /// ≤10 example row indices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<Vec<u64>>,
+}
+
+/// Which rows a `data_changed` invalidates (data-edit-design §6 — the descriptor is
+/// normative; whole-buffer drop is just the v1 frontend implementation). Exactly one of:
+///
+/// | wire shape | meaning |
+/// |---|---|
+/// | `{"rows_from": r}` | rows `r..` to the end — includes growth |
+/// | `{"rows_from": r, "rows_to": t}` | rows `r..t` (`rows_to` exclusive) |
+/// | `{"all": true}` | every row, and/or any column-set/order/type/value-levels change |
+/// | `{}` | schema-only (e.g. a rename): no row is stale, headers change via `schema` |
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Invalidation {
+    /// Present — and `true` — only for whole-dataset invalidation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub all: Option<bool>,
+    /// First stale row (inclusive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows_from: Option<u64>,
+    /// End of the stale range (EXCLUSIVE); only meaningful alongside `rows_from`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows_to: Option<u64>,
+}
+
+/// Why a `data_changed` fired — diagnostics only, never load-bearing (data-edit-design §6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeKind {
+    /// A user edit (the `data_edit` family, including `apply_inverse`).
+    Edit,
+    /// A derived-data recompute (`data_update`; future).
+    Derived,
+    /// External sync reached the cache (future; subsumes legacy DB-interval polling).
+    External,
+}
+
+/// The `cause` block of a `data_changed` (data-edit-design §6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DataChangedCause {
+    pub kind: ChangeKind,
+    /// The triggering work unit, when there was one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_id: Option<String>,
+}
+
+/// Orchestrator → Frontend: unsolicited push on the data channel (like `modules`) telling
+/// every holder of a dataset that its revision bumped (data-edit-design §6 — Increment 4,
+/// the prerequisite return leg of the edit era). One uniform buffer-invalidation path for
+/// every revision bump, whatever caused it. The lane computes the invalidation once; the
+/// orchestrator stamps identity and broadcasts. Frontend rule: per-dataset,
+/// `data_changed` arrives in revision order, after the triggering result, on the same
+/// channel; `revision ≤ current` → ignore (idempotent).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DataChanged {
+    pub dataset_id: String,
+    /// The NEW revision post-apply (edits stamp post-apply; views stamp at dispatch —
+    /// different semantics on `DataResult::dataset_revision`, documented there).
+    pub dataset_revision: u64,
+    /// The new row total — always carried in practice (the lane knows it post-apply).
+    pub rows: Option<u64>,
+    /// The canonical post-edit schema — present IFF the schema changed (the lane decides).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Value>,
+    /// Always present (possibly `{}` for a schema-only change).
+    pub invalidation: Invalidation,
+    pub cause: DataChangedCause,
 }
 
 /// Result lifecycle status (wire values are camelCase, matching the existing engine strings).
@@ -608,4 +811,272 @@ pub struct ModuleInfo {
     pub name: String,
     pub version: String,
     pub base_uri: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The four normative invalidation shapes (data-edit-design §6) serialize EXACTLY —
+    /// the frontend pattern-matches the descriptor's wire form, not just its semantics.
+    #[test]
+    fn invalidation_serializes_the_four_shapes() {
+        let none = Invalidation {
+            all: None,
+            rows_from: None,
+            rows_to: None,
+        };
+        assert_eq!(serde_json::to_string(&none).unwrap(), "{}");
+
+        let tail = Invalidation {
+            all: None,
+            rows_from: Some(1234),
+            rows_to: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&tail).unwrap(),
+            r#"{"rows_from":1234}"#
+        );
+
+        let range = Invalidation {
+            all: None,
+            rows_from: Some(1234),
+            rows_to: Some(1300),
+        };
+        assert_eq!(
+            serde_json::to_string(&range).unwrap(),
+            r#"{"rows_from":1234,"rows_to":1300}"#
+        );
+
+        let all = Invalidation {
+            all: Some(true),
+            rows_from: None,
+            rows_to: None,
+        };
+        assert_eq!(serde_json::to_string(&all).unwrap(), r#"{"all":true}"#);
+
+        // Round-trip: every shape parses back to itself.
+        for inv in [none, tail, range, all] {
+            let back: Invalidation =
+                serde_json::from_str(&serde_json::to_string(&inv).unwrap()).unwrap();
+            assert_eq!(back, inv);
+        }
+    }
+
+    /// `data_changed` rides the flattened envelope with the `type:"data_changed"` tag
+    /// (the internal tag on `Message`), and its fields land at the top level.
+    #[test]
+    fn data_changed_envelope_carries_the_wire_tag() {
+        let env = Envelope {
+            v: 1,
+            id: "orch-dchg-ds-4-7".to_string(),
+            reply_to: None,
+            session_id: Some("s-1".to_string()),
+            format: None,
+            ts: None,
+            body: Message::DataChanged(DataChanged {
+                dataset_id: "ds-4".to_string(),
+                dataset_revision: 7,
+                rows: Some(50001),
+                schema: None,
+                invalidation: Invalidation {
+                    all: None,
+                    rows_from: Some(1234),
+                    rows_to: None,
+                },
+                cause: DataChangedCause {
+                    kind: ChangeKind::Edit,
+                    work_id: Some("w-12".to_string()),
+                },
+            }),
+        };
+        let v: serde_json::Value = serde_json::to_value(&env).unwrap();
+        assert_eq!(v["type"], "data_changed");
+        assert_eq!(v["dataset_id"], "ds-4");
+        assert_eq!(v["dataset_revision"], 7);
+        assert_eq!(v["rows"], 50001);
+        assert_eq!(v["invalidation"], serde_json::json!({ "rows_from": 1234 }));
+        assert_eq!(
+            v["cause"],
+            serde_json::json!({ "kind": "edit", "work_id": "w-12" })
+        );
+        assert!(v.get("schema").is_none(), "schema absent IFF unchanged");
+
+        // Round-trip through the envelope: the frontend's parse path.
+        let json = serde_json::to_string(&env).unwrap();
+        let back: Envelope = serde_json::from_str(&json).unwrap();
+        match back.body {
+            Message::DataChanged(c) => {
+                assert_eq!(c.dataset_id, "ds-4");
+                assert_eq!(c.cause.kind, ChangeKind::Edit);
+            }
+            other => panic!("expected data_changed, got {other:?}"),
+        }
+    }
+
+    /// The `data_edit` op family round-trips through the envelope with the frozen wire
+    /// shape (data-edit-design §2–§3): `payload.edit` adjacently present, `op` tags
+    /// snake_case, `target_schema` absent when null (D4), and defaults keep the
+    /// open/view shapes valid (no `edit` key at all).
+    #[test]
+    fn edit_ops_round_trip_with_the_wire_shape() {
+        let mk = |edit: EditOp| Envelope {
+            v: 1,
+            id: "w-1".into(),
+            reply_to: None,
+            session_id: None,
+            format: None,
+            ts: None,
+            body: Message::Work(Work {
+                work_id: "w-1".into(),
+                revision: 6,
+                base_revision: None,
+                dataset_ids: vec!["ds-4".into()],
+                payload: WorkPayload::Data(DataWork {
+                    op: DataOp::Edit,
+                    source: String::new(),
+                    cache_path: String::new(),
+                    format: String::new(),
+                    ingest: Default::default(),
+                    row_offset: 0,
+                    row_limit: None,
+                    columns: None,
+                    max_bytes: VIEW_CHUNK_BYTES,
+                    render: None,
+                    edit: Some(Box::new(edit)),
+                }),
+            }),
+        };
+
+        // insert_block: anchor + absent target_schema (lane recomputes).
+        let block = EditOp::InsertBlock {
+            row: 1234,
+            col: 2,
+            target_schema: None,
+        };
+        let v: serde_json::Value = serde_json::to_value(mk(block.clone())).unwrap();
+        assert_eq!(v["payload"]["edit"]["op"], "insert_block");
+        assert_eq!(v["payload"]["edit"]["row"], 1234);
+        assert_eq!(v["payload"]["edit"]["col"], 2);
+        assert!(v["payload"]["edit"].get("target_schema").is_none());
+        let back: Envelope = serde_json::from_value(v).unwrap();
+        match back.body {
+            Message::Work(Work {
+                payload: WorkPayload::Data(d),
+                ..
+            }) => assert_eq!(d.edit, Some(Box::new(block))),
+            other => panic!("expected work, got {other:?}"),
+        }
+
+        // Every variant round-trips. (One deliberate normalization: an explicit
+        // `target_schema: null` parses as `None` — D4 defines absent ≡ null ≡ lane
+        // recomputes, so the two never need distinguishing on the Rust side either;
+        // the declared case is exercised by the engine tests' array schemas, d3+.)
+        let variants = vec![
+            EditOp::InsertBlock {
+                row: 0,
+                col: 0,
+                target_schema: None,
+            },
+            EditOp::InsertRows { at: 10, count: 5 },
+            EditOp::DeleteRows { at: 10, count: 5 },
+            EditOp::InsertCols {
+                at: 1,
+                columns: vec![NewColumnSpec {
+                    name: "score".into(),
+                    display_name: None,
+                    column_type: None, // D5: infer
+                    levels: None,
+                }],
+            },
+            EditOp::DeleteCols { at: 1, count: 2 },
+            EditOp::SchemaChange {
+                target_schema: Value::Null,
+            },
+            EditOp::ApplyInverse {
+                inverse: InverseMeta {
+                    format: "arrow_ipc_v1".into(),
+                    base_revision: 6,
+                    ops: Value::Null,
+                },
+            },
+        ];
+        for edit in variants {
+            let json = serde_json::to_string(&mk(edit.clone())).unwrap();
+            let back: Envelope = serde_json::from_str(&json).unwrap();
+            match back.body {
+                Message::Work(Work {
+                    payload: WorkPayload::Data(d),
+                    ..
+                }) => assert_eq!(d.edit, Some(Box::new(edit)), "round-trip broke for {json}"),
+                other => panic!("expected work, got {other:?}"),
+            }
+        }
+
+        // Defaults keep the open/view shapes valid: no `edit` key parses as None.
+        let open = r#"{"v":1,"id":"w-2","type":"work","work_id":"w-2","revision":0,
+            "dataset_ids":[],"kind":"data","payload":{"op":"data_open","source":"/a.csv",
+            "cache_path":"","format":"csv","ingest":{}}}"#;
+        let back: Envelope = serde_json::from_str(open).unwrap();
+        match back.body {
+            Message::Work(Work {
+                payload: WorkPayload::Data(d),
+                ..
+            }) => {
+                assert_eq!(d.op, DataOp::Open);
+                assert_eq!(d.edit, None, "absent edit must parse as None");
+            }
+            other => panic!("expected work, got {other:?}"),
+        }
+    }
+
+    /// The edit result's undo material: `inverse` rides the payload, the IPC bytes ride the
+    /// frame's binary tail (never JSON) — the meta alone must round-trip (D10).
+    #[test]
+    fn edit_result_carries_inverse_meta() {
+        let env = Envelope {
+            v: 1,
+            id: "r-1".into(),
+            reply_to: None,
+            session_id: None,
+            format: Some(FORMAT_ARROW_IPC.into()),
+            ts: None,
+            body: Message::Result(ResultMsg {
+                work_id: "w-1".into(),
+                revision: 6,
+                status: Status::Complete,
+                payload: ResultPayload::Data(DataResult {
+                    dataset_id: Some("ds-4".into()),
+                    dataset_revision: None,
+                    rows: None,
+                    schema: None,
+                    error_message: None,
+                    row_offset: None,
+                    row_count: None,
+                    truncated: None,
+                    invalidation: None,
+                    validation: None,
+                    inverse: Some(InverseMeta {
+                        format: "arrow_ipc_v1".into(),
+                        base_revision: 6,
+                        ops: serde_json::json!([{ "restore": "cells", "row": 1234 }]),
+                    }),
+                }),
+                module_version: None,
+                message: None,
+            }),
+        };
+        let v: serde_json::Value = serde_json::to_value(&env).unwrap();
+        assert_eq!(v["payload"]["inverse"]["format"], "arrow_ipc_v1");
+        assert_eq!(v["payload"]["inverse"]["base_revision"], 6);
+        assert_eq!(v["format"], FORMAT_ARROW_IPC);
+        let back: Envelope = serde_json::from_value(v).unwrap();
+        match back.body {
+            Message::Result(ResultMsg {
+                payload: ResultPayload::Data(d),
+                ..
+            }) => assert_eq!(d.inverse.unwrap().base_revision, 6),
+            other => panic!("expected result, got {other:?}"),
+        }
+    }
 }

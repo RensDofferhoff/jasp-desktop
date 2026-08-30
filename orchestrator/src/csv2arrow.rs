@@ -59,26 +59,26 @@ const MAX_BUILD_ROWS: usize = 1_000_000;
 /// bounded in memory; anything ever needing more gets HyperLogLog estimates, never unbounded
 /// sets. The inference cap is `max(threshold, DISTINCT_CAP) + 1`, so the scale/ordinal decision
 /// (which needs exactness ≤ threshold) stays correct for any threshold.
-const DISTINCT_CAP: usize = 1_000;
+pub(crate) const DISTINCT_CAP: usize = 1_000;
 /// Wire cap on the per-column `levels` array (data-model-design.md §2, decision 15): beyond
 /// this, levels are UI noise (nobody edits/enumerates 10k+ labels — the analysis itself reads
 /// the full dictionary from the Arrow cache in the runner). The schema ships the first
 /// WIRE_LEVELS_CAP entries in dictionary order and `distinct_count` (always exact for
 /// categoricals) stays the single source of truth for counts. The Arrow dictionary itself is
 /// NEVER truncated — every value needs its encoding entry.
-const WIRE_LEVELS_CAP: usize = 10_000;
+pub(crate) const WIRE_LEVELS_CAP: usize = 10_000;
 
 // ── Measurement-level inference (faithful port of column.cpp:setValues) ──────
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Level {
+pub(crate) enum Level {
     Scale,
     Ordinal,
     Nominal,
 }
 
 impl Level {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Level::Scale => "scale",
             Level::Ordinal => "ordinal",
@@ -88,21 +88,21 @@ impl Level {
 }
 
 #[derive(Default)]
-struct ColStats {
-    only_ints: bool,
-    only_doubles: bool,
+pub(crate) struct ColStats {
+    pub(crate) only_ints: bool,
+    pub(crate) only_doubles: bool,
     /// Distinct values in first-appearance order (IndexSet: ordered + O(1) dedup, one copy of
     /// each string). Numeric columns cap this at `max(threshold, DISTINCT_CAP) + 1`: exactness
     /// up to `threshold` drives the scale/ordinal decision; the headroom to DISTINCT_CAP feeds
     /// the schema's `distinct_count` (data-model-design.md §2). Text columns keep it in full —
     /// it *is* the categorical's dictionary.
-    distinct: IndexSet<String>,
-    capped: bool,
-    count: usize,
+    pub(crate) distinct: IndexSet<String>,
+    pub(crate) capped: bool,
+    pub(crate) count: usize,
 }
 
 impl ColStats {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         ColStats {
             only_ints: true,
             only_doubles: true,
@@ -110,7 +110,7 @@ impl ColStats {
         }
     }
 
-    fn observe(&mut self, v: &str, cap: usize, locale: Locale) {
+    pub(crate) fn observe(&mut self, v: &str, cap: usize, locale: Locale) {
         self.count += 1;
         let (is_int, is_dbl) = if !locale.active {
             // Fast path: strict Rust parses.
@@ -166,7 +166,7 @@ impl ColStats {
 /// The "threshold for scale" rule, transcribed from JASP `Column::setValues`: integer columns
 /// with ≤ threshold distinct are ordinal (2 → nominal); all-double columns are scale; text
 /// columns are nominal when ≤2 or > threshold distinct, else ordinal.
-fn decide(s: &ColStats, threshold: usize) -> Level {
+pub(crate) fn decide(s: &ColStats, threshold: usize) -> Level {
     let n = s.distinct.len();
     if s.count > 0 && s.only_ints && n > 0 && n <= threshold {
         return if n == 2 {
@@ -190,14 +190,14 @@ fn decide(s: &ColStats, threshold: usize) -> Level {
 /// Locale separators for numeric parsing. When `active` is false ('.' decimal, no thousands)
 /// the fast strict-parse path is used.
 #[derive(Clone, Copy)]
-struct Locale {
-    dec: char,
-    thou: Option<char>,
-    active: bool,
+pub(crate) struct Locale {
+    pub(crate) dec: char,
+    pub(crate) thou: Option<char>,
+    pub(crate) active: bool,
 }
 
 impl Locale {
-    fn new(dec: char, thou: Option<char>) -> Self {
+    pub(crate) fn new(dec: char, thou: Option<char>) -> Self {
         Locale {
             dec,
             thou,
@@ -212,7 +212,7 @@ impl Locale {
     /// Rewrite a locale-formatted number into canonical form. Trims surrounding whitespace and
     /// requires the *whole* trimmed cell to be numeric (so a text level like `"L0"` is never
     /// misread as 0); drops thousands separators, maps the decimal sep → '.'. `None` = text.
-    fn canonicalize(self, s: &str) -> Option<String> {
+    pub(crate) fn canonicalize(self, s: &str) -> Option<String> {
         let t = s.trim();
         if t.is_empty() {
             return None;
@@ -230,7 +230,7 @@ impl Locale {
         Some(out)
     }
 
-    fn parse_num(self, s: &str) -> Option<f64> {
+    pub(crate) fn parse_num(self, s: &str) -> Option<f64> {
         self.canonicalize(s)?.parse::<f64>().ok()
     }
 }
@@ -294,7 +294,7 @@ fn read_header_names(content: &str, delim: u8) -> Vec<String> {
 ///    are NOT renamed;
 /// 3. a duplicate (against the already-renamed earlier names) gets `_<1-based position>`
 ///    appended (single pass, as in the importer).
-fn jasp_column_names(names: &mut [String]) {
+pub(crate) fn jasp_column_names(names: &mut [String]) {
     for col_no in 0..names.len() {
         let name = std::mem::take(&mut names[col_no]);
         let mut renamed = if name.is_empty() {
@@ -424,12 +424,12 @@ fn drain_pending(
 
 /// A pre-built categorical dictionary, shared (same `Arc`) across every build batch so the IPC
 /// writer emits the dictionary once per field instead of rejecting a "dictionary replacement".
-struct CatDict {
-    values: ArrayRef,
+pub(crate) struct CatDict {
+    pub(crate) values: ArrayRef,
     /// dictionary value → index, for encoding each batch's cells.
-    index: HashMap<String, i32>,
+    pub(crate) index: HashMap<String, i32>,
     /// When true, canonicalize each raw cell (locale numeric categorical) before lookup.
-    canonicalize: bool,
+    pub(crate) canonicalize: bool,
 }
 
 /// Pre-build the shared dictionary for one categorical column from its merged distinct set,
@@ -437,7 +437,7 @@ struct CatDict {
 /// locale-active numeric categorical the dictionary holds *canonical* values. Value-sorts when
 /// the distinct set is ≤ `sort_limit` (JASP `labelsOrderByValue`); above that the sort is
 /// skipped (meaningless for near-unique columns) but the dictionary is always built.
-fn prebuild_dict(
+pub(crate) fn prebuild_dict(
     distinct: IndexSet<String>,
     canonicalize: bool,
     locale: Locale,
@@ -594,43 +594,254 @@ fn cast_batch_stream(
 
 // ── Output schema & writer (neo-jasp §8.3) ───────────────────────────────────
 
+/// Extend a categorical dictionary with new values in first-appearance order — absorption
+/// (data-edit-design §4 rule 1): unseen values append at the END (ordinal appends at end
+/// only; nominal first-appearance — for a single edit's incoming cells these coincide), seen
+/// values keep their index so existing keys stay valid. Returns a fresh shared dictionary
+/// for the rebuilt column's batches.
+pub(crate) fn append_levels(base: &CatDict, extra: impl Iterator<Item = String>) -> CatDict {
+    let mut values: Vec<String> = base
+        .values
+        .as_string::<i32>()
+        .iter()
+        .flatten()
+        .map(|s| s.to_string())
+        .collect();
+    let mut index: HashMap<String, i32> = base.index.clone();
+    for v in extra {
+        if !index.contains_key(&v) {
+            index.insert(v.clone(), values.len() as i32);
+            values.push(v);
+        }
+    }
+    CatDict {
+        values: Arc::new(StringArray::from(values)),
+        index,
+        canonicalize: base.canonicalize,
+    }
+}
+
+/// A dictionary from a DECLARED level list, verbatim in list order — no value-sort, no
+/// canonicalization: declared order is intent (an ordinal's level order IS its meaning;
+/// the label editor's list is what the user arranged). Callers validate duplicates before
+/// here — a declared list is authoritative, not inferred. `insert_cols` specs (d5) and
+/// declared `target_schema` levels (d6) both come here; inference never does.
+pub(crate) fn dict_from_list(levels: &[String]) -> CatDict {
+    let mut index: HashMap<String, i32> = HashMap::with_capacity(levels.len());
+    for (i, v) in levels.iter().enumerate() {
+        index.insert(v.clone(), i as i32);
+    }
+    CatDict {
+        values: Arc::new(StringArray::from(levels.to_vec())),
+        index,
+        canonicalize: false,
+    }
+}
+
+/// The single-new-column form of the [`jasp_column_names`] convention (same rules, one name
+/// joining an existing list): empty → `V<position>`, pure-integer → `V<name>`, a duplicate
+/// against the existing names → `_<position>` appended. `position` is the new column's
+/// 1-based position. The suffix LOOPS until genuinely free — the first candidate can
+/// itself be taken (an earlier insert already claimed `score_3`, columns shifted…), and a
+/// name generator that can emit a duplicate is a bug, not a convention. One convention,
+/// no copies — paste-overflow naming (§3) and `insert_cols` specs both come here.
+pub(crate) fn unique_new_name(existing: &[String], base: &str, position: usize) -> String {
+    let mut renamed = if base.is_empty() {
+        format!("V{position}")
+    } else if base.parse::<i64>().is_ok_and(|n| n.to_string() == base) {
+        format!("V{base}")
+    } else {
+        base.to_string()
+    };
+    if existing.contains(&renamed) {
+        let owned = renamed.clone();
+        let mut n = position;
+        while existing.contains(&renamed) {
+            renamed = format!("{owned}_{n}");
+            n += 1;
+        }
+    }
+    renamed
+}
+
+/// One decorated output field (neo-jasp §8.3): scale → Float64 (+ `jasp:all_integer` when
+/// hinted), categorical → Dictionary(Int32, Utf8) with the ordered flag carrying ordinal,
+/// plus the `jasp:*` metadata. Extracted from `build_output_schema` so the edit engine's
+/// rebuilt columns decorate identically — ONE rule, no copies.
+pub(crate) fn jasp_field(name: &str, display_name: &str, level: Level, all_integer: bool) -> Field {
+    let mut meta: Vec<(String, String)> =
+        vec![("jasp:display_name".into(), display_name.to_string())];
+    let f = match level {
+        Level::Scale => {
+            if all_integer {
+                meta.push(("jasp:all_integer".into(), "true".into()));
+            }
+            Field::new(name, DataType::Float64, true)
+        }
+        Level::Ordinal | Level::Nominal => {
+            meta.push(("jasp:auto_sort_by_value".into(), "true".into()));
+            Field::new(
+                name,
+                DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
+                true,
+            )
+            .with_dict_is_ordered(level == Level::Ordinal)
+        }
+    };
+    f.with_metadata(meta.into_iter().collect())
+}
+
+/// The inverse of [`jasp_field`]: read a cache column's measurement level back from its
+/// Arrow encoding (output contract §8.3): Float64 → Scale; Dictionary(Int32, Utf8) with
+/// the ordered flag → Ordinal, without → Nominal. `None` = not a v1 cache shape — the
+/// edit engine refuses such columns visibly rather than guessing.
+pub(crate) fn level_of_field(f: &Field) -> Option<Level> {
+    match f.data_type() {
+        DataType::Float64 => Some(Level::Scale),
+        DataType::Dictionary(k, v)
+            if matches!(**k, DataType::Int32) && matches!(**v, DataType::Utf8) =>
+        {
+            Some(if f.dict_is_ordered() == Some(true) {
+                Level::Ordinal
+            } else {
+                Level::Nominal
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Attach the `jasp:labels` overlay to a decorated field (neo-jasp.md §8: a SPARSE JSON
+/// value→display-label map; an entry only where label ≠ value — identity labels are
+/// ABSENT, which is why CSV-open caches never carry the key). One home beside
+/// [`jasp_field`]: field decoration never lives elsewhere. An empty map is a detach
+/// (relabelling back to identity removes the key — sparse).
+pub(crate) fn attach_labels(f: &mut Field, labels: &serde_json::Value) {
+    let mut meta = f.metadata().clone();
+    let empty = labels.as_object().is_none_or(|m| m.is_empty());
+    if empty {
+        meta.remove("jasp:labels");
+    } else {
+        meta.insert(
+            "jasp:labels".into(),
+            serde_json::to_string(labels).unwrap_or_default(),
+        );
+    }
+    f.set_metadata(meta);
+}
+
+/// Read a field's `jasp:labels` overlay back (present + non-empty), for the wire schema
+/// and the edit engine's inverse capture.
+pub(crate) fn labels_of_field(f: &Field) -> Option<serde_json::Value> {
+    let raw = f.metadata().get("jasp:labels")?;
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    (v.as_object().is_some_and(|m| !m.is_empty())).then_some(v)
+}
+
 /// Build the final decorated schema: scale→Float64, categorical→Dictionary<Int32,Utf8> with the
 /// ordered flag carrying ordinal-vs-nominal, plus the jasp:* field metadata.
 fn build_output_schema(names: &[String], levels: &[Level], stats: &[ColStats]) -> SchemaRef {
-    let mut fields: Vec<Field> = Vec::with_capacity(names.len());
-    for (i, name) in names.iter().enumerate() {
-        let mut meta: Vec<(String, String)> = vec![("jasp:display_name".into(), name.clone())];
-        let f = match levels[i] {
-            Level::Scale => {
-                if stats[i].only_ints {
-                    meta.push(("jasp:all_integer".into(), "true".into()));
-                }
-                Field::new(name, DataType::Float64, true)
-            }
-            Level::Ordinal | Level::Nominal => {
-                let ordered = levels[i] == Level::Ordinal;
-                meta.push(("jasp:auto_sort_by_value".into(), "true".into()));
-                Field::new(
-                    name,
-                    DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
-                    true,
-                )
-                .with_dict_is_ordered(ordered)
-            }
-        };
-        fields.push(f.with_metadata(meta.into_iter().collect()));
-    }
+    let fields: Vec<Field> = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| jasp_field(name, name, levels[i], stats[i].only_ints))
+        .collect();
     Arc::new(Schema::new(fields))
 }
 
+/// The effective null spellings for an ingest (the conversion's fallback applies when the
+/// caller left them empty) — shared by `convert` and the edit path's cell typing so the two
+/// can never disagree about what a missing cell looks like.
+pub(crate) fn null_spellings(ingest: &IngestParams) -> Vec<String> {
+    if ingest.nulls.is_empty() {
+        vec![String::new(), "NA".into(), "NaN".into()]
+    } else {
+        ingest.nulls.clone()
+    }
+}
+
+/// Rebuild the shared-dictionary handle from a cache column's already-materialized values
+/// (the edit path reads back the dictionary the conversion wrote). `canonicalize` is
+/// RE-DERIVED from content, matching the build rule exactly: a locale-active column whose
+/// every value parses as a number was canonicalized at conversion — and could not have
+/// been built raw, since all-numeric content under an active locale canonicalizes — so the
+/// round-trip is faithful without storing a flag in the file.
+pub(crate) fn cat_dict_from_values(values: ArrayRef, locale: Locale) -> CatDict {
+    let sa = values.as_string::<i32>();
+    let mut index: HashMap<String, i32> = HashMap::with_capacity(sa.len());
+    let mut all_numeric = true;
+    for (i, v) in sa.iter().enumerate() {
+        if let Some(v) = v {
+            index.insert(v.to_string(), i as i32);
+            if locale.active && locale.parse_num(v).is_none() {
+                all_numeric = false;
+            }
+        }
+    }
+    CatDict {
+        values,
+        index,
+        canonicalize: locale.active && all_numeric,
+    }
+}
+
+/// A categorical dictionary's count of DISTINCT NUMERIC levels — the one numeric-levels
+/// semantic, shared by the conversion's schema and the edit engine's post-edit schema.
+pub(crate) fn numeric_levels_of(cd: &CatDict, locale: Locale) -> u64 {
+    count_distinct_numbers(cd.values.as_string::<i32>().iter().flatten().map(|v| {
+        if cd.canonicalize {
+            v.parse::<f64>().ok() // canonical dictionary: plain '.' format
+        } else {
+            locale.parse_num(v) // raw dictionary: source-locale format
+        }
+    }))
+}
+
+/// One column's wire-schema JSON (the `kind:"data"` result shape, §19.2 / data-model-design
+/// §2) — the SINGLE mapping shared by the open result and the edit engine's post-edit schema
+/// so the two shapes can never drift.
+pub(crate) fn column_info_json(c: &ColumnInfo) -> serde_json::Value {
+    use serde_json::json;
+    let mut col = serde_json::Map::new();
+    col.insert("name".into(), json!(c.name));
+    col.insert("display_name".into(), json!(c.display_name));
+    col.insert("type".into(), json!(c.level));
+    if c.level == "scale" {
+        col.insert("all_integer".into(), json!(c.all_integer));
+    }
+    if let Some(levels) = &c.levels {
+        col.insert("levels".into(), json!(levels));
+    }
+    if let Some(labels) = &c.labels {
+        col.insert("labels".into(), json!(labels));
+    }
+    // Constraint-check stats (data-model-design.md §2): value_count = non-empty cell count
+    // (zero IS a value); distinct_count = distinct values, exact for categoricals and exact
+    // up to ~1k for scale (the cap value means "at least that many").
+    col.insert("value_count".into(), json!(c.value_count));
+    col.insert("distinct_count".into(), json!(c.distinct_count));
+    if let Some(nl) = c.numeric_levels {
+        col.insert("numeric_levels".into(), json!(nl));
+    }
+    serde_json::Value::Object(col)
+}
+
+/// Open an in-memory LZ4 IPC writer — the inverse blob's encoding (data-edit-design §10:
+/// the same codec stack as the caches; dictionary columns stay dictionary-typed).
+pub(crate) fn make_ipc_writer<W: std::io::Write>(
+    w: W,
+    schema: &SchemaRef,
+) -> Result<FileWriter<W>, Box<dyn std::error::Error>> {
+    let opts = IpcWriteOptions::default().try_with_compression(Some(CompressionType::LZ4_FRAME))?;
+    Ok(FileWriter::try_new_with_options(w, schema, opts)?)
+}
+
 /// Open the LZ4-compressed Feather (IPC file) writer.
-fn make_feather_writer(
+pub(crate) fn make_feather_writer(
     out: &str,
     schema: &SchemaRef,
 ) -> Result<FileWriter<File>, Box<dyn std::error::Error>> {
-    let file = File::create(out)?;
-    let opts = IpcWriteOptions::default().try_with_compression(Some(CompressionType::LZ4_FRAME))?;
-    Ok(FileWriter::try_new_with_options(file, schema, opts)?)
+    make_ipc_writer(File::create(out)?, schema)
 }
 
 // ── Result ────────────────────────────────────────────────────────────────────────────────
@@ -663,6 +874,11 @@ pub struct ColumnInfo {
     /// the parsed number (legacy doubleset semantics: "1.5"/"1.50" count once), non-finite
     /// excluded. The frontend never parses wire values (data-model-design.md §2).
     pub numeric_levels: Option<u64>,
+    /// Categoricals only: the `jasp:labels` overlay (neo-jasp.md §8) — a sparse JSON
+    /// value→display-label map, present IFF the field carries a non-empty one. The label
+    /// is what you READ (display, factor levels); the value is the data. Absent for every
+    /// identity-labelled column (CSV-open caches) — sparse serialization.
+    pub labels: Option<serde_json::Value>,
 }
 
 /// The lane's `{schema, rows}` reply payload.
@@ -677,7 +893,7 @@ pub struct ConvertOutput {
 /// Count distinct numeric values, deduping on the PARSED number — legacy doubleset semantics:
 /// "1.5"/"1.50" count once, ±0 unified, non-finite ("NaN"/"inf") excluded (data-model-design.md
 /// §2). Feeds both the scale `distinct_count` and the categorical `numeric_levels`.
-fn count_distinct_numbers(parsed: impl Iterator<Item = Option<f64>>) -> u64 {
+pub(crate) fn count_distinct_numbers(parsed: impl Iterator<Item = Option<f64>>) -> u64 {
     let mut seen: HashSet<u64> = HashSet::new();
     for f in parsed.flatten() {
         if f.is_finite() {
@@ -698,11 +914,7 @@ pub fn convert(
     let locale = Locale::new(ingest.decimal_sep, ingest.thousands_sep);
     let threshold = ingest.threshold;
     let sort_limit = ingest.sort_limit;
-    let nulls = if ingest.nulls.is_empty() {
-        vec![String::new(), "NA".into(), "NaN".into()]
-    } else {
-        ingest.nulls.clone()
-    };
+    let nulls = null_spellings(ingest);
 
     // Delimiter sniff + header from a small prefix; the whole file is never held.
     let head = read_head(source, 1 << 20)?;
@@ -847,15 +1059,9 @@ pub fn convert(
             // Distinct NUMERIC levels (data-model-design.md §2): canonical dictionaries parse
             // plain; raw dictionaries parse with the source locale. Dedupe on the parsed
             // number, exclude non-finite ("NaN"/"inf" cells are not numeric levels).
-            let numeric_levels = cat_dicts[i].as_ref().map(|cd| {
-                count_distinct_numbers(cd.values.as_string::<i32>().iter().flatten().map(|v| {
-                    if cd.canonicalize {
-                        v.parse::<f64>().ok() // canonical dictionary: plain '.' format
-                    } else {
-                        locale.parse_num(v) // raw dictionary: source-locale format
-                    }
-                }))
-            });
+            let numeric_levels = cat_dicts[i]
+                .as_ref()
+                .map(|cd| numeric_levels_of(cd, locale));
             ColumnInfo {
                 name: names[i].clone(),
                 display_name: names[i].clone(),
@@ -874,6 +1080,7 @@ pub fn convert(
                 },
                 numeric_levels,
                 levels: levels_values,
+                labels: None, // CSV open never creates value≠label data (sparse = absent)
             }
         })
         .collect();
@@ -914,6 +1121,94 @@ pub fn convert(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The single-new-column form must agree with the whole-header convention it came from
+    // (jasp_column_names): same three rules, applied to one name at a known position.
+    #[test]
+    fn unique_new_name_follows_the_importer_convention() {
+        let existing: Vec<String> = vec!["V1".into(), "cont".into(), "V3".into()];
+        // position 4 (1-based) — the next column after `existing`.
+        assert_eq!(unique_new_name(&existing, "", 4), "V4");
+        assert_eq!(unique_new_name(&existing, "score", 4), "score");
+        assert_eq!(unique_new_name(&existing, "5", 4), "V5");
+        assert_eq!(unique_new_name(&existing, "007", 4), "007"); // not pure-int
+        assert_eq!(unique_new_name(&existing, "cont", 4), "cont_4"); // duplicate
+        assert_eq!(unique_new_name(&existing, "V1", 4), "V1_4");
+    }
+
+    // Absorption (§4 rule 1): unseen values append at the end in first-appearance order;
+    // seen values keep their index so existing keys stay valid.
+    #[test]
+    fn append_levels_extends_in_first_appearance_order() {
+        let base = prebuild_dict(
+            ["a".to_string(), "b".to_string()].into_iter().collect(),
+            false,
+            Locale::new('.', None),
+            0, // sort_limit 0: never sort — deterministic order for the assertion
+        );
+        let ext = append_levels(
+            &base,
+            ["z".to_string(), "a".to_string(), "m".to_string()].into_iter(),
+        );
+        let values: Vec<String> = ext
+            .values
+            .as_string::<i32>()
+            .iter()
+            .flatten()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            values,
+            vec!["a", "b", "z", "m"],
+            "seen keeps index, new appends"
+        );
+        assert_eq!(ext.index["a"], 0);
+        assert_eq!(ext.index["z"], 2);
+        assert_eq!(ext.index["m"], 3);
+    }
+
+    // One decoration rule (§8.3): the ordered flag carries ordinal-vs-nominal, metadata
+    // keys are exactly the three jasp:* entries, scale carries all_integer only when true.
+    #[test]
+    fn jasp_field_decorates_the_output_contract() {
+        let s = jasp_field("x", "X disp", Level::Scale, true);
+        assert_eq!(s.data_type(), &DataType::Float64);
+        assert_eq!(
+            s.metadata().get("jasp:display_name").map(String::as_str),
+            Some("X disp")
+        );
+        assert_eq!(
+            s.metadata().get("jasp:all_integer").map(String::as_str),
+            Some("true")
+        );
+        assert!(s.metadata().get("jasp:auto_sort_by_value").is_none());
+
+        let n = jasp_field("g", "g", Level::Nominal, false);
+        assert!(matches!(n.data_type(), DataType::Dictionary(_, _)));
+        assert_eq!(n.dict_is_ordered(), Some(false));
+
+        let o = jasp_field("r", "r", Level::Ordinal, false);
+        assert_eq!(
+            o.dict_is_ordered(),
+            Some(true),
+            "the ordered flag IS the ordinal marker"
+        );
+
+        let plain = jasp_field("p", "p", Level::Scale, false);
+        assert!(plain.metadata().get("jasp:all_integer").is_none());
+
+        // The decoration round-trips: jasp_field → level_of_field is the identity for all
+        // three levels — the edit engine reads back exactly what the conversion wrote.
+        for level in [Level::Scale, Level::Ordinal, Level::Nominal] {
+            let f = jasp_field("x", "x", level, false);
+            assert_eq!(level_of_field(&f), Some(level));
+        }
+        assert_eq!(
+            level_of_field(&Field::new("i", DataType::Int64, true)),
+            None,
+            "a non-v1 cache shape has no level"
+        );
+    }
 
     // Column naming must match the GUI importer (csvimporter.cpp) exactly, because the
     // analysis side (read_jasp_data / tidyselect) references columns by these names.

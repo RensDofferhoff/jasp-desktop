@@ -1,7 +1,8 @@
 //! NEO JASP data-runner — the Rust data-plane lane.
 //!
-//! A self-attaching runner that advertises `Capability::Data { op: data_open, formats: ["csv"] }`
-//! plus `Capability::Data { op: data_view }` and serves both:
+//! A self-attaching runner that advertises `Capability::Data { op: data_open, formats: ["csv"] }`,
+//! `Capability::Data { op: data_view }`, and `Capability::Data { op: data_edit }` — serving
+//! all three:
 //!
 //! * `data_open` — converts the source CSV into a canonical Arrow Feather file at the
 //!   orchestrator-assigned `cache_path` (the `csv2arrow` production path, ported in
@@ -12,12 +13,17 @@
 //!   (`format:"text/tsv"`, §18.1). The lane contract relaxes to "a window-sized blob" for
 //!   this op only (dataset-manager-as-implemented §7); every response is bounded by the
 //!   request's `max_bytes` + a small envelope.
+//! * `data_edit` — the edit family's six ops + `apply_inverse` ([`dataedit`],
+//!   data-edit-design.md): the forward cells (§1.2 TSV) ride the frame tail in, the
+//!   inverse (meta + Arrow-IPC bytes) rides it out. Advertised since d8 — the family
+//!   serves completely (`serve()` has no refusals left); format-agnostic like view (it
+//!   reads the cache).
 //!
 //! Connection model (mirrors the R runner / §19.5): REQ dial on the control endpoint →
 //! `register` → `register_ack { channel_url }` → PAIR dial of the data channel → all work/result
 //! flows there.
 //!
-//! Scope: CSV open + views of any cache. No edits, no Arrow-native open, no R lane
+//! Scope: CSV open + views + edits of any cache. No Arrow-native open, no R lane
 //! (spss/excel) — later.
 //!
 //! Run: `JASP_ORCH_URL=tcp://127.0.0.1:9555 cargo run --bin jasp-data-runner`
@@ -26,6 +32,8 @@
 mod arrowview;
 #[path = "../csv2arrow.rs"]
 mod csv2arrow;
+#[path = "../dataedit.rs"]
+mod dataedit;
 #[path = "../messages.rs"]
 mod messages;
 
@@ -59,6 +67,12 @@ fn frame_envelope(env: &Envelope) -> Vec<u8> {
 }
 
 fn deframe(body: &[u8]) -> Option<Envelope> {
+    deframe_parts(body).map(|(env, _)| env)
+}
+
+/// Framing with the binary tail (§18.1) — the edit family's forward cells (§1.2 TSV) and
+/// inverse IPC bytes ride it, exactly like a view result's TSV.
+fn deframe_parts(body: &[u8]) -> Option<(Envelope, &[u8])> {
     if body.len() < 4 {
         return None;
     }
@@ -66,7 +80,8 @@ fn deframe(body: &[u8]) -> Option<Envelope> {
     if body.len() < 4 + len {
         return None;
     }
-    serde_json::from_slice(&body[4..4 + len]).ok()
+    let env = serde_json::from_slice(&body[4..4 + len]).ok()?;
+    Some((env, &body[4 + len..]))
 }
 
 // ─── Wire helpers ────────────────────────────────────────────────────────────
@@ -80,29 +95,7 @@ fn data_payload(out: &csv2arrow::ConvertOutput) -> messages::DataResult {
     let columns: Vec<serde_json::Value> = out
         .columns
         .iter()
-        .map(|c| {
-            let mut col = serde_json::Map::new();
-            col.insert("name".into(), json!(c.name));
-            col.insert("display_name".into(), json!(c.display_name));
-            col.insert("type".into(), json!(c.level));
-            if c.level == "scale" {
-                col.insert("all_integer".into(), json!(c.all_integer));
-            }
-            if let Some(levels) = &c.levels {
-                col.insert("levels".into(), json!(levels));
-            }
-            // Constraint-check stats (data-model-design.md §2): value_count = non-empty cell
-            // count (zero IS a value); distinct_count = distinct values, exact for categoricals
-            // and exact up to ~1k for scale (the cap value means "at least that many"). This
-            // serves every form constraint in the module registries — minLevels/maxLevels,
-            // minNumericLevels/maxNumericLevels, and the "maximum levels for scale" gate.
-            col.insert("value_count".into(), json!(c.value_count));
-            col.insert("distinct_count".into(), json!(c.distinct_count));
-            if let Some(nl) = c.numeric_levels {
-                col.insert("numeric_levels".into(), json!(nl));
-            }
-            serde_json::Value::Object(col)
-        })
+        .map(csv2arrow::column_info_json)
         .collect();
     messages::DataResult {
         dataset_id: None,
@@ -113,6 +106,9 @@ fn data_payload(out: &csv2arrow::ConvertOutput) -> messages::DataResult {
         row_offset: None,
         row_count: None,
         truncated: None,
+        invalidation: None,
+        validation: None,
+        inverse: None,
     }
 }
 
@@ -127,6 +123,9 @@ fn data_error(message: String) -> messages::DataResult {
         row_offset: None,
         row_count: None,
         truncated: None,
+        invalidation: None,
+        validation: None,
+        inverse: None,
     }
 }
 
@@ -184,6 +183,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     op: DataOp::View,
                     formats: None,
                 },
+                // The edit family (d8): complete (every op serves, every restore program
+                // lives), format-agnostic like view — it reads the pre-edit cache the
+                // orchestrator injects as `source` (P3).
+                Capability::Data {
+                    op: DataOp::Edit,
+                    formats: None,
+                },
             ],
             priority: 0,
             environment: json!(null),
@@ -203,7 +209,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         other => return Err(format!("expected register_ack, got {other:?}").into()),
     };
-    println!("[data] registered {runner_id} (data_open: csv, data_view) channel={channel_url}");
+    println!(
+        "[data] registered {runner_id} (data_open: csv, data_view, data_edit) channel={channel_url}"
+    );
 
     // 2. Dial the dedicated PAIR data channel; all work/result flows here.
     let ch = Socket::new(Protocol::Pair1)?;
@@ -242,10 +250,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
         };
-        let Some(env) = deframe(&raw[..]) else {
+        let Some((env, tail)) = deframe_parts(&raw[..]) else {
             eprintln!("[data] undecodable frame — skipping");
             continue;
         };
+        // The edit family's tail (forward §1.2 cells / inverse IPC bytes); empty elsewhere.
+        let tail = tail.to_vec();
         let Message::Work(w) = env.body else {
             println!("[data] ignoring non-work message {:?}", env.body);
             continue;
@@ -254,14 +264,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("[data] work_id={} is not data work — ignoring", w.work_id);
             continue;
         };
-        if d.op != DataOp::Open && d.op != DataOp::View {
+        if !matches!(d.op, DataOp::Open | DataOp::View | DataOp::Edit) {
             let reply = result_env(
                 env.session_id.clone(),
                 &w.work_id,
                 w.revision,
                 Status::FatalError,
                 data_error(format!(
-                    "this lane only serves data_open and data_view (got {:?})",
+                    "this lane only serves data_open, data_view and data_edit (got {:?})",
                     d.op
                 )),
             );
@@ -280,6 +290,111 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )),
             );
             let _ = ch.send(frame_envelope(&reply).as_slice());
+            continue;
+        }
+
+        // ── data_edit: dispatch to the edit engine (the family is under construction
+        // until d8 — every op currently answers a clear fatalError, and the capability is
+        // NOT advertised, so production work never routes here yet) ──
+        if d.op == DataOp::Edit {
+            let Some(edit) = d.edit.clone() else {
+                let reply = result_env(
+                    env.session_id.clone(),
+                    &w.work_id,
+                    w.revision,
+                    Status::FatalError,
+                    data_error("data_edit requires an edit (the op-family payload)".to_string()),
+                );
+                let _ = ch.send(frame_envelope(&reply).as_slice());
+                continue;
+            };
+            println!(
+                "[data] data_edit work_id={} source='{}' -> {} ({:?})",
+                w.work_id, d.source, d.cache_path, edit
+            );
+            let job = dataedit::EditJob {
+                source: d.source.clone(),
+                cache_path: d.cache_path.clone(),
+                ingest: d.ingest.clone(),
+                revision: w.revision,
+                edit: *edit,
+                tail,
+            };
+            let reply = match dataedit::serve(&job) {
+                Ok(out) => {
+                    // d3+: the complete edit result — identity stays lane-empty, the
+                    // orchestrator stamps it; view-consistency material moves into the
+                    // `data_changed` broadcast (D6); the inverse rides the binary tail.
+                    let mut env = result_env(
+                        env.session_id.clone(),
+                        &w.work_id,
+                        w.revision,
+                        Status::Complete,
+                        messages::DataResult {
+                            dataset_id: None,
+                            dataset_revision: None,
+                            rows: Some(out.rows),
+                            schema: out.schema,
+                            error_message: None,
+                            row_offset: None,
+                            row_count: None,
+                            truncated: None,
+                            invalidation: Some(out.invalidation),
+                            validation: None,
+                            inverse: out.inverse_meta,
+                        },
+                    );
+                    let frame = if out.inverse_bytes.is_empty() {
+                        frame_envelope(&env)
+                    } else {
+                        env.format = Some(messages::FORMAT_ARROW_IPC.to_string());
+                        frame_parts(
+                            &serde_json::to_vec(&env).expect("serialize edit result"),
+                            &out.inverse_bytes,
+                        )
+                    };
+                    if let Err(e) = ch.send(frame.as_slice()).map_err(|(_, e)| e) {
+                        eprintln!("[data] result send failed: {e} — exiting");
+                        return Ok(());
+                    }
+                    continue;
+                }
+                Err(dataedit::EditFailure::Validation(issues)) => result_env(
+                    env.session_id.clone(),
+                    &w.work_id,
+                    w.revision,
+                    Status::ValidationError,
+                    messages::DataResult {
+                        dataset_id: None,
+                        dataset_revision: None,
+                        rows: None,
+                        schema: None,
+                        error_message: Some(
+                            "the edit was refused — nothing was applied".to_string(),
+                        ),
+                        row_offset: None,
+                        row_count: None,
+                        truncated: None,
+                        invalidation: None,
+                        validation: Some(issues),
+                        inverse: None,
+                    },
+                ),
+                Err(dataedit::EditFailure::Fatal(m)) => result_env(
+                    env.session_id.clone(),
+                    &w.work_id,
+                    w.revision,
+                    Status::FatalError,
+                    data_error(m),
+                ),
+            };
+            if let Err(e) = ch
+                .send(frame_envelope(&reply).as_slice())
+                .map_err(|(_, e)| e)
+            {
+                eprintln!("[data] result send failed: {e} — exiting");
+                return Ok(());
+            }
             continue;
         }
 
@@ -324,6 +439,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 row_offset: Some(out.row_offset),
                                 row_count: Some(out.row_count),
                                 truncated: Some(out.truncated),
+                                invalidation: None,
+                                validation: None,
+                                inverse: None,
                             },
                         ),
                         out.tsv,

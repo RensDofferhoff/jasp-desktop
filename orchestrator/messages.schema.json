@@ -531,6 +531,57 @@
           ]
         }
       }
+    },
+    {
+      "description": "Unsolicited dataset-revision push on the data channel (data-edit-design §6).",
+      "type": "object",
+      "required": [
+        "cause",
+        "dataset_id",
+        "dataset_revision",
+        "invalidation",
+        "type"
+      ],
+      "properties": {
+        "cause": {
+          "$ref": "#/definitions/DataChangedCause"
+        },
+        "dataset_id": {
+          "type": "string"
+        },
+        "dataset_revision": {
+          "description": "The NEW revision post-apply (edits stamp post-apply; views stamp at dispatch — different semantics on `DataResult::dataset_revision`, documented there).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "invalidation": {
+          "description": "Always present (possibly `{}` for a schema-only change).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Invalidation"
+            }
+          ]
+        },
+        "rows": {
+          "description": "The new row total — always carried in practice (the lane knows it post-apply).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "schema": {
+          "description": "The canonical post-edit schema — present IFF the schema changed (the lane decides)."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "data_changed"
+          ]
+        }
+      }
     }
   ],
   "required": [
@@ -720,6 +771,51 @@
         }
       ]
     },
+    "ChangeKind": {
+      "description": "Why a `data_changed` fired — diagnostics only, never load-bearing (data-edit-design §6).",
+      "oneOf": [
+        {
+          "description": "A user edit (the `data_edit` family, including `apply_inverse`).",
+          "type": "string",
+          "enum": [
+            "edit"
+          ]
+        },
+        {
+          "description": "A derived-data recompute (`data_update`; future).",
+          "type": "string",
+          "enum": [
+            "derived"
+          ]
+        },
+        {
+          "description": "External sync reached the cache (future; subsumes legacy DB-interval polling).",
+          "type": "string",
+          "enum": [
+            "external"
+          ]
+        }
+      ]
+    },
+    "DataChangedCause": {
+      "description": "The `cause` block of a `data_changed` (data-edit-design §6).",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/ChangeKind"
+        },
+        "work_id": {
+          "description": "The triggering work unit, when there was one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
     "DataOp": {
       "description": "The data-plane operations — the `op` of a `data` capability (and of `data` work, §19.3).",
       "oneOf": [
@@ -768,6 +864,28 @@
             "null"
           ]
         },
+        "invalidation": {
+          "description": "The lane-computed invalidation descriptor of a completed edit — what `data_changed` will tell every holder is stale (§6). Lane → orchestrator transport ONLY: the orchestrator moves it into the broadcast and strips it from the forwarded result (D6: results carry undo material; `data_changed` carries view-consistency material).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Invalidation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inverse": {
+          "description": "The undo material of a completed edit (D1/D10): the BLACK BOX. The `(meta, bytes)` pair is ONE inseparable unit — this object plus the frame's Arrow-IPC binary tail. The frontend stores it verbatim and resubmits it verbatim via `apply_inverse`; it never interprets, merges, or serializes it. Only `format` may be observed (log/size).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InverseMeta"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "row_count": {
           "description": "Rows carried in the binary part (lane, `data_view`).",
           "type": [
@@ -804,6 +922,16 @@
             "boolean",
             "null"
           ]
+        },
+        "validation": {
+          "description": "Structured detail iff `status` is `validationError` (§3): one entry per failing rule, ≤10 example row indices each. Filled by the lane for edit validation failures; by the orchestrator for the D11 `stale_edit` dispatch check.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/ValidationIssue"
+          }
         }
       }
     },
@@ -831,6 +959,17 @@
           "items": {
             "type": "string"
           }
+        },
+        "edit": {
+          "description": "Present iff `op` is `data_edit`: the adjacently-nested edit operation. Defaults keep the `data_open`/`data_view` shapes valid (the established pattern — `row_offset`/ `render` ride the same way). The block's forward cells ride the frame's binary part in the §1.2 TSV grammar; for `apply_inverse` the tail is the inverse's Arrow-IPC bytes. Boxed: the op family is bigger than the rest of the work combined, and only `data_edit` ever carries it — open/view works shouldn't pay its size on every clone.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EditOp"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "format": {
           "description": "Routing key selecting the lane + parser (`\"csv\"`, later `\"spss\"`, `\"arrow\"`, …). Meaningful for `data_open`; `data_view` is format-agnostic (it reads the cache).",
@@ -892,6 +1031,186 @@
         }
       }
     },
+    "EditOp": {
+      "description": "One edit operation inside a `data_edit` work unit (data-edit-design §3), internally tagged by `op`. The op set (v1): `insert_block`, `insert_rows`, `insert_cols`, `delete_rows`, `delete_cols`, `schema_change`, plus `apply_inverse` — the undo/redo entry point (§5), not user-facing.\n\nSemantics in one line each: `insert_block` = paste (overwrite/expand, holes → null, anchor may name not-yet-existing rows/cols); `insert_rows`/`insert_cols` = shift down/ right with null fill; `delete_rows`/`delete_cols` = shift up/left; `schema_change` = metadata ONLY (rename, retype, levels, column order) — never the column set or row count, so there is exactly one way to say \"add a column\".",
+      "oneOf": [
+        {
+          "description": "Paste at anchor `(row, col)`; the cells ride the frame's binary part (§1.2 TSV). Overwrites covered cells; the extent grows to `max(current, anchor + shape)`; holes → null; overflow columns are created (inferred per D5 unless declared, named per `jasp_column_names`, overridable via `target_schema`).",
+          "type": "object",
+          "required": [
+            "col",
+            "op",
+            "row"
+          ],
+          "properties": {
+            "col": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "op": {
+              "type": "string",
+              "enum": [
+                "insert_block"
+              ]
+            },
+            "row": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "target_schema": {
+              "description": "The declarative postcondition (D4): absent/null → the lane recomputes (absorption/promotion, §4); present → adhere-or-error (`schema_mismatch`)."
+            }
+          }
+        },
+        {
+          "description": "Shift rows down at `at` by `count`; null fill.",
+          "type": "object",
+          "required": [
+            "at",
+            "count",
+            "op"
+          ],
+          "properties": {
+            "at": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "count": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "op": {
+              "type": "string",
+              "enum": [
+                "insert_rows"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Shift rows up: removes `[at, at+count)`. `at+count ≤ rows` else `range` error.",
+          "type": "object",
+          "required": [
+            "at",
+            "count",
+            "op"
+          ],
+          "properties": {
+            "at": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "count": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "op": {
+              "type": "string",
+              "enum": [
+                "delete_rows"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Insert columns at `at` (shift right). One entry per column — an open-schema column spec; `type: null` (absent) = the lane infers (D5, the csv2arrow path).",
+          "type": "object",
+          "required": [
+            "at",
+            "columns",
+            "op"
+          ],
+          "properties": {
+            "at": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/NewColumnSpec"
+              }
+            },
+            "op": {
+              "type": "string",
+              "enum": [
+                "insert_cols"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Shift left: removes `count` columns at `at`.",
+          "type": "object",
+          "required": [
+            "at",
+            "count",
+            "op"
+          ],
+          "properties": {
+            "at": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "count": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "op": {
+              "type": "string",
+              "enum": [
+                "delete_cols"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Metadata only: rename, retype, set/reorder levels, reorder columns — the complete post-edit column list as the frontend intends it. **Never changes the column set or row count.**",
+          "type": "object",
+          "required": [
+            "op",
+            "target_schema"
+          ],
+          "properties": {
+            "op": {
+              "type": "string",
+              "enum": [
+                "schema_change"
+              ]
+            },
+            "target_schema": true
+          }
+        },
+        {
+          "description": "Undo/redo entry point (§5): submits a previously returned inverse blob VERBATIM — `inverse` echoes the result's meta; the blob's Arrow-IPC bytes ride the frame's binary part. The lane validates (format known, embedded base revision acceptable) and applies atomically; the result carries its own inverse (redo material) — symmetric.",
+          "type": "object",
+          "required": [
+            "inverse",
+            "op"
+          ],
+          "properties": {
+            "inverse": {
+              "$ref": "#/definitions/InverseMeta"
+            },
+            "op": {
+              "type": "string",
+              "enum": [
+                "apply_inverse"
+              ]
+            }
+          }
+        }
+      ]
+    },
     "IngestParams": {
       "description": "Ingestion parameters carried by a data `work` (the frontend sends them on the open; the orchestrator stores them on the dataset entry and they ride every data op, since the lane is stateless). They **change the result** — locale decides how numbers are parsed/canonicalized and `threshold` decides ordinal-vs-scale — so they are baked into the cached Arrow at conversion. Changing them is a re-open, not an edit. Maps 1:1 onto the `csv2arrow` lane's knobs.",
       "type": "object",
@@ -946,6 +1265,60 @@
         }
       }
     },
+    "Invalidation": {
+      "description": "Which rows a `data_changed` invalidates (data-edit-design §6 — the descriptor is normative; whole-buffer drop is just the v1 frontend implementation). Exactly one of:\n\n| wire shape | meaning | |---|---| | `{\"rows_from\": r}` | rows `r..` to the end — includes growth | | `{\"rows_from\": r, \"rows_to\": t}` | rows `r..t` (`rows_to` exclusive) | | `{\"all\": true}` | every row, and/or any column-set/order/type/value-levels change | | `{}` | schema-only (e.g. a rename): no row is stale, headers change via `schema` |",
+      "type": "object",
+      "properties": {
+        "all": {
+          "description": "Present — and `true` — only for whole-dataset invalidation.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "rows_from": {
+          "description": "First stale row (inclusive).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "rows_to": {
+          "description": "End of the stale range (EXCLUSIVE); only meaningful alongside `rows_from`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "InverseMeta": {
+      "description": "The meta half of an inverse blob (data-edit-design §2, §5, D10). Lane-filled on the edit result; echoed verbatim by the frontend on `apply_inverse`. `base_revision` is the revision of the state the edit was computed against — lane-embedded provenance, checked defensively at apply time (the revision itself only ever climbs; §5).",
+      "type": "object",
+      "required": [
+        "base_revision",
+        "format",
+        "ops"
+      ],
+      "properties": {
+        "base_revision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "format": {
+          "description": "The only field the frontend may observe. v1: `\"arrow_ipc_v1\"` — old cells as Arrow-IPC (LZ4_FRAME) in the frame's binary part. Future encodings (lane-side tokens, overlay references) are new values in this slot — never a contract change.",
+          "type": "string"
+        },
+        "ops": {
+          "description": "The restore program (op kinds, anchors, old schema fragment) — lane internals, non-contractual JSON."
+        }
+      }
+    },
     "ModuleInfo": {
       "description": "One discoverable module. `base_uri` is the directory found by scanning (the orchestrator's libset scan or a runner's advertisement), always trailing-slash so assets resolve by simple concatenation. The wire carries nothing richer — no titles, icons, or menus.",
       "type": "object",
@@ -963,6 +1336,40 @@
         },
         "version": {
           "type": "string"
+        }
+      }
+    },
+    "NewColumnSpec": {
+      "description": "One column of an `insert_cols` edit (data-edit-design §3): an open-schema entry.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "display_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "levels": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "description": "`\"scale\" | \"ordinal\" | \"nominal\"`; absent/null = the lane infers (D5).",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -1009,6 +1416,52 @@
         "fatalError",
         "validationError"
       ]
+    },
+    "ValidationIssue": {
+      "description": "One validation failure on a `validationError` data result (data-edit-design §3). Codes: `anchor` | `range` | `coercion` | `level_unknown` | `level_in_use` | `schema_mismatch` | `stale_edit`.",
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "description": "One of the codes above.",
+          "type": "string"
+        },
+        "column": {
+          "description": "Display name of the offending column; absent when the failure is not column-scoped (e.g. `stale_edit`, a bad anchor).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "count": {
+          "description": "How many cells/rows failed (when countable).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "message": {
+          "description": "Human-readable detail (frontend may surface verbatim).",
+          "type": "string"
+        },
+        "rows": {
+          "description": "≤10 example row indices.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          }
+        }
+      }
     },
     "ViewRender": {
       "description": "Locale rendering spec for `data_view` requests (data-view-format.md §1.2): explicit separator **characters**, not a locale id — the frontend's `QLocale` is the authority and the lane stays dependency-free. A locale/separator change is a drop-and-refill on the frontend (the buffer's strings are locale-baked).",

@@ -350,6 +350,33 @@ DataSet *Workspace::dataSetByName(const std::string & name) const
 	return nullptr;
 }
 
+DataSet *Workspace::dataSetByLaneId(const std::string & laneId) const
+{
+	if(laneId.empty())
+		return nullptr;
+
+	for(auto & idData : _dataSets)
+		if(idData.second->datasetId() == laneId)
+			return idData.second;
+
+	return nullptr;
+}
+
+DataSet *Workspace::applyLaneRevision(const std::string & laneId, uint64_t revision, uint64_t rows, bool hasRows, const Json::Value & schema, const Json::Value & invalidation)
+{
+	DataSet * ds = dataSetByLaneId(laneId);
+	if(!ds)
+	{
+		// A push for a dataset we do not hold (closed tab, or its open never landed): nothing
+		// to invalidate — drop it, never crash on it (§6: the broadcast goes to every holder).
+		Log::log() << "Workspace: data_changed for unknown dataset '" << laneId << "' ignored." << std::endl;
+		return nullptr;
+	}
+
+	ds->applyRevision(revision, rows, hasRows, schema, invalidation);
+	return ds;
+}
+
 QString Workspace::makeDataSetTitleUnique(const QString & title, DataSet * exclude) const
 {
 	QSet<QString> takenTitles;

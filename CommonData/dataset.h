@@ -94,16 +94,25 @@ public:
 	// One id space: the orchestrator-assigned dataset id is THE id (their SQLite int stays for
 	// db rows only). "" = not orchestrator-backed (legacy import / computed) — serve via the legacy path.
 	const	std::string	&	datasetId()				const	{ return _laneDatasetId;				}
-	bool				isOpen()		const	{ return !_laneDatasetId.empty();	}
-	uint64_t			schemaRows()			const	{ return _schemaRows;					}
+				bool				isOpen()		const		{ return !_laneDatasetId.empty();	}
+				uint64_t			schemaRows()			const	{ return _schemaRows;					}
+				uint64_t			laneRevision()			const	{ return _laneRevision;					}
 	const	std::vector<ColumnInfo> &	schema()	const	{ return _schemaColumns;				}
 	const	ColumnInfo	*	schemaColumnAt(size_t index)				const;	///< nullptr when out of range
 	const	ColumnInfo	*	schemaColumn(const std::string & name)	const;	///< nullptr when absent
 	int					schemaColumnIndex(const std::string & name)	const;	///< -1 when absent
 	/// Populate from the orchestrator's kind:"data" terminal result and mirror the metadata
 	/// (columns + row count; NEVER row data) into this DataSet so the per-dataset provider
-	/// chain (filters, forms, headers) serves lane metadata. Emits schemaChanged.
+	/// chain (filters, forms, headers) serves lane metadata. Emits schemaChanged. A fresh
+	/// identity starts a fresh revision space (0).
 	void				applySchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema, const std::string & sourcePath);
+	/// Land a `data_changed` push (data-edit-design §6, Increment 4): adopt the NEW revision
+	/// (idempotent — `revision ≤ current` is ignored, the §6 ordering rule), the new row total,
+	/// and the post-edit schema IFF one was carried, then refresh the mirror and emit
+	/// schemaChanged — which restarts the view lane at the new revision (the v1 whole-buffer
+	/// drop; the invalidation descriptor makes range-aware invalidation a drop-in later,
+	/// §11 open item 2). Only a lane-bound dataset takes revisions.
+	void				applyRevision(uint64_t revision, uint64_t rows, bool hasRows, const Json::Value & schema, const Json::Value & invalidation);
 			bool			dataFileSynch()			const { return _dataFileSynch;			}
 			
 	const	std::string &	dataFilePath()			const { return _dataFilePath;			}
@@ -371,8 +380,13 @@ private:
 	// NEO lane identity + wire schema (multi-dataset fold) — see the public block above
 	std::string				_laneDatasetId;
 	uint64_t				_schemaRows				= 0;
+	uint64_t				_laneRevision			= 0;	///< the §6 staleness stamp — received, compared, echoed; never reasoned about
 	std::vector<ColumnInfo>	_schemaColumns;
 	std::unordered_map<std::string, size_t>	_schemaColumnIndex;	///< first-wins, same semantics as the old DataModel linear scan
+	/// Shared by applySchema (open) and applyRevision (data_changed): rebuild `_schemaColumns`
+	/// from a wire schema array, grow the legacy-column mirror, land the row count, emit
+	/// schemaChanged. `schema` must be a non-empty array (callers guard).
+	void				landWireSchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema);
 	static stringset		_defaultEmptyvalues;	// Default empty values if workspace do not have its own empty values (used for backward compatibility)
 	std::string				_description;
 	UndoStack			*	_undoStack				= nullptr;

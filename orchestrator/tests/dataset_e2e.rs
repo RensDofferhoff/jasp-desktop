@@ -277,6 +277,7 @@ fn open_dataset(fe: &Socket, path: &str, work_id: &str) -> (Status, DataResult) 
                 columns: None,
                 max_bytes: messages::VIEW_CHUNK_BYTES,
                 render: None,
+                edit: None,
             }),
         }),
     );
@@ -576,6 +577,7 @@ fn view_dataset(
                 columns: None,
                 max_bytes,
                 render,
+                edit: None,
             }),
         }),
     );
@@ -759,6 +761,7 @@ fn view_of_unknown_dataset_errors() {
                 columns: None,
                 max_bytes: messages::VIEW_CHUNK_BYTES,
                 render: None,
+                edit: None,
             }),
         }),
     );
@@ -775,4 +778,259 @@ fn view_of_unknown_dataset_errors() {
         }
         other => panic!("expected error, got {other:?}"),
     }
+}
+
+// ─── The edit crown over the real lane (d8) ─────────────────────────────────
+
+/// Submit an edit (any `EditOp`) with its §1.2 TSV / inverse-IPC tail; returns the
+/// terminal DataResult (D6-stripped: identity + inverse only) and the result frame's
+/// own tail — the inverse's Arrow-IPC bytes, stored VERBATIM for undo (D10: the
+/// frontend never interprets them).
+#[allow(clippy::too_many_arguments)]
+fn edit_dataset(
+    fe: &Socket,
+    dataset_id: &str,
+    work_id: &str,
+    base_revision: u64,
+    edit: messages::EditOp,
+    tail: &[u8],
+) -> (Status, DataResult, Vec<u8>) {
+    let env = envelope(
+        work_id,
+        Message::Work(Work {
+            work_id: work_id.to_string(),
+            revision: base_revision, // D11: the CURRENT dataset revision (echo-only)
+            base_revision: None,
+            dataset_ids: vec![dataset_id.to_string()],
+            payload: WorkPayload::Data(messages::DataWork {
+                op: messages::DataOp::Edit,
+                source: String::new(), // the orchestrator injects the pre-edit cache
+                cache_path: String::new(), // …and assigns the NEXT revision's path
+                format: String::new(),
+                ingest: messages::IngestParams::default(),
+                row_offset: 0,
+                row_limit: None,
+                columns: None,
+                max_bytes: messages::VIEW_CHUNK_BYTES,
+                render: None,
+                edit: Some(Box::new(edit)),
+            }),
+        }),
+    );
+    let mut frame = frame_envelope(&env);
+    frame.extend_from_slice(tail);
+    fe.send(&frame[..]).map_err(|(_, e)| e).unwrap();
+    let raw = recv_until_raw(fe, Duration::from_secs(60), |e| {
+        matches!(&e.body, Message::Result(r)
+            if r.work_id == work_id && !matches!(r.status, Status::Running))
+    });
+    let (res_env, res_tail) = deframe_parts(&raw[..]).expect("valid frame");
+    let Message::Result(r) = res_env.body else {
+        panic!("expected result");
+    };
+    let status = r.status.clone();
+    let ResultPayload::Data(d) = r.payload else {
+        panic!("expected data result payload");
+    };
+    (status, d, res_tail.to_vec())
+}
+
+/// The `data_changed` push that follows every edit's terminal result (same channel,
+/// after it — §6 ordering).
+fn recv_data_changed(fe: &Socket, dataset_id: &str) -> messages::DataChanged {
+    let env = recv_until(
+        fe,
+        Duration::from_secs(30),
+        |e| matches!(&e.body, Message::DataChanged(dc) if dc.dataset_id == dataset_id),
+    );
+    match env.body {
+        Message::DataChanged(dc) => dc,
+        other => panic!("expected data_changed, got {other:?}"),
+    }
+}
+
+/// Row 0 of a view as a string (all columns, one chunk).
+fn view_row0(fe: &Socket, dataset_id: &str, work_id: &str) -> String {
+    let (_e, st, d, tsv) = view_dataset(fe, dataset_id, work_id, 0, 1_000_000, None);
+    assert!(matches!(st, Status::Complete), "view failed: {d:?}");
+    String::from_utf8_lossy(&tsv)
+        .lines()
+        .next()
+        .expect("a rendered row")
+        .to_string()
+}
+
+/// THE d8 crown, over the real binaries: open → edit (a DECLARED-schema paste, P13) →
+/// edit (`schema_change`) → `data_changed` after every result (revision, rows, schema,
+/// invalidation — D6's split) → views prove the cache → undo × 2 (apply_inverse with
+/// the stored (meta, bytes) verbatim) → the ORIGINAL, view-verified → redo → the edited
+/// state again. Both algebraic identities (undo∘edit = id, redo∘undo∘edit = edit) plus
+/// the D11 revision ladder 0→5, all on real sockets with the now-advertised lane.
+#[test]
+fn edit_undo_redo_crown_over_the_real_lane() {
+    let (_orch, url, _dir_root) = spawn_orch("crown");
+    let csv = format!("{}/../test_data/debug.csv", env!("CARGO_MANIFEST_DIR"));
+    let (fe, _session) = hello_frontend(&url);
+    let (status, data) = open_dataset(&fe, &csv, "w-crown-open");
+    assert!(matches!(status, Status::Complete), "open failed: {data:?}");
+    let id = data.dataset_id.expect("dataset_id");
+
+    // HOP 1 — a DECLARED-schema paste (P13): x overwritten under a declared scale
+    // postcondition (echo + adherence), y + z left to the auto path (null entries —
+    // z is ordinal), and a new column Q4 (nominal, declared levels) created by the
+    // same edit.
+    let (status, res, inv1_bytes) = edit_dataset(
+        &fe,
+        &id,
+        "w-crown-e1",
+        0,
+        messages::EditOp::InsertBlock {
+            row: 0,
+            col: 1,
+            target_schema: Some(json!([
+                { "name": "x", "type": "scale" },
+                null,
+                null,
+                { "name": "Q4", "type": "nominal", "levels": ["P", "Q"] },
+            ])),
+        },
+        b"9.75\t10.5\t100\tP\n",
+    );
+    assert!(matches!(status, Status::Complete), "e1 failed: {res:?}");
+    assert_eq!(res.dataset_id.as_deref(), Some(id.as_str()));
+    assert_eq!(
+        res.dataset_revision,
+        Some(1),
+        "revision bumped (stamped post-apply)"
+    );
+    assert!(
+        res.rows.is_none() && res.schema.is_none() && res.invalidation.is_none(),
+        "D6 strip: the forwarded result carries identity + inverse only"
+    );
+    let inv1 = res.inverse.clone().expect("every edit carries its inverse");
+    assert!(!inv1_bytes.is_empty(), "the paste's inverse has IPC bytes");
+    let dc1 = recv_data_changed(&fe, &id);
+    assert_eq!(dc1.dataset_revision, 1);
+    assert_eq!(dc1.rows, Some(6));
+    let s1 = dc1
+        .schema
+        .as_ref()
+        .expect("schema changed (a column was created)");
+    let cols1 = s1.as_array().unwrap();
+    assert_eq!(cols1.len(), 5, "Q4 created");
+    let q4 = cols1.iter().find(|c| c["name"] == "Q4").expect("Q4");
+    assert_eq!(q4["levels"], json!(["P", "Q"]), "declared levels verbatim");
+    assert_eq!(
+        dc1.invalidation.all,
+        Some(true),
+        "a column-set change → all"
+    );
+    assert_eq!(
+        view_row0(&fe, &id, "w-crown-v1"),
+        "A\t9.75\t10.5\t100\tP",
+        "the view shows the edited cache"
+    );
+
+    // HOP 2 — schema_change (the d6/d7b bonus hop): rename + relabel `group`. A
+    // Keep-class change — JSON-only inverse, `{}` invalidation.
+    let (status, res, inv2_bytes) = edit_dataset(
+        &fe,
+        &id,
+        "w-crown-e2",
+        1,
+        messages::EditOp::SchemaChange {
+            target_schema: json!([
+                { "name": "group", "display_name": "Condition",
+                  "labels": { "A": "alpha", "B": "beta" } },
+                { "name": "x" }, { "name": "y" }, { "name": "z" }, { "name": "Q4" },
+            ]),
+        },
+        b"",
+    );
+    assert!(matches!(status, Status::Complete), "e2 failed: {res:?}");
+    let inv2 = res.inverse.clone().expect("inverse");
+    assert!(inv2_bytes.is_empty(), "a Keep-class change is JSON-only");
+    let dc2 = recv_data_changed(&fe, &id);
+    assert_eq!(dc2.dataset_revision, 2);
+    let s2 = dc2.schema.as_ref().unwrap().as_array().unwrap();
+    let cond = s2
+        .iter()
+        .find(|c| c["display_name"] == "Condition")
+        .expect("renamed column");
+    assert_eq!(cond["labels"], json!({ "A": "alpha", "B": "beta" }));
+    assert!(
+        dc2.invalidation.all.is_none() && dc2.invalidation.rows_from.is_none(),
+        "rename+labels-only → {{}}"
+    );
+
+    // UNDO HOP 2 — apply_inverse with the stored (meta, bytes) VERBATIM (LIFO).
+    let (status, res, _redo2) = edit_dataset(
+        &fe,
+        &id,
+        "w-crown-u2",
+        2,
+        messages::EditOp::ApplyInverse { inverse: inv2 },
+        &inv2_bytes,
+    );
+    assert!(matches!(status, Status::Complete), "u2 failed: {res:?}");
+    let dc3 = recv_data_changed(&fe, &id);
+    assert_eq!(dc3.dataset_revision, 3);
+    assert_eq!(
+        dc3.invalidation.all,
+        Some(true),
+        "undo always all:true (P12)"
+    );
+    let s3 = dc3.schema.as_ref().unwrap().as_array().unwrap();
+    assert!(
+        s3.iter().all(|c| c["display_name"] != "Condition"),
+        "the rename is undone"
+    );
+
+    // UNDO HOP 1 — the paste's restore_block (the IPC bytes ride the tail).
+    let (status, res, redo1_bytes) = edit_dataset(
+        &fe,
+        &id,
+        "w-crown-u1",
+        3,
+        messages::EditOp::ApplyInverse { inverse: inv1 },
+        &inv1_bytes,
+    );
+    assert!(matches!(status, Status::Complete), "u1 failed: {res:?}");
+    let redo1 = res
+        .inverse
+        .clone()
+        .expect("the undo carries its own inverse (the redo)");
+    let dc4 = recv_data_changed(&fe, &id);
+    assert_eq!(dc4.dataset_revision, 4);
+    assert_eq!(dc4.rows, Some(6));
+    let s4 = dc4.schema.as_ref().unwrap().as_array().unwrap();
+    assert_eq!(s4.len(), 4, "Q4 trimmed — the original schema restored");
+
+    // The ORIGINAL, view-verified: undo ∘ edit = id over the real rail.
+    assert_eq!(
+        view_row0(&fe, &id, "w-crown-v2"),
+        "A\t1.5\t10.2\t100",
+        "UNDO IDENTITY FAILED over the real lane"
+    );
+
+    // REDO — the undo's own inverse re-pastes (overflow columns included):
+    // redo ∘ undo ∘ edit = edit over the real rail.
+    let (status, res, _rb) = edit_dataset(
+        &fe,
+        &id,
+        "w-crown-r1",
+        4,
+        messages::EditOp::ApplyInverse { inverse: redo1 },
+        &redo1_bytes,
+    );
+    assert!(matches!(status, Status::Complete), "redo failed: {res:?}");
+    let dc5 = recv_data_changed(&fe, &id);
+    assert_eq!(dc5.dataset_revision, 5, "revision only climbs");
+    let s5 = dc5.schema.as_ref().unwrap().as_array().unwrap();
+    assert_eq!(s5.len(), 5, "Q4 re-created by the redo");
+    assert_eq!(
+        view_row0(&fe, &id, "w-crown-v3"),
+        "A\t9.75\t10.5\t100\tP",
+        "REDO IDENTITY FAILED over the real lane"
+    );
 }

@@ -50,6 +50,11 @@ public:
 			DataSets				dataSets()		const;
 			DataSet				*	dataSetById(int id) const;
 			DataSet				*	dataSetByName(const std::string & name) const;
+			DataSet				*	dataSetByLaneId(const std::string & laneId) const;	///< NEO: by orchestrator id ("ds-N") — nullptr when absent/not lane-backed
+			/// NEO data_changed routing (data-edit-design §6): route a revision-bump push to the
+			/// holding dataset by lane id (no-op + log when the dataset is gone — a closed tab's
+			/// push is simply dropped, nothing to invalidate). Returns the dataset it landed on.
+			DataSet				*	applyLaneRevision(const std::string & laneId, uint64_t revision, uint64_t rows, bool hasRows, const Json::Value & schema, const Json::Value & invalidation);
 			Filter				*	filterById(int id) const;
 			///Returns title if no other dataset already has that title, otherwise appends " (n)" with an incrementing n until it is unique. exclude lets a dataset check against the others without matching against its own current title.
 			QString					makeDataSetTitleUnique(const QString & title, DataSet * exclude = nullptr) const;

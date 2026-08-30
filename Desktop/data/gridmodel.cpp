@@ -78,7 +78,13 @@ void GridModel::startView()
 
 	_viewEpoch++;
 	_buffer = new DataViewBuffer(this);
-	_buffer->reset(_dataSet->schemaRows(), 0 /* dataset revision — edits bump it in a later increment */, _viewEpoch);
+	// The buffer's revision MUST be the dataset's CURRENT revision: chunks are stamped with
+	// the revision at their dispatch (data-edit-design §6), and the buffer rejects any chunk
+	// whose revision differs — so a lane restarted after an edit (applyRevision → schemaChanged
+	// → bindToShown) adopts the bumped revision here, keeping the (revision, epoch) fill
+	// identity honest. A stale in-flight chunk from the pre-edit lane is dropped by the epoch
+	// guard; a fresh chunk dispatched post-edit carries the new revision and ingests cleanly.
+	_buffer->reset(_dataSet->schemaRows(), _dataSet->laneRevision(), _viewEpoch);
 	_filler = new ViewFiller(_dataSet->datasetId(), _buffer, this);
 
 	connect(_buffer, &DataViewBuffer::chunkIngested,	this, &GridModel::onChunkIngested);

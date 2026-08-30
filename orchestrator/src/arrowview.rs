@@ -182,7 +182,7 @@ fn serve_inner(
 /// Parse the Feather footer: the Arrow schema + the row count of every record-batch block.
 /// Reads only the encapsulated message metadata per block — batch bodies stay untouched, so
 /// this is O(blocks) tiny reads regardless of file size.
-fn footer_info(file: &mut File) -> Result<(arrow::datatypes::Schema, Vec<u64>), String> {
+pub(crate) fn footer_info(file: &mut File) -> Result<(arrow::datatypes::Schema, Vec<u64>), String> {
     let io = |e: std::io::Error| e.to_string();
     let mut tail = [0u8; 10];
     file.seek(SeekFrom::End(-10)).map_err(io)?;
@@ -295,6 +295,66 @@ fn escape_into(cell: &str, out: &mut Vec<u8>) {
             other => out.push(other),
         }
     }
+}
+
+/// Split one §1.2 row's bytes into cell slices — a raw TAB scan with NO escape logic
+/// (real TABs never survive escaping, format doc §1.2's byte-uniqueness property). The
+/// row excludes its LF terminator. Unused until the edit engine lands (d3).
+#[allow(dead_code)]
+pub(crate) fn split_row(row: &[u8]) -> Vec<&[u8]> {
+    row.split(|&b| b == b'\t').collect()
+}
+
+/// Parse one cell back (format doc §1.2 — the edit path's parse-back of the render grammar):
+/// the WHOLE cell `\N` = null (a literal `\N` cell arrives as `\\N` and unescapes
+/// normally); otherwise unescape `\t \n \r \\`. Cells without a backslash skip unescaping
+/// entirely (the common case). An unknown escape sequence (a frontend authoring bug — the
+/// grammar never emits one) passes through as literals rather than dropping bytes.
+/// Returns `(text, is_null)`; an empty cell is a VALUE, distinct from null.
+#[allow(dead_code)]
+pub(crate) fn unescape_cell(cell: &[u8]) -> (String, bool) {
+    if cell == b"\\N" {
+        return (String::new(), true);
+    }
+    if !cell.contains(&b'\\') {
+        return (String::from_utf8_lossy(cell).into_owned(), false);
+    }
+    let mut out = Vec::with_capacity(cell.len());
+    let mut i = 0;
+    while i < cell.len() {
+        if cell[i] == b'\\' && i + 1 < cell.len() {
+            match cell[i + 1] {
+                b't' => {
+                    out.push(b'\t');
+                    i += 2;
+                    continue;
+                }
+                b'n' => {
+                    out.push(b'\n');
+                    i += 2;
+                    continue;
+                }
+                b'r' => {
+                    out.push(b'\r');
+                    i += 2;
+                    continue;
+                }
+                b'\\' => {
+                    out.push(b'\\');
+                    i += 2;
+                    continue;
+                }
+                _ => {
+                    out.push(cell[i]);
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+        out.push(cell[i]);
+        i += 1;
+    }
+    (String::from_utf8_lossy(&out).into_owned(), false)
 }
 
 /// C/Qt `'g'` rendering — exact legacy parity (`QLocale::toString(dbl, 'g', 10)`,
@@ -413,6 +473,51 @@ mod tests {
             max_bytes,
             render: None,
         }
+    }
+
+    /// The §1.2 grammar round-trips: escape → split → unescape returns the original cells
+    /// verbatim (tab/newline/backslash torture, unicode, empty-as-value), and the null
+    /// marker stays unambiguous against a literal `\N` cell. This is the parse-back the
+    /// edit engine rides (data-edit-design §2: "the edit path parses the same display
+    /// string back, exactly like legacy").
+    #[test]
+    fn grammar_escape_unescape_round_trips() {
+        let cells: Vec<String> = vec![
+            "plain".into(),
+            "".into(), // empty string IS a value
+            "has<TAB>\ttab".into(),
+            "line1\nline2\r\n".into(),
+            "back\\slash".into(),
+            "\\N literal".into(), // encodes as \\N — a value, not null
+            "héllo 世界 🚀".into(),
+            "a\tb\nc\rd\\e".into(),
+        ];
+        let mut row: Vec<u8> = Vec::new();
+        for (i, cell) in cells.iter().enumerate() {
+            if i > 0 {
+                row.push(b'\t');
+            }
+            escape_into(cell, &mut row);
+        }
+        row.push(b'\n');
+        // The byte-uniqueness property (§1.2): splitting is a raw TAB scan — every part
+        // belongs to exactly one cell because no CELL contains a real TAB/LF.
+        let row_bytes = &row[..row.len() - 1];
+        let parts = split_row(row_bytes);
+        assert_eq!(parts.len(), cells.len(), "rectangular: one cell per column");
+        for (part, orig) in parts.iter().zip(cells.iter()) {
+            let (text, is_null) = unescape_cell(part);
+            assert!(!is_null);
+            assert_eq!(&text, orig, "round-trip must be verbatim");
+        }
+
+        // The null marker vs its literal twin.
+        let (text, null) = unescape_cell(b"\\N");
+        assert!(null);
+        assert!(text.is_empty());
+        let (text, null) = unescape_cell(b"\\\\N");
+        assert!(!null, "\\\\N is the literal string \\N — a value");
+        assert_eq!(text, "\\N");
     }
 
     /// Write a Feather mirroring the lane output contract: score (scale Float64),

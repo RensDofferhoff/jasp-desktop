@@ -460,10 +460,14 @@ enum RouterMsg {
         env: Envelope,
         binary: Vec<u8>,
     },
-    /// A deframed message arrived on a frontend's data channel.
+    /// A deframed message arrived on a frontend's data channel. The binary tail (§18.1)
+    /// rides along verbatim — an edit's forward cells (§1.2 TSV) or an `apply_inverse`'s
+    /// IPC bytes ride it, and the router re-frames it untouched when forwarding (the
+    /// mirror image of `RunnerData`'s tail path).
     FrontendData {
         frontend: Arc<FrontendRuntime>,
         env: Envelope,
+        binary: Vec<u8>,
     },
     /// A runner's channel pipe was removed (disconnect) → evict.
     EvictRunner(String),
@@ -569,6 +573,9 @@ struct ParkedWork {
     frontend: Arc<FrontendRuntime>,
     env: Envelope,
     work: messages::Work,
+    /// The incoming frame's binary tail (§18.1) — an edit's forward cells or an
+    /// `apply_inverse`'s IPC bytes, forwarded verbatim when the park drains.
+    tail: Vec<u8>,
     parked_ms: u64,
 }
 
@@ -607,11 +614,21 @@ struct DatasetEntry {
 
 /// One in-flight data work (`data_works`). Carries what the terminal result needs:
 /// which dataset it serves, which op it is (state flip on `Open` only), and — for `View` —
-/// the dataset revision **at dispatch**, stamped into the result (§6.3 race rules).
+/// the dataset revision **at dispatch**, stamped into the result (§6.3 race rules). For
+/// `Edit` the same field carries the NEW revision minted at dispatch (stamped post-apply).
 struct DataWorkEntry {
     dataset_id: String,
     op: DataOp,
     revision: u64,
+}
+
+/// The lane's view-consistency fields captured off a terminal edit result (D6: results
+/// carry undo material; `data_changed` carries view-consistency material). The lane fills
+/// them for the orchestrator's broadcast; the forwarded result drops them.
+struct ViewConsistency {
+    rows: Option<u64>,
+    schema: Option<serde_json::Value>,
+    invalidation: Option<messages::Invalidation>,
 }
 
 /// The single-threaded state machine. Owns the registries, correlation table, and channel keep-
@@ -693,9 +710,11 @@ impl Router {
                     env,
                     binary,
                 } => self.on_runner_message(&runner, env, binary),
-                RouterMsg::FrontendData { frontend, env } => {
-                    self.on_frontend_message(&frontend, env)
-                }
+                RouterMsg::FrontendData {
+                    frontend,
+                    env,
+                    binary,
+                } => self.on_frontend_message(&frontend, env, binary),
                 RouterMsg::EvictRunner(id) => self.evict_runner(&id),
                 RouterMsg::DropFrontend(id) => self.drop_frontend(&id),
                 RouterMsg::ProvisionFailed { module, reason } => {
@@ -1068,10 +1087,11 @@ impl Router {
                 if let Err(e) = fe.channel.recv_async(&aio) {
                     eprintln!("[orch] frontend {} re-arm failed: {e}", fe.session_id);
                 }
-                if let Some(env) = deframe(&msg[..]) {
+                if let Some((env, binary)) = deframe_parts(&msg[..]) {
                     let _ = tx.send(RouterMsg::FrontendData {
                         frontend: Arc::clone(&fe),
                         env,
+                        binary: binary.to_vec(),
                     });
                 }
             }
@@ -1109,7 +1129,7 @@ impl Router {
         }
     }
 
-    fn on_frontend_message(&mut self, fe: &Arc<FrontendRuntime>, env: Envelope) {
+    fn on_frontend_message(&mut self, fe: &Arc<FrontendRuntime>, env: Envelope, tail: Vec<u8>) {
         // Decide the action with data cloned out of `env` first, so the match that moves `env`
         // (into `route_work`) does not also borrow `env.body`.
         enum Action {
@@ -1131,7 +1151,7 @@ impl Router {
             _ => Action::Other,
         };
         match action {
-            Action::Work(w) => self.route_work(Arc::clone(fe), env, &w),
+            Action::Work(w) => self.route_work(Arc::clone(fe), env, &w, tail),
             Action::Abort(work_id) => self.route_abort(fe, &work_id),
             Action::WorkClose(work_id, revision) => self.close_work(fe, work_id, revision),
             Action::ListModules => {
@@ -1168,11 +1188,17 @@ impl Router {
     }
 
     /// Work (frontend → runner) — §6.1.
-    fn route_work(&mut self, fe: Arc<FrontendRuntime>, env: Envelope, w: &messages::Work) {
+    fn route_work(
+        &mut self,
+        fe: Arc<FrontendRuntime>,
+        env: Envelope,
+        w: &messages::Work,
+        tail: Vec<u8>,
+    ) {
         // 1. Select a runner (returns an owned Arc; no borrow of `self` escapes this line).
         match select_runner(&self.runners, &w.payload) {
-            Some(runner) => self.dispatch_work(runner, fe, env, w),
-            None => self.miss_work(fe, env, w),
+            Some(runner) => self.dispatch_work(runner, fe, env, w, &tail),
+            None => self.miss_work(fe, env, w, tail),
         }
     }
 
@@ -1185,6 +1211,7 @@ impl Router {
         fe: Arc<FrontendRuntime>,
         mut env: Envelope,
         w: &messages::Work,
+        tail: &[u8],
     ) {
         // 2. Stamp session_id so (session_id, work_id) round-trips through the runner.
         env.session_id = Some(fe.session_id.clone());
@@ -1313,7 +1340,71 @@ impl Router {
             value["payload"]["cache_path"] = json!(cache_path.to_string_lossy());
         }
 
-        let frame = frame_bytes(&serde_json::to_vec(&value).expect("re-serialize work"));
+        // Data-edit work: the orchestrator mints the NEXT revision's identity — the new
+        // cache path the lane writes the edited Feather to — after checking the declared
+        // base revision (D11: `Work.revision` on an edit IS the base dataset revision;
+        // mismatch = stale edit, rejected without dispatch). The dataset keeps resolving to
+        // the pre-edit file until the terminal result (`route_result` does the swap), so
+        // in-flight views stay consistent. Lane-side edits are Increment (d); until a lane
+        // advertises `data_edit`, this arm is unreachable in production.
+        if let WorkPayload::Data(d) = &w.payload
+            && d.op == DataOp::Edit
+        {
+            if resolved.len() != 1 {
+                let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
+                self.release_paths(&acquired);
+                self.send_bad_request(&fe, w, "data_edit requires exactly one dataset_id");
+                return;
+            }
+            if d.edit.is_none() {
+                let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
+                self.release_paths(&acquired);
+                self.send_bad_request(&fe, w, "data_edit requires an edit (the op-family payload)");
+                return;
+            }
+            let (dataset_id, old_path) = &resolved[0];
+            let current = self
+                .datasets
+                .get(dataset_id)
+                .map(|e| e.revision)
+                .unwrap_or(0);
+            if w.revision != current {
+                let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
+                self.release_paths(&acquired);
+                self.send_stale_edit(&fe, w, dataset_id, w.revision, current);
+                return;
+            }
+            let new_revision = current + 1;
+            let cache_path =
+                self.config
+                    .dataset_cache_path(&fe.session_id, dataset_id, new_revision);
+            println!(
+                "[orch] data_edit {dataset_id} (session {}) base={} -> rev {new_revision} -> lane {}",
+                fe.session_id, current, runner.runner_id
+            );
+            self.data_works.insert(
+                (fe.session_id.clone(), w.work_id.clone()),
+                DataWorkEntry {
+                    dataset_id: dataset_id.clone(),
+                    op: DataOp::Edit,
+                    revision: new_revision,
+                },
+            );
+            // The lane's typed parse drops the top-level `dataset_paths` map, so the read
+            // path rides the payload — symmetric with `data_open`: `source` = the file to
+            // READ (the pre-edit cache), `cache_path` = the file to WRITE (the new revision;
+            // the swap lands at the terminal result).
+            value["payload"]["source"] = json!(old_path.to_string_lossy());
+            value["payload"]["cache_path"] = json!(cache_path.to_string_lossy());
+        }
+
+        // §18.1: the frame's binary tail forwards VERBATIM — an edit's forward cells
+        // (§1.2 TSV) or an `apply_inverse`'s IPC bytes. Bulk bytes never go through the
+        // JSON parser (the same rule as the runner→frontend tail path).
+        let frame = frame_parts(
+            &serde_json::to_vec(&value).expect("re-serialize work"),
+            tail,
+        );
 
         // 5. Record the route, bump outstanding, forward.
         let key = (fe.session_id.clone(), w.work_id.clone());
@@ -1356,7 +1447,13 @@ impl Router {
     /// regardless of `ever_registered` — a frontend waiting on an open must never be dropped
     /// silently. Analysis/rcode keep the original behaviour: a visible error once a runner has
     /// existed, else a silent drop (the startup-time heuristic).
-    fn miss_work(&mut self, fe: Arc<FrontendRuntime>, env: Envelope, w: &messages::Work) {
+    fn miss_work(
+        &mut self,
+        fe: Arc<FrontendRuntime>,
+        env: Envelope,
+        w: &messages::Work,
+        tail: Vec<u8>,
+    ) {
         let prov = self.provisioner.clone();
 
         if let WorkPayload::Data(d) = &w.payload {
@@ -1369,6 +1466,10 @@ impl Router {
                     _ => None,
                 },
                 DataOp::View => Some(LaneKind::RustData),
+                // The edit family parks like the rest of the data plane — the same lane
+                // owns the cache. (The lane advertises `data_edit` only once it serves it;
+                // until then edits fail visibly here.)
+                DataOp::Edit => Some(LaneKind::RustData),
                 _ => None,
             };
             let configured =
@@ -1379,6 +1480,7 @@ impl Router {
                     fe,
                     env,
                     w,
+                    tail,
                     Awaiting::Lane {
                         lane,
                         op: d.op,
@@ -1423,6 +1525,7 @@ impl Router {
                 fe,
                 env,
                 w,
+                tail,
                 Awaiting::AnalysisRClassicJaspbase {
                     module: module.to_string(),
                     version: version.to_string(),
@@ -1485,6 +1588,7 @@ impl Router {
         fe: Arc<FrontendRuntime>,
         env: Envelope,
         w: &messages::Work,
+        tail: Vec<u8>,
         awaiting: Awaiting,
     ) {
         let key = (fe.session_id.clone(), w.work_id.clone());
@@ -1512,6 +1616,7 @@ impl Router {
                     let pw = slot.get_mut();
                     pw.env = env;
                     pw.work = w.clone();
+                    pw.tail = tail;
                     // parked_ms is kept: the provision request started at the original park time.
                 }
                 // else: stale/equal retry — already re-acked with the running marker above.
@@ -1533,6 +1638,7 @@ impl Router {
                     frontend: fe,
                     env,
                     work: w.clone(),
+                    tail,
                     parked_ms: now_ms(),
                 });
                 match &awaiting {
@@ -1596,7 +1702,7 @@ impl Router {
                 "[orch] dispatching parked work_id={} ({what}) to runner {}",
                 pw.work.work_id, runner.runner_id
             );
-            self.dispatch_work(runner, pw.frontend, pw.env, &pw.work);
+            self.dispatch_work(runner, pw.frontend, pw.env, &pw.work, &pw.tail);
         }
     }
 
@@ -1735,6 +1841,54 @@ impl Router {
             }
         }
 
+        // Data-edit work at its terminal result: the REVISION-BUMP POINT. On success the
+        // dataset's identity advances to the revision minted at dispatch — path swap now,
+        // old file retires via `release_paths` once its refs drain (in-flight views hold
+        // them; the `still_current` guard flips false here). On failure nothing moves: the
+        // entry keeps the pre-edit path/revision and the janitor sweeps any partial file
+        // the lane wrote. Either way the `data_changed` broadcast (below, after the result)
+        // fires only on success — a failed edit changed nothing (§3 atomicity).
+        if let Some(entry) = &data_entry
+            && entry.op == DataOp::Edit
+        {
+            let new_path =
+                self.config
+                    .dataset_cache_path(&session_id, &entry.dataset_id, entry.revision);
+            match status {
+                Status::Complete => {
+                    if let Some(ds) = self.datasets.get_mut(&entry.dataset_id) {
+                        ds.revision = entry.revision;
+                        ds.current_path = new_path;
+                    }
+                    println!(
+                        "[orch] dataset {} edited — revision {} ({})",
+                        entry.dataset_id, entry.revision, session_id
+                    );
+                }
+                _ => {
+                    eprintln!(
+                        "[orch] dataset {} edit failed (lane error); revision unchanged",
+                        entry.dataset_id
+                    );
+                    let _ = self.janitor.send(Reclaim::File(new_path));
+                }
+            }
+        }
+
+        // The lane's view-consistency fields, captured before the forwarded result is
+        // rebuilt — they feed the `data_changed` broadcast (D6 split).
+        let lane_fields = match &env.body {
+            Message::Result(r) => match &r.payload {
+                messages::ResultPayload::Data(d) => Some(ViewConsistency {
+                    rows: d.rows,
+                    schema: d.schema.clone(),
+                    invalidation: d.invalidation,
+                }),
+                _ => None,
+            },
+            _ => None,
+        };
+
         let Some(route) = self.work.get(&key).cloned() else {
             println!("[orch] result for unknown work ({session_id},{work_id}) — dropping");
             return;
@@ -1766,7 +1920,19 @@ impl Router {
                     if let Some(entry) = &data_entry {
                         d.dataset_id = Some(entry.dataset_id.clone());
                         if entry.op == DataOp::View {
+                            // The dataset revision AT DISPATCH (§6.3 race rules).
                             d.dataset_revision = Some(entry.revision);
+                        } else if entry.op == DataOp::Edit {
+                            // The NEW revision POST-APPLY (§2) — different semantics from the
+                            // view stamp above, documented on both.
+                            d.dataset_revision = Some(entry.revision);
+                            // D6: view-consistency material rides `data_changed` only.
+                            // Stripped here so the lane can never leak it onto the result
+                            // path — the editor's command callback stores undo material,
+                            // the buffer/view listens for the broadcast.
+                            d.rows = None;
+                            d.schema = None;
+                            d.invalidation = None;
                         }
                     }
                 }
@@ -1785,6 +1951,23 @@ impl Router {
             eprintln!(
                 "[orch] result to frontend {} failed ({e}); dropping result",
                 route.frontend.session_id
+            );
+        }
+        // `data_changed` — after the triggering result, on the same channel (§6 ordering).
+        if let Some(entry) = &data_entry
+            && entry.op == DataOp::Edit
+            && matches!(status, Status::Complete)
+        {
+            self.broadcast_data_changed(
+                &session_id,
+                &entry.dataset_id,
+                entry.revision,
+                &work_id,
+                lane_fields.unwrap_or(ViewConsistency {
+                    rows: None,
+                    schema: None,
+                    invalidation: None,
+                }),
             );
         }
         if terminal {
@@ -1898,6 +2081,70 @@ impl Router {
             self.path_refs.remove(path);
             println!("[orch] retired dataset file {} reclaimed", path.display());
             let _ = self.janitor.send(Reclaim::File(path.clone()));
+        }
+    }
+
+    /// The D11 rejection: an edit's declared base revision (`Work.revision`) is not the
+    /// dataset's current revision — the frontend is editing a stale snapshot. Synthesized as
+    /// a `validationError` RESULT (the same shape a lane validation failure takes), so the
+    /// frontend's edit-failure path is uniform. Nothing was applied: no revision bump, no
+    /// `data_changed` (§3 atomicity).
+    fn send_stale_edit(
+        &self,
+        fe: &FrontendRuntime,
+        w: &messages::Work,
+        dataset_id: &str,
+        base: u64,
+        current: u64,
+    ) {
+        eprintln!(
+            "[orch] work_id={} stale edit on {dataset_id}: base revision {base} != current {current}",
+            w.work_id
+        );
+        let env = Envelope {
+            v: 1,
+            id: format!("orch-stale-edit-{}", w.work_id),
+            reply_to: None,
+            session_id: Some(fe.session_id.clone()),
+            format: None,
+            ts: None,
+            body: Message::Result(messages::ResultMsg {
+                work_id: w.work_id.clone(),
+                revision: w.revision,
+                status: messages::Status::ValidationError,
+                payload: messages::ResultPayload::Data(messages::DataResult {
+                    dataset_id: Some(dataset_id.to_string()),
+                    dataset_revision: Some(current),
+                    rows: None,
+                    schema: None,
+                    error_message: Some(format!(
+                        "stale edit: base revision {base} is not the current revision {current}; \
+                         refetch and retry"
+                    )),
+                    row_offset: None,
+                    row_count: None,
+                    truncated: None,
+                    invalidation: None,
+                    validation: Some(vec![messages::ValidationIssue {
+                        column: None,
+                        code: "stale_edit".to_string(),
+                        message: format!(
+                            "base revision {base} is not the current revision {current}"
+                        ),
+                        count: None,
+                        rows: None,
+                    }]),
+                    inverse: None,
+                }),
+                module_version: None,
+                message: None,
+            }),
+        };
+        if let Err(e) = fe.send(frame_envelope(&env)) {
+            eprintln!(
+                "[orch] stale_edit to frontend {} failed: {e}",
+                fe.session_id
+            );
         }
     }
 
@@ -2229,6 +2476,65 @@ impl Router {
         );
     }
 
+    /// `data_changed` (data-edit-design §6, Increment 4): the one uniform buffer-invalidation
+    /// path for every dataset revision bump, whatever caused it. Filled from the lane's result
+    /// fields (rows / schema-iff-changed / the lane-computed invalidation descriptor); the
+    /// orchestrator stamps identity + cause. Sent to every frontend holding the dataset — the
+    /// dataset is session-scoped, so today that is exactly the opening session's frontend; a
+    /// future multi-holder era iterates the same rail. Ordering is the frontend's safety net:
+    /// per-dataset, revision order, after the triggering result; `revision ≤ current` → ignore.
+    /// Cause is diagnostics-only by contract (§6) — never load-bearing.
+    fn broadcast_data_changed(
+        &self,
+        session_id: &str,
+        dataset_id: &str,
+        revision: u64,
+        work_id: &str,
+        view: ViewConsistency,
+    ) {
+        let Some(fe) = self.frontends.get(session_id) else {
+            eprintln!("[orch] data_changed for {dataset_id} dropped: session {session_id} is gone");
+            return;
+        };
+        // The descriptor is normative-ALWAYS; `None` means a buggy lane — default to the
+        // conservative whole-dataset drop rather than leave any buffer stale. (An EMPTY
+        // `{}` is legal and passes through: schema-only, no row is stale.)
+        let invalidation = if let Some(inv) = view.invalidation {
+            inv
+        } else {
+            eprintln!(
+                "[orch] data_changed for {dataset_id}: lane omitted the invalidation descriptor; broadcasting all"
+            );
+            messages::Invalidation {
+                all: Some(true),
+                rows_from: None,
+                rows_to: None,
+            }
+        };
+        let env = Envelope {
+            v: 1,
+            id: format!("orch-dchg-{dataset_id}-{revision}"),
+            reply_to: None,
+            session_id: Some(session_id.to_string()),
+            format: None,
+            ts: Some(now_ms()),
+            body: Message::DataChanged(messages::DataChanged {
+                dataset_id: dataset_id.to_string(),
+                dataset_revision: revision,
+                rows: view.rows,
+                schema: view.schema,
+                invalidation,
+                cause: messages::DataChangedCause {
+                    kind: messages::ChangeKind::Edit,
+                    work_id: Some(work_id.to_string()),
+                },
+            }),
+        };
+        if let Err(e) = fe.send(frame_envelope(&env)) {
+            eprintln!("[orch] data_changed to frontend {session_id} failed: {e}; dropping push");
+        }
+    }
+
     /// A `modules` envelope carrying `catalog`. `reply_to` = `Some(id)` answers a `list_modules`
     /// query (session-scoped); `None` is an unsolicited change push.
     fn modules_envelope(
@@ -2556,6 +2862,9 @@ fn running_result(work_id: &str, revision: u64, session_id: &str, kind: WorkKind
             row_offset: None,
             row_count: None,
             truncated: None,
+            invalidation: None,
+            validation: None,
+            inverse: None,
         }),
         WorkKind::Rcode => {
             messages::ResultPayload::Rcode(json!({ "title": "provisioning a runner" }))
@@ -2613,6 +2922,9 @@ fn no_runner_result(
             row_offset: None,
             row_count: None,
             truncated: None,
+            invalidation: None,
+            validation: None,
+            inverse: None,
         }),
         WorkKind::Rcode => messages::ResultPayload::Rcode(json!({
             "error": true,
@@ -4071,6 +4383,7 @@ mod tests {
                 columns: None,
                 max_bytes: messages::VIEW_CHUNK_BYTES,
                 render: None,
+                edit: None,
             }),
         }))
     }
@@ -4123,6 +4436,9 @@ mod tests {
                     row_offset: None,
                     row_count: None,
                     truncated: None,
+                    invalidation: None,
+                    validation: None,
+                    inverse: None,
                 }),
                 module_version: None,
                 message: None,
@@ -4367,6 +4683,9 @@ mod tests {
                     row_offset: None,
                     row_count: None,
                     truncated: None,
+                    invalidation: None,
+                    validation: None,
+                    inverse: None,
                 }),
                 module_version: None,
                 message: None,
@@ -4458,6 +4777,7 @@ mod tests {
                 columns: None,
                 max_bytes: messages::VIEW_CHUNK_BYTES,
                 render: None,
+                edit: None,
             }),
         }))
     }
@@ -4493,6 +4813,9 @@ mod tests {
                     row_offset: Some(row_offset),
                     row_count: Some(row_count),
                     truncated: Some(truncated),
+                    invalidation: None,
+                    validation: None,
+                    inverse: None,
                 }),
                 module_version: None,
                 message: None,
@@ -4633,6 +4956,449 @@ mod tests {
         lane.set_opt::<RecvTimeout>(Some(Duration::from_millis(300)))
             .unwrap();
         assert!(lane.recv().is_err(), "no work reaches the lane");
+    }
+
+    // ── data_edit: the edit-era rails (data-edit-design §2, §6) ─────────────
+
+    /// Register a mock lane serving open (csv) + view + EDIT — enough to drive an edit to
+    /// its terminal result and observe the orchestrator rails (revision bump, path swap,
+    /// `data_changed` broadcast) without any real Feather I/O.
+    fn register_edit_lane(control_url: &str) -> (Socket, String) {
+        register_with_caps(
+            control_url,
+            vec![
+                Capability::Data {
+                    op: DataOp::Open,
+                    formats: Some(vec!["csv".to_string()]),
+                },
+                Capability::Data {
+                    op: DataOp::View,
+                    formats: None,
+                },
+                Capability::Data {
+                    op: DataOp::Edit,
+                    formats: None,
+                },
+            ],
+        )
+    }
+
+    /// A `data_edit` work against one Ready dataset. `base_revision` rides `Work.revision`
+    /// (D11: on an edit it IS the base dataset revision — echo-only for the frontend,
+    /// checked by the orchestrator).
+    fn data_edit_work(work_id: &str, dataset_id: &str, base_revision: u64) -> Envelope {
+        data_edit_work_with_op(
+            work_id,
+            dataset_id,
+            base_revision,
+            messages::EditOp::InsertBlock {
+                row: 0,
+                col: 0,
+                target_schema: None, // lane recomputes (D4)
+            },
+        )
+    }
+
+    /// [`data_edit_work`] with an arbitrary op variant (the rail is op-agnostic — the
+    /// row ops exercise it with a schema-absent result).
+    fn data_edit_work_with_op(
+        work_id: &str,
+        dataset_id: &str,
+        base_revision: u64,
+        edit: messages::EditOp,
+    ) -> Envelope {
+        envelope(Message::Work(Work {
+            work_id: work_id.to_string(),
+            revision: base_revision,
+            base_revision: None,
+            dataset_ids: vec![dataset_id.to_string()],
+            payload: WorkPayload::Data(messages::DataWork {
+                op: DataOp::Edit,
+                source: String::new(), // orchestrator injects the pre-edit cache to READ
+                cache_path: String::new(), // orchestrator assigns the NEXT revision's path
+                format: String::new(),
+                ingest: messages::IngestParams::default(),
+                row_offset: 0,
+                row_limit: None,
+                columns: None,
+                max_bytes: messages::VIEW_CHUNK_BYTES,
+                render: None,
+                edit: Some(Box::new(edit)),
+            }),
+        }))
+    }
+
+    /// The mock edit lane's terminal answer: the view-consistency fields (rows, schema
+    /// IFF changed, invalidation) the orchestrator moves into the `data_changed`
+    /// broadcast, per D6.
+    fn lane_edit_result(
+        lane: &Socket,
+        session: &str,
+        work_id: &str,
+        rows: u64,
+        schema: Option<Value>,
+        invalidation: messages::Invalidation,
+    ) {
+        let result = Envelope {
+            v: 1,
+            id: format!("rn-{work_id}"),
+            reply_to: None,
+            session_id: Some(session.to_string()),
+            format: None,
+            ts: None,
+            body: Message::Result(ResultMsg {
+                work_id: work_id.to_string(),
+                revision: 0,
+                status: Status::Complete,
+                payload: ResultPayload::Data(DataResult {
+                    dataset_id: None,
+                    dataset_revision: None,
+                    rows: Some(rows),
+                    schema,
+                    error_message: None,
+                    row_offset: None,
+                    row_count: None,
+                    truncated: None,
+                    invalidation: Some(invalidation),
+                    validation: None,
+                    inverse: None,
+                }),
+                module_version: None,
+                message: None,
+            }),
+        };
+        lane.send(frame_envelope(&result).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+    }
+
+    /// The mock edit lane's failure: a `fatalError` carrying `error_message`. Per §3
+    /// atomicity the orchestrator must leave the revision, the path, and the broadcast silent.
+    fn lane_edit_failure(lane: &Socket, session: &str, work_id: &str, message: &str) {
+        let result = Envelope {
+            v: 1,
+            id: format!("rn-{work_id}"),
+            reply_to: None,
+            session_id: Some(session.to_string()),
+            format: None,
+            ts: None,
+            body: Message::Result(ResultMsg {
+                work_id: work_id.to_string(),
+                revision: 0,
+                status: Status::FatalError,
+                payload: ResultPayload::Data(DataResult {
+                    dataset_id: None,
+                    dataset_revision: None,
+                    rows: None,
+                    schema: None,
+                    error_message: Some(message.to_string()),
+                    row_offset: None,
+                    row_count: None,
+                    truncated: None,
+                    invalidation: None,
+                    validation: None,
+                    inverse: None,
+                }),
+                module_version: None,
+                message: None,
+            }),
+        };
+        lane.send(frame_envelope(&result).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+    }
+
+    // 26a. The full edit rail: dispatch mints the NEXT revision's cache path (identity, not
+    //      I/O); the terminal Complete bumps the revision + swaps the path; the forwarded
+    //      result carries identity + the NEW revision but NO view-consistency material
+    //      (D6: rows/schema/invalidation are stripped — they ride `data_changed`); and the
+    //      `data_changed` push follows the result on the same channel, filled from the
+    //      lane's fields with identity + cause stamped by the orchestrator.
+    #[test]
+    fn edit_completion_bumps_revision_and_broadcasts_data_changed() {
+        let url = format!("inproc://orch-ds-edit-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_edit_lane(&url);
+        let (fe, session) = hello_frontend(&url);
+
+        let dataset_id = open_to_ready(&fe, &lane, &session); // revision 0
+        let old_path = broker.datasets_snapshot()[0].2.clone();
+
+        let edit = data_edit_work("w-edit", &dataset_id, 0);
+        fe.send(frame_envelope(&edit).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+
+        // The lane receives the edit with the NEXT revision's cache path injected.
+        let raw = lane.recv().expect("lane recv edit work");
+        let env = deframe(&raw[..]).unwrap();
+        assert_eq!(env.session_id.as_deref(), Some(session.as_str()));
+        match &env.body {
+            Message::Work(w) => match &w.payload {
+                WorkPayload::Data(d) => {
+                    assert!(matches!(d.op, DataOp::Edit));
+                    assert_eq!(w.revision, 0, "Work.revision = the base revision (D11)");
+                    assert_eq!(
+                        d.source,
+                        old_path.to_string_lossy(),
+                        "source = the pre-edit cache to READ (mirrors data_open's direction)"
+                    );
+                    let path = PathBuf::from(&d.cache_path);
+                    assert!(
+                        path.file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .ends_with("_1.arrow"),
+                        "cache_path names the NEXT revision: {}",
+                        d.cache_path
+                    );
+                    assert_ne!(path, old_path);
+                }
+                other => panic!("expected data work payload, got {other:?}"),
+            },
+            other => panic!("expected work, got {other:?}"),
+        }
+
+        // The lane's terminal answer carries the view-consistency fields.
+        lane_edit_result(
+            &lane,
+            &session,
+            "w-edit",
+            8,
+            Some(json!([{ "name": "x", "type": "nominal" }])),
+            messages::Invalidation {
+                all: None,
+                rows_from: Some(3),
+                rows_to: None,
+            },
+        );
+
+        // FIRST the forwarded result: identity + the NEW revision, view-consistency stripped.
+        match deframe(&fe.recv().expect("frontend recv edit result")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-edit");
+                assert!(matches!(r.status, Status::Complete));
+                let ResultPayload::Data(d) = &r.payload else {
+                    panic!("expected data result payload")
+                };
+                assert_eq!(d.dataset_id.as_deref(), Some(dataset_id.as_str()));
+                assert_eq!(
+                    d.dataset_revision,
+                    Some(1),
+                    "edits stamp the NEW revision post-apply (§2)"
+                );
+                assert_eq!(d.rows, None, "rows ride data_changed only (D6)");
+                assert_eq!(d.schema, None, "schema rides data_changed only (D6)");
+                assert_eq!(d.invalidation, None);
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
+
+        // THEN the `data_changed` push — same channel, after the triggering result (§6).
+        let dchg = deframe(&fe.recv().expect("frontend recv data_changed")[..]).unwrap();
+        assert_eq!(dchg.session_id.as_deref(), Some(session.as_str()));
+        assert!(dchg.reply_to.is_none(), "a push is unsolicited");
+        match &dchg.body {
+            Message::DataChanged(c) => {
+                assert_eq!(c.dataset_id, dataset_id);
+                assert_eq!(c.dataset_revision, 1);
+                assert_eq!(c.rows, Some(8), "the new total rides data_changed");
+                assert!(c.schema.is_some(), "schema present IFF changed");
+                assert_eq!(
+                    c.invalidation,
+                    messages::Invalidation {
+                        all: None,
+                        rows_from: Some(3),
+                        rows_to: None
+                    }
+                );
+                assert_eq!(c.cause.kind, messages::ChangeKind::Edit);
+                assert_eq!(c.cause.work_id.as_deref(), Some("w-edit"));
+            }
+            other => panic!("expected data_changed, got {other:?}"),
+        }
+
+        // The registry advanced: revision bumped, path swapped, old file retired once its
+        // refs drained (the route held the only one).
+        let snap = broker.datasets_snapshot();
+        assert_eq!(snap[0].1, "ready");
+        let new_path = snap[0].2.clone();
+        assert!(
+            new_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("_1.arrow"),
+            "current_path swapped to the edited file: {}",
+            new_path.display()
+        );
+        assert_ne!(new_path, old_path);
+    }
+
+    // 26a'. The edit rail with a ROW op (d4): `insert_rows` moves nothing in the schema,
+    // so the lane's result carries schema: None — the broadcast must carry rows + the
+    // descriptor and OMIT schema (schema-iff-changed), and the frontend keeps the old
+    // one. The same rail, exercised without view-consistency schema material.
+    #[test]
+    fn row_op_edit_broadcasts_data_changed_without_schema() {
+        let url = format!("inproc://orch-ds-rowedit-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_edit_lane(&url);
+        let (fe, session) = hello_frontend(&url);
+
+        let dataset_id = open_to_ready(&fe, &lane, &session); // revision 0
+
+        let edit = data_edit_work_with_op(
+            "w-insrows",
+            &dataset_id,
+            0,
+            messages::EditOp::InsertRows { at: 2, count: 3 },
+        );
+        fe.send(frame_envelope(&edit).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+
+        // The lane receives the work (rail is op-agnostic) and answers without a schema.
+        let _ = lane.recv().expect("lane recv edit work");
+        lane_edit_result(
+            &lane,
+            &session,
+            "w-insrows",
+            11, // rows grew, nothing else moved
+            None,
+            messages::Invalidation {
+                all: None,
+                rows_from: Some(2),
+                rows_to: None,
+            },
+        );
+
+        let _ = deframe(&fe.recv().expect("frontend recv edit result")[..]).unwrap();
+        match &deframe(&fe.recv().expect("frontend recv data_changed")[..])
+            .unwrap()
+            .body
+        {
+            Message::DataChanged(c) => {
+                assert_eq!(c.dataset_revision, 1);
+                assert_eq!(c.rows, Some(11));
+                assert_eq!(c.schema, None, "schema absent — nothing in it moved");
+                assert_eq!(
+                    c.invalidation,
+                    messages::Invalidation {
+                        all: None,
+                        rows_from: Some(2),
+                        rows_to: None
+                    }
+                );
+            }
+            other => panic!("expected data_changed, got {other:?}"),
+        }
+
+        // The registry advanced all the same: path swapped to the next revision's file.
+        let snap = broker.datasets_snapshot();
+        assert_eq!(snap[0].1, "ready");
+        assert!(
+            snap[0]
+                .2
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("_1.arrow"),
+            "current_path swapped despite no schema: {}",
+            snap[0].2.display()
+        );
+    }
+
+    // 26b. D11 at dispatch: an edit whose declared base revision is not the dataset's
+    //      current revision is a STALE EDIT — synthesized `validationError` result with the
+    //      structured `stale_edit` code, nothing dispatched, no revision bump, no
+    //      `data_changed`. The frontend refetches and retries.
+    #[test]
+    fn stale_edit_is_rejected_at_dispatch() {
+        let url = format!("inproc://orch-ds-staleedit-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_edit_lane(&url);
+        let (fe, session) = hello_frontend(&url);
+
+        let dataset_id = open_to_ready(&fe, &lane, &session); // revision 0
+        let before = broker.datasets_snapshot();
+
+        let edit = data_edit_work("w-stale", &dataset_id, 7); // base 7 ≠ current 0
+        fe.send(frame_envelope(&edit).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        match deframe(&fe.recv().expect("stale_edit validationError")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-stale");
+                assert!(matches!(r.status, Status::ValidationError));
+                let ResultPayload::Data(d) = &r.payload else {
+                    panic!("expected data result payload")
+                };
+                assert_eq!(d.dataset_id.as_deref(), Some(dataset_id.as_str()));
+                assert_eq!(d.dataset_revision, Some(0), "current revision echoed");
+                let issues = d.validation.as_ref().expect("validation detail");
+                assert_eq!(issues.len(), 1);
+                assert_eq!(issues[0].code, "stale_edit");
+                assert!(issues[0].message.contains("7"));
+            }
+            other => panic!("expected validationError result, got {other:?}"),
+        }
+        lane.set_opt::<RecvTimeout>(Some(Duration::from_millis(300)))
+            .unwrap();
+        assert!(lane.recv().is_err(), "a stale edit never reaches a lane");
+        assert_eq!(
+            broker.datasets_snapshot(),
+            before,
+            "registry untouched by a rejected edit"
+        );
+    }
+
+    // 26c. §3 atomicity on the failure leg: a lane edit failure leaves the revision, the
+    //      path, and the broadcast silent — nothing changed, so nothing is invalidated.
+    #[test]
+    fn failed_edit_leaves_revision_and_broadcast_silent() {
+        let url = format!("inproc://orch-ds-editfail-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_edit_lane(&url);
+        let (fe, session) = hello_frontend(&url);
+
+        let dataset_id = open_to_ready(&fe, &lane, &session); // revision 0
+        let before = broker.datasets_snapshot();
+
+        let edit = data_edit_work("w-edit-fail", &dataset_id, 0);
+        fe.send(frame_envelope(&edit).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let _ = lane.recv().expect("lane recv edit work");
+        lane_edit_failure(&lane, &session, "w-edit-fail", "coercion failed");
+
+        match deframe(&fe.recv().expect("frontend recv edit failure")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-edit-fail");
+                assert!(matches!(r.status, Status::FatalError));
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
+        fe.set_opt::<RecvTimeout>(Some(Duration::from_millis(300)))
+            .unwrap();
+        assert!(
+            fe.recv().is_err(),
+            "a failed edit broadcasts no data_changed"
+        );
+        assert_eq!(
+            broker.datasets_snapshot(),
+            before,
+            "registry untouched by a failed edit"
+        );
     }
 
     // 27. A lane death mid-VIEW fails the work like any eviction but keeps the dataset

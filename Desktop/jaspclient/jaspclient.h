@@ -133,11 +133,14 @@ signals:
 	/// Replace your menu with it.
 	void modulesUpdated(const ModuleCatalog & catalog);
 
-	/// A `data_changed` broadcast arrived (neo-jasp §19.2, data-view-design §6): invalidation
-	/// metadata, never a data carrier — consumers refetch the affected scope via `data_view`.
-	/// Skeleton signal: no producer exists until `data_edit`/`data_update` land; the reaction
-	/// matrix hooks in when they do.
-	void datasetChanged(const QString & datasetId, quint64 revision);
+	/// A `data_changed` push arrived (data-edit-design §6, Increment 4): view-consistency
+	/// material — the new revision, the new row total, the post-edit schema IFF it changed
+	/// (null otherwise), and the lane-computed invalidation descriptor (a raw object:
+	/// `{}`, `{all}`, `{rows_from[, rows_to]}` — interpretation belongs to the consumer, the
+	/// client stays thin). No `work_id`, so this is NOT routed through the completion slots:
+	/// consumers route by `datasetId` (Workspace → the holding DataSet::applyRevision).
+	/// `cause` is diagnostics-only (§6) — logged, never carried. GUI thread.
+	void dataChanged(const QString & datasetId, quint64 revision, quint64 rows, bool hasRows, const Json::Value & schema, const Json::Value & invalidation);
 
 private:
 	// Connection lifecycle — all run on the single worker thread (`_recvThread`).

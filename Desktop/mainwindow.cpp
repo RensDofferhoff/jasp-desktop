@@ -42,6 +42,7 @@
 #include "gui/preferencesmodel.h"
 #include "data/exporters/jaspexporter.h"
 #include "data/gridmodel.h"			// NEO data view (data-view-design.md §7.2/§7.3)
+#include "data/datasetpackage.h"	// NEO: Workspace (data_changed routing, data-edit-design §6)
 #include "utilities/application.h"
 #include "gui/jaspversionchecker.h"
 #include "ALTNavigation/altnavcontrol.h"
@@ -129,6 +130,17 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 	// initial catalog load — so the ribbon's special buttons are added first and modules slot
 	// in on the correct side of the divider. Pushes that arrive before then are cached by the
 	// client and applied wholesale by that initial load.
+
+	// NEO data_changed wiring (data-edit-design §6, Increment 4): the revision-bump push has
+	// no work_id, so it routes by dataset_id through the Workspace to the holding DataSet
+	// (applyRevision) — the shown dataset's view lane restarts at the new revision (v1
+	// whole-buffer drop; range-aware invalidation drops into the same slot later). The lambda
+	// bridges the Desktop-typed signal into CommonData, which cannot see jaspclient.h.
+	if (Workspace * ws = _package->workspace())
+		connect(_jaspClient, &JaspClient::dataChanged, this, [ws](const QString & datasetId, quint64 revision, quint64 rows, bool hasRows, const Json::Value & schema, const Json::Value & invalidation)
+		{
+			ws->applyLaneRevision(datasetId.toStdString(), revision, rows, hasRows, schema, invalidation);
+		});
 
 	_datasetTableModel		= new DataSetTableModel(this);
 	_columnModel			= new ColumnModel();
