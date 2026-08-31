@@ -214,6 +214,10 @@ public:
 
 			void			setColumnCount(	size_t colCount);
 			void			setRowCount(	size_t rowCount, bool alsoLoadData = true);
+			/// The LANE row count (applySchema/applyRevision): metadata ONLY — never materializes
+			/// the legacy Columns' per-row value vectors nor the default filter's vector (gigabytes
+			/// of dead weight on a large lane dataset; the grid reads cells through the view lane).
+			void			setRowCountMetadata(size_t rowCount);
 
 			void			incRevision() override;
 			bool			checkForUpdates(std::function<void(float)> progressCallback = [](float){});

@@ -874,6 +874,20 @@ void DataSet::setRowCount(size_t rowCount, bool alsoLoadData)
 	refresh();
 }
 
+void DataSet::setRowCountMetadata(size_t rowCount)
+{
+	// The LANE mirror's row count (applySchema/applyRevision — the "metadata only" path
+	// landWireSchema always intended): set the count WITHOUT materializing legacy row
+	// storage. The legacy setRowCount resizes every mirror Column's value vectors
+	// (_dbls/_ints × rowCount — on a 30M-row lane dataset that is gigabytes of dead
+	// weight the grid never reads: NEO cells come from the view lane, and the mirror
+	// exists so the provider chain sees names/types/counts) and resets the default
+	// filter's per-row vector — both bombs for a lane dataset. No legacy consumer
+	// iterates a lane dataset's Column values (no analyses on lane data yet; the
+	// DataSetTableModel is never the source for one).
+	_rowCount = rowCount;
+}
+
 void DataSet::incRevision()
 {
 	assert(_dataSetId != -1);
@@ -2307,7 +2321,7 @@ void DataSet::landWireSchema(const std::string & datasetId, uint64_t rows, const
 		for (size_t i = _columns.size(); i < _schemaColumns.size(); i++)
 			createColumn(_schemaColumns[i].name, _schemaColumns[i].type);
 
-	setRowCount(size_t(rows), false);	// metadata only — never load row data
+	setRowCountMetadata(size_t(rows));	// metadata only — never load row data, never materialize legacy vectors
 
 	Log::log() << "DataSet: lane schema applied for " << datasetId << " (" << rows << " rows, " << _schemaColumns.size() << " columns)" << std::endl;
 	emit schemaChanged();
@@ -2334,7 +2348,7 @@ void DataSet::applyRevision(uint64_t revision, uint64_t rows, bool hasRows, cons
 	{
 		if (hasRows)
 			_schemaRows = rows;
-		setRowCount(size_t(_schemaRows), false);	// metadata only
+		setRowCountMetadata(size_t(_schemaRows));	// metadata only — the lane path never materializes legacy vectors
 		Json::StreamWriterBuilder w;
 		w["indentation"] = "";
 		Log::log() << "DataSet: lane revision " << revision << " for " << _laneDatasetId
