@@ -1487,11 +1487,24 @@ QQmlContext * DataSetViewBase::setStyleDataItem(QQmlContext * previousContext, b
 	bool	isEditable	( flagsModel & Qt::ItemIsEditable),
 			isEnabled	( flagsModel & Qt::ItemIsEnabled);
 
-	if(isEditable || _storedDisplayText.count(row) == 0 || _storedDisplayText[row].count(col) == 0)
-		_storedDisplayText[row][col] = _model->data(modelIndex, Qt::DisplayRole).toString();
+	// The stored-text map is a LEGACY-model cache: it keeps the display text of every cell
+	// that ever entered the viewport and is only cleared on a model reset — on a 30M-row
+	// lane dataset that is an unbounded scroll-creep (~0.7 KB per visited row) and, worse,
+	// a stale one: evicted rows' chunks are gone, so the cached text survives eviction
+	// instead of showing the placeholder. Editable (lane) cells therefore NEVER enter the
+	// map — they serve live from the model, which is cheap (the lane view caches per cell)
+	// and self-healing (placeholder while the chunk is away, refreshed when it returns).
+	QString	text;
+	if (isEditable)
+		text = _model->data(modelIndex, Qt::DisplayRole).toString();
+	else
+	{
+		if (_storedDisplayText.count(row) == 0 || _storedDisplayText[row].count(col) == 0)
+			_storedDisplayText[row][col] = _model->data(modelIndex, Qt::DisplayRole).toString();
+		text = _storedDisplayText[row][col];
+	}
 
-	QString text		= _storedDisplayText[row][col],
-			textEdit	= _model->data(modelIndex, getRole("noSepaDisplay")).toString();
+	QString	textEdit	= _model->data(modelIndex, getRole("noSepaDisplay")).toString();
 
 	if(isEditable && !emptyValLabel)
 	{
