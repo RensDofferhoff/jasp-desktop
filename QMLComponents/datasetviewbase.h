@@ -265,7 +265,7 @@ protected:
 	float extraColumnWidth() { return !_extraColumnItem || expandDataSet() ? 0 : _extraColumnItem->width(); }
 
 	QQuickItem *	createTextItem(int row, int col);
-	void			storeTextItem(int row, int col, bool cleanUp = true);
+	void			storeTextItem(size_t row, size_t col, bool cleanUp = true);
 	void			setTextItemInfo(int row, int col, QQuickItem * textItem);
 
 	QQuickItem	*	createRowNumber(	int row);
@@ -299,11 +299,18 @@ protected:
 	QAbstractItemModel									*	_model					= nullptr;
 	QItemSelectionModel									*	_selectionModel			= nullptr;
 	std::vector<QSizeF>										_cellSizes;							//[col]
-	std::vector<double>										_colXPositions,						//[col][row]
-															_dataColsMaxWidth;
-	std::stack<ItemContextualized*>							_textItemStorage,
-															_rowNumberStorage,
-															_columnHeaderStorage;
+std::vector<double>															_colXPositions,								//[col][row]
+																						_dataColsMaxWidth;
+	/// The item pools are REUSE stacks — but they never shrank: a fast fling through a huge
+	/// dataset momentarily created far more delegates than any viewport needs, and the pool
+	/// kept them forever (each ItemContextualized = a QQuickItem + its QQmlContext, kilobytes).
+	/// Beyond this cap the item is deleted instead of pooled — 3× a generous full viewport.
+	static constexpr size_t											kItemPoolCap = 12000;
+	/// Pool an item if caching is on and the pool is under [`kItemPoolCap`], else delete it.
+	template <typename T> void poolItem(std::stack<T*> & pool, T * item, bool cache);
+	std::stack<ItemContextualized*>											_textItemStorage,
+																						_rowNumberStorage,
+																						_columnHeaderStorage;
 	ItemCxsByIndex                  						_rowNumberItems,
 															_columnHeaderItems;
 	ItemCxsByColRow                                 		_cellTextItems;						//[col][row]

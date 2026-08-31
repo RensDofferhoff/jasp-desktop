@@ -437,10 +437,9 @@ void DataSetViewBase::storeOutOfViewItems(bool all)
                     if(all || col < _currentViewportColMin || col > _currentViewportColMax || row < _currentViewportRowMin || row > _currentViewportRowMax)
                     {
                         intTextItem.second->item->setVisible(false);
-						intTextItem.second->item->setParentItem(nullptr);
+                        intTextItem.second->item->setParentItem(nullptr);
 
-                        if (_cacheItems)		_textItemStorage.push(intTextItem.second);
-                        else					delete intTextItem.second;
+                        poolItem(_textItemStorage, intTextItem.second, _cacheItems);
                     }
                     else
                     {
@@ -465,8 +464,7 @@ void DataSetViewBase::storeOutOfViewItems(bool all)
                 intItem.second->item->setVisible(false);
 				intItem.second->item->setParentItem(nullptr);
 
-                if (_cacheItems)		_columnHeaderStorage.push(intItem.second);
-                else					delete intItem.second;
+                poolItem(_columnHeaderStorage, intItem.second, _cacheItems);
             }
             else
                 cleanList[col]  = intItem.second;
@@ -488,8 +486,7 @@ void DataSetViewBase::storeOutOfViewItems(bool all)
                 intItem.second->item->setVisible(false);
 				intItem.second->item->setParentItem(nullptr);
 
-                if (_cacheItems)		_rowNumberStorage.push(intItem.second);
-                else					delete intItem.second;
+                poolItem(_rowNumberStorage, intItem.second, _cacheItems);
             }
             else
                 cleanList[row] = intItem.second;
@@ -546,9 +543,20 @@ void DataSetViewBase::buildNewLinesAndCreateNewItems()
 					pos1y((2 + row) *	_dataRowsMaxHeight		);
 
 			JASPTIMER_RESUME(DataSetViewBase::buildNewLinesAndCreateNewItems_GRID_DATA);
-			if(_storedLineFlags.count(row) == 0 || _storedLineFlags[row].count(col) == 0)
-				_storedLineFlags[row][col] = static_cast<unsigned char>(_model->data(_model->index(row, col), getRole("lines")).toInt());
-			unsigned char lineFlags = _storedLineFlags[row][col];
+			// Same rule as _storedDisplayText in setStyleDataItem: that map is a LEGACY-model cache
+			// that keeps one byte per cell EVER viewported (~430 B/row of std::map nodes) and is
+			// only cleared on a model reset — an unbounded scroll-creep on a 30M-row lane dataset.
+			// Editable (lane) cells serve live from the model — the lane's `lines` role is pure
+		// index arithmetic (DataSet::getDataSetViewLines), so caching buys nothing anyway.
+			unsigned char lineFlags;
+			if (_model->flags(_model->index(row, col)) & Qt::ItemIsEditable)
+				lineFlags = static_cast<unsigned char>(_model->data(_model->index(row, col), getRole("lines")).toInt());
+			else
+			{
+				if(_storedLineFlags.count(row) == 0 || _storedLineFlags[row].count(col) == 0)
+					_storedLineFlags[row][col] = static_cast<unsigned char>(_model->data(_model->index(row, col), getRole("lines")).toInt());
+				lineFlags = _storedLineFlags[row][col];
+			}
 			JASPTIMER_STOP(DataSetViewBase::buildNewLinesAndCreateNewItems_GRID_DATA);
 
 			/*
@@ -765,7 +773,14 @@ void DataSetViewBase::setTextItemInfo(int row, int col, QQuickItem * textItem)
 	iAmParent(textItem);
 }
 
-void DataSetViewBase::storeTextItem(int row, int col, bool cleanUp)
+template <typename T>
+void DataSetViewBase::poolItem(std::stack<T *> & pool, T * item, bool cache)
+{
+	if (cache && pool.size() < kItemPoolCap)		pool.push(item);
+	else											delete item;
+}
+
+void DataSetViewBase::storeTextItem(size_t row, size_t col, bool cleanUp)
 {
 	if((_cellTextItems.count(col) == 0 && _cellTextItems[col].count(row) == 0) || _cellTextItems[col][row] == nullptr) return;
 
@@ -790,8 +805,7 @@ void DataSetViewBase::storeTextItem(int row, int col, bool cleanUp)
 	textItem->item->setVisible(		false);
 	textItem->item->setParentItem(	nullptr);
 
-	if (_cacheItems)		_textItemStorage.push(textItem);
-	else					delete textItem;
+	poolItem(_textItemStorage, textItem, _cacheItems);
 
 	JASPTIMER_STOP(DataSetViewBase::storeTextItem);
 }
@@ -889,8 +903,7 @@ void DataSetViewBase::storeRowNumber(int row)
 	rowNumber->item->setParentItem(nullptr);
 	
 
-	if (_cacheItems)		_rowNumberStorage.push(rowNumber);
-	else					delete rowNumber;
+	poolItem(_rowNumberStorage, rowNumber, _cacheItems);
 }
 
 
@@ -992,8 +1005,7 @@ void DataSetViewBase::storeColumnHeader(int col)
 	columnHeader->item->setVisible(false);
 	columnHeader->item->setParentItem(nullptr);
 
-	if (_cacheItems)		_columnHeaderStorage.push(columnHeader);
-	else					delete columnHeader;
+	poolItem(_columnHeaderStorage, columnHeader, _cacheItems);
 }
 
 QQuickItem * DataSetViewBase::createleftTopCorner()

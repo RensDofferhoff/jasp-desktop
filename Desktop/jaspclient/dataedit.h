@@ -76,8 +76,12 @@ public:
 	/// (frontend-authored, from the forward gesture).
 	DataEditCommand(DataSet * dataSet, const Json::Value & editOp, QByteArray tail, const QString & text);
 
-	void	undo()					override;
-	void	redo()					override;
+	void	undo()				override;
+	void	redo()				override;
+
+	/// The command's resident undo material: the stored inverse blob (IPC bytes) plus the
+	/// forward op's tail (kept for redo) — the stack sums this for the ~250 MB byte cap.
+	size_t	undoBytes() const override	{ return size_t(_inverseBytes.size()) + size_t(_tail.size()); }
 
 private:
 	/// Submit the forward op (or the stored inverse, for undo) and file the result's

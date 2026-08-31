@@ -18,6 +18,12 @@ class UndoModelCommand : public QUndoCommand
 public:
 						UndoModelCommand(DataSet * dataSet = nullptr);
 
+	/// The command's resident UNDO-material footprint in bytes (the inverse blob + any
+	/// stored forward tail). The stack sums this to enforce the byte cap (the ~250 MB
+	/// drop-oldest policy, data-edit-design §11.4) — legacy commands hold their state in
+	/// the columns themselves and cost nothing here.
+	virtual size_t		undoBytes() const					{ return 0; }
+
 	virtual QString		columnName(int colIndex = -1)		const;
 	QString				rowName(int rowIndex)				const;
 	
@@ -466,6 +472,10 @@ public:
 	static void			setCurrent(UndoStack* stack) { _currentUndoStack = stack; }
 
 	void				pushCommand(UndoModelCommand* command);
+	/// The byte cap pass (§11.4): after a push, sum undoBytes() top-down and drop oldest
+	/// commands until the stored undo material fits ~250 MB. See the .cpp for the
+	/// setUndoLimit trick (QUndoStack cannot remove arbitrary commands).
+	void				enforceUndoByteCap();
 	void				startMacro(const QString& text = QString());
 	void				endMacro(UndoModelCommand* command = nullptr);
 	QUndoCommand*		parentCommand()		{ return _parentCommand; }
