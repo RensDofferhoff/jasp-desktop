@@ -5,6 +5,7 @@
 #include "workspace.h"
 #include "gridmodel.h"
 #include "jaspclient/dataedit.h"
+#include "log.h"
 #include <algorithm>
 #include <climits>
 
@@ -426,7 +427,12 @@ bool ExpandDataProxyModel::setData(const QModelIndex &index, const QVariant &val
 	{
 		DataSet * ds = gridSourceDataSet();
 		if (!ds)
+		{
+			Log::log() << "ExpandDataProxyModel::setData: no live dataset on the NEO source — edit refused (row " << index.row() << ", col " << index.column() << ")" << std::endl;
 			return false;
+		}
+
+		Log::log() << "DataEdit: cell edit at (row " << index.row() << ", col " << index.column() << ") — one insert_block" << std::endl;
 
 		const QString cell = DataEdit::escapeCell(value);
 		undoStack()->endMacro(new DataEditCommand(
@@ -461,7 +467,10 @@ void ExpandDataProxyModel::pasteSpreadsheet(int row, int col, const std::vector<
 		// and the header-rename surfaces' business — not this op.
 		DataSet * grid = gridSourceDataSet();
 		if (!grid)
+		{
+			Log::log() << "ExpandDataProxyModel::pasteSpreadsheet: no live dataset on the NEO source — paste dropped" << std::endl;
 			return;
+		}
 
 		std::vector<std::vector<QString>> escaped(values.size());
 		for (size_t c = 0; c < values.size(); ++c)

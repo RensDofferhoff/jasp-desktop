@@ -263,17 +263,26 @@ void JaspClient::recvLoop()
 
 std::string JaspClient::submit(const Json::Value & work, ResultHandler handler, const QByteArray & binary)
 {
-	std::string workId = work.get("work_id", "").asString();
+	// The frame MUST carry its identity: `work_id` keys the orchestrator's correlation and
+	// `id` is a required envelope field. Callers that set their own work_id pass through
+	 // untouched; a minted one is INJECTED here — a frame without them fails the
+	// orchestrator's typed parse and is dropped with no reply (the silent-edit landmine).
+	Json::Value envelope = work;
+	std::string workId = envelope.get("work_id", "").asString();
 	if (workId.empty())
+	{
 		workId = "w" + std::to_string(_nextWork++);	// generic one-shot work (analyses supply their id)
+		envelope["work_id"]	= workId;
+		envelope["id"]		= workId;
+	}
 
-	const uint64_t revision = work.get("revision", 0).asUInt64();
+	const uint64_t revision = envelope.get("revision", 0).asUInt64();
 
 	// Same work_id re-submitted → the assignment replaces the old slot (eviction by construction).
 	// No abort dance and no separate per-analysis map: this revision is the high-water mark (§23).
-	_slots[workId] = Slot{ revision, work.get("kind", "analysis_r_classic_jaspbase").asString(), std::move(handler) };
+	_slots[workId] = Slot{ revision, envelope.get("kind", "analysis_r_classic_jaspbase").asString(), std::move(handler) };
 
-	sendFrame(work, binary);
+	sendFrame(envelope, binary);
 	return workId;
 }
 

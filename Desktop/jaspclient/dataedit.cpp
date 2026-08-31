@@ -118,6 +118,9 @@ void DataEditCommand::submit(bool isUndo)
 	const Json::Value	op		= isUndo ? DataEdit::applyInverseOp(_inverseMeta) : _editOp;
 	const QByteArray	tail	= isUndo ? _inverseBytes : _tail;
 
+	Log::log() << "DataEditCommand: submitting " << (isUndo ? "undo" : "edit") << " '" << _text.toStdString()
+				   << "' for " << ds->datasetId() << " at revision " << ds->laneRevision() << std::endl;
+
 	JaspClient::client()->submitDataEdit(
 				QString::fromStdString(ds->datasetId()),
 				ds->laneRevision(),			// the D11 echo, read at submit time (it only climbs)
@@ -134,6 +137,8 @@ void DataEditCommand::submit(bool isUndo)
 			{
 				_inverseMeta	= result.inverseMeta;
 				_inverseBytes	= result.binary;
+				Log::log() << "DataEditCommand: '" << _text.toStdString() << "' applied — revision "
+						   << result.datasetRevision << ", inverse " << result.binary.size() << " bytes stored" << std::endl;
 			}
 			return;
 		}

@@ -1093,6 +1093,18 @@ impl Router {
                         env,
                         binary: binary.to_vec(),
                     });
+                } else {
+                    // Never-swallow (the 2026-08-31 UI smoke-test lesson): an unparseable
+                    // frame would otherwise vanish with NO trace on either side — the
+                    // client saw its TX, the router saw nothing. A missing required field
+                    // (id, work_id) is the classic cause; log it loudly so the seam bug
+                    // shows itself.
+                    eprintln!(
+                        "[orch] frontend {} sent an undecodable frame ({} bytes) — dropped \
+                         (missing required fields? id / work_id)",
+                        fe.session_id,
+                        msg.len()
+                    );
                 }
             }
             AioResult::Recv(Err(e)) => {

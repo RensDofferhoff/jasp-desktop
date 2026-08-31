@@ -18,13 +18,13 @@ clean on both bins. Release binaries rebuilt WITH d8.
 - **Resume pointer**: everything through **d8** is landed and green (146 tests, real
   sockets; release binaries current) — the lane ADVERTISES `data_edit` and the e2e
   crown proves the full rail. **(c) is DONE** (five `applyRevision` scenarios in
-  `Tests/testall.*`). **(e)'s first UI slice is LANDED** (2026-08-29, §1e): cell edits +
-  paste + Ctrl+Z run end-to-end through the real UI — `DataEditCommand` + the client's
-  edit vocabulary (`Desktop/jaspclient/dataedit.*`), outbound frame tails, and the
-  proxy/GridModel editable surface. Remaining (e) slices: `toggleColType`/
-  `setColumnName` un-stubs (schema_change), row/col structural commands, the ~250MB
-  undo-stack cap, range-aware invalidation. Environment note: ipc-dependent Rust suites
-  need `unsandboxed`; the C++ suite's PRE-EXISTING breakage is §5.
+  `Tests/testall.*`). **(e)'s first UI slice is LANDED and UI-VERIFIED** (2026-08-31,
+  §1e): cell edits + multi-column paste + Ctrl+Z/Ctrl+Shift+Z all run end-to-end in the
+  real app against the real orchestrator (the user smoke-tested on a 100k×30 dataset).
+  Remaining (e) slices: `toggleColType`/`setColumnName` un-stubs (schema_change),
+  row/col structural gestures → their ops, the ~250MB undo-stack cap, range-aware
+  invalidation. Environment note: ipc-dependent Rust suites need `unsandboxed`; the
+  C++ suite's PRE-EXISTING breakage is §5.
 - `data-edit-design.md` — the contract. §2 wire shape, §3 ops + atomicity, §4 type/label
   resolution, §5 undo, §6 `data_changed` + build order, §10 lane notes.
 - `data-view-format.md` §1.2 — the TSV grammar (escape INTO and now parse BACK from).
@@ -534,8 +534,26 @@ frontend never sees a wire format) — `Desktop/jaspclient/dataedit.{h,cpp}`:
   Ctrl+Z → `undo()` → `apply_inverse` with the stored blob → same return leg.
 - Validation: JASPDesktopLib + JASP app build clean; the runnable JASPTest set
   (15: savLabels + 7 syncer + 5 lane scenarios) green with the new code linked in.
-  The interactive UI smoke test (open a CSV, type in a cell, Ctrl+Z) is the user's
-  manual step — the rail beneath it is the Rust e2e crown's proven path.
+  **UI-VERIFIED 2026-08-31**: cell edits + multi-column paste (incl. one-paste undo)
+  confirmed working in the real app against the real orchestrator on a 100k×30
+  dataset.
+- **The 2026-08-31 smoke test caught TWO seam bugs, both fixed**:
+  1. `JaspClient::submit` MINTED the correlation id but never wrote it into the
+     outgoing JSON (`const Json::Value&` — it couldn't), and `submitDataEdit` set
+     neither `id` nor `work_id` — both REQUIRED envelope fields. The frame left the
+     client (TX logged), failed the orchestrator's typed parse, and vanished.
+     Every prior caller set its own ids, so the path was never exercised. Fix:
+     `submit` copies the envelope and INJECTS the minted `work_id` + `id`. Rule: a
+     frame's identity must be IN the frame, not just in the slot map.
+  2. The orchestrator DROPPED unparseable frames in total silence — TX on one side,
+     nothing on the other, both logs innocent. Fix: `arm_frontend_channel` eprints
+     `undecodable frame (N bytes) — dropped` (never-swallow on parse failure).
+  Diagnostics added alongside (keep them): the proxy's NEO refusal paths and
+  `DataEditCommand`'s submit/apply stages log via `Log::log` — the stage that dies
+  now names itself.
+- Known QML wart (not blocking, pre-existing): `DataTableViewEdit.qml:181` logs
+  `Unable to assign [undefined] to bool` on edit-item transitions — worth a look
+  when the editing UX gets polished.
 - NOT yet (later slices): `toggleColType`/`setColumnName` un-stubs (schema_change),
   row/col insert-delete gestures → their ops, the ~250MB byte-based undo-stack cap,
   range-aware invalidation, the paste dialog's `target_schema` declarations.
