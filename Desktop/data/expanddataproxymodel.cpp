@@ -568,6 +568,34 @@ stringset ExpandDataProxyModel::columnIndexesToNames(intset columnIndexes)
 
 int ExpandDataProxyModel::setColumnType(intset columnIndexes, int columnType)
 {
+	// NEO: a retype is a schema_change (§3 — the column set never moves; the lane
+	// re-encodes the data, coerce-or-error). The shown indexes ARE the schema indexes
+	// (no filter compaction in the NEO view); names come from the schema, not the legacy
+	// mirror (renames keep the mirror stale — the grid reads the schema).
+	if (!dataSetSourceModel())
+	{
+		DataSet * ds = gridSourceDataSet();
+		if (!ds)
+		{
+			Log::log() << "ExpandDataProxyModel::setColumnType: no live NEO dataset — ignored" << std::endl;
+			return columnType;
+		}
+
+		std::set<std::string> names;
+		for (int col : columnIndexes)
+		{
+			const ColumnInfo * info = col >= 0 ? ds->schemaColumnAt(size_t(col)) : nullptr;
+			if (info)
+				names.insert(info->name);
+		}
+		if (!names.empty())
+			undoStack()->endMacro(new DataEditCommand(
+				ds,
+				DataEdit::schemaChangeTypeOp(ds, names, static_cast<enum columnType>(columnType)),
+				QByteArray(),
+				tr("Change column type")));
+		return columnType;
+	}
 
 	undoStack()->pushCommand(new SetColumnTypeCommand(dataSetSourceModel(), columnIndexesToNames(columnIndexes), columnType));
 

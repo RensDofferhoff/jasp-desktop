@@ -3,6 +3,7 @@
 #include <QLocale>
 #include <algorithm>
 #include <limits>
+#include <set>
 
 #include "viewfiller.h"
 #include "data/datasetpackage.h"
@@ -11,6 +12,7 @@
 #include "qutils.h"
 #include "jasptheme.h"
 #include "log.h"
+#include "jaspclient/dataedit.h"
 
 const QString	GridModel::placeholderText = QStringLiteral("…");	// U+2026 — distinct from empty cells and nulls
 
@@ -456,10 +458,57 @@ void GridModel::setColumnFilter(const QString & filter)
 	Log::log() << "GridModel: column filter '" << tq(filter.toStdString()) << "' stored, but column filtering is not implemented until the edit era" << std::endl;
 }
 
-void GridModel::toggleColType(int, bool)
+void GridModel::toggleColType(int column, bool doubleClick)
 {
-	// Edit-era: column type changes ride data_edit (merge-multidataset.md §6 — fail loudly).
-	Log::log() << "GridModel: toggleColType ignored — column type editing waits for data_edit (edit era)" << std::endl;
+	// The status-bar type toggle (single click: the clicked column; double click: ALL
+	// visible columns) — one schema_change per gesture. The cycle is scale → ordinal →
+	// nominal → scale (nominalText rides as nominal on the wire; unknown enters the
+	// cycle at scale).
+	if (!_dataSet || !_dataSet->isOpen())
+		return;
+
+	auto nextType = [](enum columnType cur) -> enum columnType
+	{
+		switch (cur)
+		{
+		case columnType::scale:		return columnType::ordinal;
+		case columnType::ordinal:	return columnType::nominal;
+		default:					return columnType::scale;
+		}
+	};
+
+	const auto & schema = _dataSet->schema();
+	std::set<std::string> names;
+	if (doubleClick)
+	{
+		for (const ColumnInfo & info : schema)
+			names.insert(info.name);
+	}
+	else
+	{
+		const ColumnInfo * info = column >= 0 && size_t(column) < schema.size() ? &schema[size_t(column)] : nullptr;
+		if (!info)
+			return;
+		names.insert(info->name);
+	}
+	if (names.empty())
+		return;
+
+	// The NEW type: the clicked column's successor (double click: the first column's —
+	// every column cycles to the same next type so the batch lands as one coherent state).
+	const std::string & anchor = *names.begin();
+	const ColumnInfo * anchorInfo = _dataSet->schemaColumn(anchor);
+	if (!anchorInfo)
+		return;
+
+	UndoStack * stack = UndoStack::singleton();
+	if (!stack)
+		return;
+	stack->endMacro(new DataEditCommand(
+			_dataSet,
+			DataEdit::schemaChangeTypeOp(_dataSet, names, nextType(anchorInfo->type)),
+			QByteArray(),
+			doubleClick ? tr("Change all column types") : tr("Change column type")));
 }
 
 bool GridModel::isColumnNameFree(QString name) const

@@ -9,6 +9,7 @@
 
 #include "undostack.h"
 #include "dataset.h"
+#include "columntype.h"
 
 /// The data-edit client vocabulary (data-edit-design §2/§3/§5): everything wire-shaped
 /// about editing lives HERE, beside JaspClient — the op JSON shapes, the §1.2 TSV
@@ -24,6 +25,16 @@ namespace DataEdit
 	/// `apply_inverse` — submits a previously returned inverse blob VERBATIM (D10): the
 	/// meta rides the `inverse` field, the IPC bytes ride the frame tail.
 	Json::Value	applyInverseOp(const Json::Value & inverseMeta);
+
+	/// `schema_change` retype (§3): the full target_schema array — d6's count-match rule
+	/// needs EVERY column, matched by its CURRENT field name — with `type` set on the
+	/// named column(s). Everything absent is `keep`; the lane re-encodes the data (the
+	/// lossy-intent direction, coerce-or-error: text values refuse a retype to scale).
+	Json::Value	schemaChangeTypeOp(DataSet * dataSet, const std::set<std::string> & columnNames, columnType newType);
+
+	/// The wire type string of a columnType (nominalText rides as nominal; unknown is
+	/// not representable — callers refuse).
+	QString		wireTypeOf(columnType type);
 
 	// ── §1.2 authoring (the mirror of DataViewBuffer::unescapeCell) ──────────────────
 

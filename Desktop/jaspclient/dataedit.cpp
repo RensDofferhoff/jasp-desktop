@@ -27,6 +27,41 @@ Json::Value DataEdit::applyInverseOp(const Json::Value & inverseMeta)
 	return op;
 }
 
+QString DataEdit::wireTypeOf(columnType type)
+{
+	switch (type)
+	{
+	case columnType::scale:		return QStringLiteral("scale");
+	case columnType::ordinal:	return QStringLiteral("ordinal");
+	case columnType::nominal:
+	case columnType::nominalText:	return QStringLiteral("nominal");
+	default:						return QString();	// unknown — not representable on the wire
+	}
+}
+
+Json::Value DataEdit::schemaChangeTypeOp(DataSet * dataSet, const std::set<std::string> & columnNames, columnType newType)
+{
+	// d6's shape: one entry per column of the POST-EDIT schema, in order, each carrying
+	// its CURRENT field name as the identity (`name`); absent fields mean keep. Only the
+	// targeted entries carry `type` — a retype, nothing else (rename/reorder/relabel are
+	// other gestures' entries).
+	const QString wireType = wireTypeOf(newType);
+	Json::Value targetSchema(Json::arrayValue);
+	for (const ColumnInfo & info : dataSet->schema())
+	{
+		Json::Value entry(Json::objectValue);
+		entry["name"] = info.name;
+		if (columnNames.count(info.name))
+			entry["type"] = wireType.toStdString();
+		targetSchema.append(entry);
+	}
+
+	Json::Value op(Json::objectValue);
+	op["op"]				= "schema_change";
+	op["target_schema"]	= targetSchema;
+	return op;
+}
+
 // ── §1.2 authoring ──────────────────────────────────────────────────────────────────────
 
 QString DataEdit::escapeCell(const QVariant & cell)
