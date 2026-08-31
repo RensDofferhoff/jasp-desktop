@@ -1,30 +1,33 @@
-# HANDOVER — Data Edit era: the `data_changed` rail (a+b) and the lane engine (d1–d8)
+# HANDOVER — Data Edit era: the `data_changed` rail (a+b), the lane engine (d1–d8), and the seam (e)
 
-**Status:** 2026-08-29. Implements `refactor_design/data-edit-design.md` **rev 4** (decisions
+**Status:** 2026-08-31. Implements `refactor_design/data-edit-design.md` **rev 4** (decisions
 D1–D11 frozen; do not relitigate — open items are its §11). Done: build-order steps **(a)**
 (`data_changed` wire + orchestrator rail) and **(b)** (frontend dispatch → `applyRevision`),
 plus **d1–d8** of the lane slicing — the edit family is COMPLETE and LIVE: all six ops
 serve with their undo programs, `insert_block`'s declared `target_schema` (d6b, P13)
 round-trips, the lane ADVERTISES `data_edit` (d8), and the real-lane e2e crown proves
-the whole rail (edit → undo ×2 → redo, revisions 0→5, views at every state).
-Remaining: step **(e)** (the frontend seam) — **(c)** (the C++ harness scenarios) is
-DONE: five `applyRevision` scenarios green in `JASPTest`.
+the whole rail. **(c)** DONE (five `applyRevision` scenarios). **(e)** slices 1–2 LANDED
+and UI-VERIFIED: cell edits + paste + undo/redo, and column-type switching via
+`schema_change`. The 2026-08-31 big-data session (terror_tall, 30M×8) hardened the
+view path (five memory fixes) and landed the undo byte cap — and set the DIRECTION:
+**stop patching the legacy view machinery; remove it** (Phase B accelerated, §4).
 
-All Rust tests green on real sockets (146: 91 + 44 + 11) including the e2e suite; clippy
-clean on both bins. Release binaries rebuilt WITH d8.
+All Rust tests green on real sockets (146: 91 + 44 + 11); clippy clean. C++ runnable
+set 16/16 (§5). Release binaries current with d8+.
 
 ## 0. Read first
 
-- **Resume pointer**: everything through **d8** is landed and green (146 tests, real
-  sockets; release binaries current) — the lane ADVERTISES `data_edit` and the e2e
-  crown proves the full rail. **(c) is DONE** (five `applyRevision` scenarios in
-  `Tests/testall.*`). **(e)'s first UI slice is LANDED and UI-VERIFIED** (2026-08-31,
-  §1e): cell edits + multi-column paste + Ctrl+Z/Ctrl+Shift+Z all run end-to-end in the
-  real app against the real orchestrator (the user smoke-tested on a 100k×30 dataset).
-  Remaining (e) slices: `toggleColType`/`setColumnName` un-stubs (schema_change),
-  row/col structural gestures → their ops, the ~250MB undo-stack cap, range-aware
-  invalidation. Environment note: ipc-dependent Rust suites need `unsandboxed`; the
-  C++ suite's PRE-EXISTING breakage is §5.
+- **Resume pointer**: **(e)** slices 1–2 are LANDED and UI-VERIFIED (§1e): cell edits,
+  multi-column paste, Ctrl+Z/Ctrl+Shift+Z, and column-type switching (header menu +
+  status-bar toggle) all run in the real app against the real orchestrator. The
+  big-data session hardened the view (five memory fixes + the undo byte cap, §1e) —
+  but **memory still creeps on scroll and CPU sometimes stays high** (the leading
+  suspect: `DataSetSyncer` running on lane datasets — §4 R1). **DIRECTION SET
+  (2026-08-31, the user's call): stop patching the legacy view machinery — it is
+  scheduled for deletion (Phase B). Next work is the REMOVAL plan in §4 (R1 syncer,
+  R2 mirror audit, R3 dead code), then the remaining (e) features (row/col structural
+  gestures, `setColumnName` rename, labels editor).** Environment note: ipc-dependent
+  Rust suites need `unsandboxed`; the C++ suite's PRE-EXISTING breakage is §5.
 - `data-edit-design.md` — the contract. §2 wire shape, §3 ops + atomicity, §4 type/label
   resolution, §5 undo, §6 `data_changed` + build order, §10 lane notes.
 - `data-view-format.md` §1.2 — the TSV grammar (escape INTO and now parse BACK from).
@@ -554,9 +557,56 @@ frontend never sees a wire format) — `Desktop/jaspclient/dataedit.{h,cpp}`:
 - Known QML wart (not blocking, pre-existing): `DataTableViewEdit.qml:181` logs
   `Unable to assign [undefined] to bool` on edit-item transitions — worth a look
   when the editing UX gets polished.
-- NOT yet (later slices): `toggleColType`/`setColumnName` un-stubs (schema_change),
-  row/col insert-delete gestures → their ops, the ~250MB byte-based undo-stack cap,
-  range-aware invalidation, the paste dialog's `target_schema` declarations.
+- NOT yet (later slices): `setColumnName` rename (schema_change), row/col insert-delete
+  gestures → their ops, range-aware invalidation, the paste dialog's `target_schema`
+  declarations, the labels editor (B2).
+
+### (e2) Column-type switching — the crash and the feature
+
+The header's type menu reached the LEGACY path (`proxy::setColumnType` →
+`SetColumnTypeCommand` with a NULL dataset for a NEO source → `_dataSetID = -1` →
+`UndoModelCommand::dataSet()` asserted). Fixed by routing the gesture where the design
+always said it goes — `schema_change` (`c52e581af`):
+
+- `DataEdit::schemaChangeTypeOp(ds, names, newType)` — d6's count-match shape: every
+  column entry by CURRENT field name, `type` on the targets (`wireTypeOf`: nominalText
+  rides as nominal).
+- `proxy::setColumnType` NEO branch submits one `DataEditCommand` (no tail);
+  `GridModel::toggleColType` un-stubbed: the status-bar toggle cycles
+  scale → ordinal → nominal → scale (double-click: ALL columns in one op).
+- Known cosmetic wart: the header type menu's icons resolve through
+  `JaspTheme::currentIconPath()` to a non-existent qrc prefix (`variable-nominal.svg`
+  lives under `QMLComponents/icons`) — labels render, icons don't.
+
+### (e3) The big-data session — terror_tall (30M×8): five fixes, one direction
+
+Loading terror_tall ate 10+ GB. The hunt found FIVE row-sized/usage-sized offenders in
+the legacy view path (each fixed + committed) and — the real lesson — that they all live
+in machinery whose designed fate is DELETION (Phase B). **Direction set: stop patching,
+start removing (§4).**
+
+| # | Offender | Cost on 30M×8 | Commit |
+|---|---|---|---|
+| 1 | `startView` overwrote `_buffer`/`_iller` — every restart leaked a full TSV buffer AND a still-running filler (the repeating fill cycles in the orchestrator log) | unbounded ×dataset | `6560a0fae` |
+| 2 | `landWireSchema` → `setRowCount(rows, false)` — "metadata only" in comment only; it resized every mirror Column's `_dbls`/`_ints` to rowCount + the filter vector | ~2GB instantly at "dataset ready" | `9bf4ab1ae` |
+| 3 | `_storedDisplayText` — per-visited-row map, never trimmed | ~0.7KB × rows scrolled | `baad0849b` |
+| 4 | `_storedLineFlags` — same disease (1 byte of flags on ~430B of map nodes per cell) | ~0.4KB × rows scrolled | `a6526730b` |
+| 5 | item pools (`_textItemStorage`…) never shrank — flings left permanent balloons | KBs × peak items | `a6526730b` |
+
+- Fixes 3–4 use the SAME pattern: **editable (lane) cells serve live from the model and
+  never enter the cache** — the lane's roles are cheap (the `lines` role is pure index
+  arithmetic); legacy datasets keep their caches.
+- **The undo byte cap LANDED** (§11.4, `a6526730b`): `UndoModelCommand::undoBytes()`
+  virtual; `DataEditCommand` counts inverse blob + forward tail;
+  `UndoStack::enforceUndoByteCap()` after every push sums top-down and drops OLDEST at
+  ~250MB via the `setUndoLimit(n)`-then-`(0)` trick (QUndoStack cannot remove arbitrary
+  commands); over-cap macros log but keep their children (§5's honest minimum).
+- **STILL OPEN after all five**: memory creeps on scroll (slower) and CPU sometimes
+  stays high. Leading suspect for BOTH: `DataSetSyncer` running on lane datasets
+  (§4 R1) — the FileMenu open path starts file syncing/watching on a 200MB CSV the
+  lane owns; periodic re-reads/hashes = sustained CPU; the cross-thread warning in
+  the user's log is it. Secondary suspects: glibc arena retention from the 200MB
+  chunk churn; QML relayout churn from per-chunk `dataChanged` emissions.
 
 ### (c) The C++ harness scenarios — `applyRevision`'s contract pinned
 
@@ -678,33 +728,38 @@ JSON shape exactly):
     relay, re-run `edit_undo_redo_crown_over_the_real_lane` — a dropped tail reads as
     "the edit block is empty" at the lane, silently degrading every edit.
 
-## 4. Next: (e) the frontend seam
+## 4. Next: the REMOVAL plan (Phase B accelerated) + the remaining (e) features
 
-- **(c) is DONE** (§1c above — five green scenarios; the fixture vocabulary
-  (`laneSchema`/`laneColumn`/`_newLaneDataSet`) is reusable for (e)'s tests).
-- **(e) — seam/surface (frontend)**, in slices: **e1** JaspClient grows an OUTBOUND
-  binary tail (`sendFrame`/`frameEnvelope` are JSON-only today — edits submit §1.2 TSV
-  cells, `apply_inverse` submits IPC bytes; `Result.binary` already carries INBOUND
-  tails — the Rust e2e's `edit_dataset` helper is the reference framing); **e2** the
-  submission layer (typed `data_edit` envelopes, `revision = laneRevision()` — the D11
-  echo; `Result` gains the inverse fields, stored verbatim per D10); **e3** the
-  QUndoCommand marriage (`redo()` SUBMITS, `undo()` submits `apply_inverse` with the
-  stored (meta, bytes) verbatim, NO `mergeWith` — coalescing at commit boundaries: one
-  paste = one `insert_block`; the ~250MB byte-based stack cap); **e4** the surface flip
-  (`ExpandDataProxyModel::flags` gates on `isOpen()` not legacy-source;
-  un-stub `GridModel::toggleColType`/`setColumnName` → `schema_change`); **e5** model
-  dynamics (rowsInserted/rowsRemoved instead of the whole-model restart — v1 may keep
-  the documented drop).
-- **(e) — seam/surface (frontend)**: proxy `setData` → commit-boundary batching →
-  `QUndoCommand{opSubmitted, inverse}` → JaspClient submission (`redo()` submits the op,
-  `undo()` submits `apply_inverse` with the stored `(meta, bytes)` verbatim; no
-  `mergeWith`). HANDOVER-multidataset-fold §3 checklist: flip `ItemIsEditable` when
-  `isOpen()`, un-stub `toggleColType`/`setColumnName`, route cell edits. JaspClient needs
-  the inverse tail bytes on results (`Result.binary` already carries tails verbatim).
-- **(c) — harness scenarios** (C++ `Tests/testall.*`): mid-fill invalidation, row growth,
-  schema swap, stale-view interleave, idempotent ignore — against `applyRevision`. NOW
-  ALSO WORTH: a row-op scenario (`rows_from` invalidation without schema material — the
-  `data_changed`-schema-absent path the C++ side has never seen either).
+**The pinned direction (2026-08-31, the user's call): STOP patching the legacy view
+machinery — five fixes went into code whose designed fate is deletion (§8's Phase B).
+Patches only where something is actively on fire; the cure is removal.** The removal
+work, ordered by safety and payoff (audit grounded 2026-08-31):
+
+- **R1 — lane datasets never sync (small, do first; the CPU suspect).** The FileMenu
+  open path starts legacy syncing alongside the NEO open: `FileMenu::setCurrentDataFile`
+  L207 (`ds->syncer().startFileSyncing(path)`), `FileMenu::setDataFileWatcher` L238,
+  `MainWindow::dataSetIOCompleted` L1985/L1996 (`startFileSyncing`/
+  `startDatabaseSyncing`). Gate each on `!ds->isOpen()` (lane-bound datasets skip).
+  Kills the file watcher, the periodic re-reads/hashes of a huge source CSV (the
+  sustained-CPU suspect), the sqlite interval machinery, and the cross-thread
+  QObject warning. The (c) syncer tests cover the LEGACY path — they must stay green
+  (they use legacy-loaded fixtures, so the gate should not affect them — verify).
+- **R2 — stop creating the legacy Column mirror for lane datasets (needs a short
+  audit).** `landWireSchema`'s mirror exists so the provider chain (forms/headers)
+  serves metadata. Audit who reads `dataSet->column(s)` on LANE paths; findings so
+  far: `ColumnModel::isColumnNameFree` (L924) — GridModel already has a schema-based
+  twin. Point stragglers at `schema()` then gate the mirror creation
+  (`if (_columns.size() < _schemaColumns.size()) …` block). After this, lane datasets
+  touch ZERO legacy row/column storage — the class of bugs §1e3 hunted goes extinct.
+- **R3 — delete the bypassed caches' dead branches** (cosmetic, last): after R2, the
+  `_storedDisplayText`/`_storedLineFlags` legacy branches and the `DataSetTableModel`
+  edit paths are dead on the lane route; remove when comfortable.
+- **Remaining (e) features (after or interleaved with the removal):** `setColumnName`
+  rename → `schema_change`; row/col insert-delete gestures → their ops
+  (`insert_rows`/`delete_rows`/`insert_cols`/`delete_cols` — all served by the lane
+  since d4/d5); range-aware invalidation instead of the whole-view restart; the paste
+  dialog's `target_schema` declarations; the labels editor (B2). The undo byte cap is
+  DONE (§1e3).
 
 ## 5. Validation + environment quirks
 
@@ -714,8 +769,21 @@ cargo test                       # 91 (data-runner) + 44 (orchestrator) + 11 (da
 cargo clippy --all-targets       # clean (keep it that way on every touched target)
 cargo run --bin jasp-orchestrator -- --schema > messages.schema.json   # regen after wire changes
                                   # (d4–d8 changed NO serde wire types)
+# C++ (the runnable set; see the breakage note below):
+QT_QPA_PLATFORM=offscreen build/Desktop_Qt_6_11_0-Debug/Tests/JASPTest testSavLabels \
+  testSyncerStartStopFileSyncing testSyncerFileChangeEmitsSignal testSyncerStartStopDatabaseSyncing \
+  testSyncerSyncNowWithoutDataSource testSyncerMultipleStartStop testSyncerReleasesSyncGuardOnCompletion \
+  testSyncerRetriesFileChangeMissedDuringSync testUndoColumnDropLevels \
+  testLaneRevisionLandsRowsAndSchema testLaneRevisionIgnoresStalePushes testLaneRevisionSchemaSwap \
+  testLaneRevisionRowGrowthWithoutSchema testLaneRevisionOutOfOrderPushes   # 16/16 green
 ```
 
+- 2026-08-31 (big-data + undo-cap session): the five view fixes + the undo byte cap
+  (§1e3); runnable C++ set **16/16** (the undo regression test joined); app + release
+  orchestrator rebuilt. UI-verified by the user on terror_tall (30M×8): load survives,
+  memory "much much better" but STILL creeps on scroll + CPU sometimes high → §4 R1.
+- 2026-08-31 (seam session): (e) slices 1–2 UI-verified; the two seam bugs (§1e);
+  runnable set 15/15 at that point.
 - 2026-08-29 (d8 session, unsandboxed): full suite green — 91 + 44 + 11 = 146 on real
   sockets; clippy clean; release binaries rebuilt WITH d8 (orchestrator included — the
   tail relay changed).
