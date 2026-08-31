@@ -78,6 +78,15 @@ void GridModel::startView()
 	if (!_dataSet || !_dataSet->isOpen() || _dataSet->schemaRows() == 0)
 		return;		// nothing to view (legacy dataset, or a schema-only one) — the grid shows an empty model
 
+	// Drop any previous view FIRST (the 2026-08-31 memory bomb): restarts happen on every
+	// schemaChanged/shownDataSetChanged, and overwriting the pointers without dropping leaked
+	// a FULL TSV buffer plus a STILL-RUNNING filler per restart — N leaked fillers each kept
+	// streaming the whole dataset into their own unbounded arenas (on terror_tall: 10+ GB,
+	// load never completing; on small datasets it hid as the repeating fill cycles in the
+	// orchestrator log). dropView stops the old filler (aborting in-flight chunks — the epoch
+	// guard rejects their late arrival) and deleteLaters the old buffer.
+	dropView();
+
 	_viewEpoch++;
 	_buffer = new DataViewBuffer(this);
 	// The buffer's revision MUST be the dataset's CURRENT revision: chunks are stamped with
