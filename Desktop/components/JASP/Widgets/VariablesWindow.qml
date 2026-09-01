@@ -44,11 +44,27 @@ FocusScope
 		{
 			if (columnModel.visible && columnModel.chosenColumn >= 0)
 			{
-				columnModel.setColumnNameQ(		(columnModel.compactMode ? tabInfo : columnInfoTop).columnNameValue)
-				columnModel.setColumnTitleQ(	(columnModel.compactMode ? tabInfo : columnInfoTop).columnTitleValue)
-				columnModel.setColumnDescriptionQ((columnModel.compactMode ? tabInfo : columnInfoTop).columnDescriptionValue)
-				columnModel.computedType		= (columnModel.compactMode ? tabInfo : columnInfoTop).columnComputedTypeValue
-				columnModel.currentColumnType	= (columnModel.compactMode ? tabInfo : columnInfoTop).columnTypeValue
+				var info = columnModel.compactMode ? tabInfo : columnInfoTop
+
+				// Commit PENDING USER EDITS only — the per-field dirty flags (set by
+				// textEdited, cleared as they are committed). The unconditional
+				// force-commit pushed the fields' text on EVERY switch, and a stale
+				// field (the previous column's values still shown) INFECTED the next
+				// column with them.
+				if (info.columnNameEdited)
+				{
+					columnModel.setColumnNameQ(info.columnNameValue)
+					info.columnNameEdited = false
+				}
+				if (info.columnTitleEdited)
+				{
+					columnModel.setColumnTitleQ(info.columnTitleValue)
+					info.columnTitleEdited = false
+				}
+				if (info.columnDescriptionValue !== columnModel.columnDescription)
+					columnModel.setColumnDescriptionQ(info.columnDescriptionValue)
+				columnModel.computedType		= info.columnComputedTypeValue
+				columnModel.currentColumnType	= info.columnTypeValue
 			}
 		}
 		
@@ -300,10 +316,10 @@ FocusScope
 					
 					CheckBox
 					{
-						id:					columnHasLabels
-						label:				qsTr("Use labels")
-						checked:			columnModel.column &&  columnModel.column.hasLabels
-						onCheckedChanged:	if(columnModel.column) columnModel.column.hasLabels = checked
+						id:						columnHasLabels
+						label:					qsTr("Use labels")
+						checked:			columnModel.hasLabels
+						onCheckedChanged:	if(columnModel.column) columnModel.setHasLabelsQ(checked)
 					}
 				
 					LabelEditorWindow

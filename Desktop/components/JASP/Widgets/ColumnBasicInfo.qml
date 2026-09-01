@@ -29,10 +29,14 @@ Item
 	height:						implicitHeight
 	property bool showIcons:	true
 	property alias columnNameValue:			columnNameVariablesWindow.value
-	property alias columnTitleValue:		columnTitleVariablesWindow.value
+	property alias columnTitleValue:			columnTitleVariablesWindow.value
 	property alias columnDescriptionValue:	columnDescriptionVariablesWindow.text
 	property alias columnComputedTypeValue:	computedTypeVariableWindow.value
 	property alias columnTypeValue:			columnTypeVariableWindow.value
+	// Per-field "the user actually typed" flags (set by textEdited, cleared on commit) —
+	// the switch-time force-commit commits only these (see VariablesWindow).
+	property alias columnNameEdited:		columnNameVariablesWindow.userEditedName
+	property alias columnTitleEdited:		columnTitleVariablesWindow.userEditedTitle
 
 	function focusOnTheNamePlease()
 	{
@@ -74,9 +78,19 @@ Item
 			{
 				id:					columnNameVariablesWindow
 				placeholderText:	qsTr("<First fill in the column name>")
-				value:				columnModel.column ? columnModel.column.name : ""
-				onEditingFinished:	if((columnModel.column ? columnModel.column.name : "") !== displayValue) 
-										columnModel.setColumnNameQ(displayValue)
+				value:				columnModel.columnName
+				// Phantom-rename guard: editingFinished also fires on plain FOCUS-OUT — e.g.
+				// clicking another column — with the PREVIOUS column's text still in the field,
+				// which renamed the newly chosen column to the previous one's name. Only a real
+				// user edit (textEdited fires per keystroke) may submit.
+				property bool	userEditedName:	false
+				onTextEdited:		userEditedName = true
+				onEditingFinished:
+				{
+					if (userEditedName && columnModel.columnName !== displayValue)
+						columnModel.setColumnNameQ(displayValue)
+					userEditedName = false
+				}
 				undoModel:			columnModel
 				editable:           columnModel.nameEditable
 				label:				qsTr("Name: ")
@@ -157,11 +171,19 @@ Item
 			TextField
 			{
 				id:					columnTitleVariablesWindow
-				label:				qsTr("Long name: ");
+				label:				qsTr("Long name: ")
 				placeholderText:	qsTr("<Fill in a more descriptive name of the column>")
 				fieldWidth:			longNameRow.width - ( rightColumn.labelWidth + closeButton.width + helpButton.width)
-				value:				columnModel.column ? columnModel.column.title : ""
-				onEditingFinished:	if((columnModel.column ? columnModel.column.title : "") !== displayValue) columnModel.setColumnTitleQ(displayValue)
+				value:				columnModel.columnTitle
+				// Phantom-rename guard — same as the Name field above.
+				property bool	userEditedTitle:	false
+				onTextEdited:			userEditedTitle = true
+				onEditingFinished:
+				{
+					if (userEditedTitle && columnModel.columnTitle !== displayValue)
+						columnModel.setColumnTitleQ(displayValue)
+					userEditedTitle = false
+				}
 				undoModel:			columnModel
 				controlLabel.width:	rightColumn.labelWidth
 				enabled:			!columnModel.isVirtual
@@ -217,9 +239,9 @@ Item
 				implicitWidth:		descriptionRow.width - x
 				control.padding:	3 * jaspTheme.uiScale
 
-				text:				columnModel.column ? columnModel.column.description : ""
+				text:				columnModel.columnDescription
 				wrapMode:           TextEdit.Wrap
-				onEditingFinished: 	if((columnModel.column ? columnModel.column.description : "") !== text) columnModel.setColumnDescriptionQ(text)
+				onEditingFinished: 	if(columnModel.columnDescription !== text) columnModel.setColumnDescriptionQ(text)
 				applyScriptInfo:	""
 				placeholderText:	"..."
 				undoModel:			columnModel

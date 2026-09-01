@@ -9,6 +9,20 @@
 
 class DataSet;
 
+/// Legacy (C++ frontend) data synchronization: watches the source file / polls the source
+/// database and re-imports through the legacy Importer into legacy Column storage. Lane
+/// datasets never use it (the R1 gate: `dataSet->isOpen()` skips the starts) — for
+/// orchestrator-backed datasets sync will be BACKEND-owned instead: the orchestrator
+/// watches the source, reconverts through the data_open machinery, bumps the revision and
+/// broadcasts data_changed (cause: external).
+///
+/// Policy pinned 2026-08-31 for that backend sync — an external change is a FRESH RELOAD:
+/// NOTHING survives. No rebase of local edits onto the new source, and the dataset's undo
+/// stack is CLEARED (dropped, not refused — see DataSet::applyRevision: an external revision
+/// bump forks history, so stored inverse blobs are strict-LIFO-void and meaningless against
+/// the reloaded data). Candidate LATER exception, only if wanted: the labels overlay
+/// (jasp:labels, P11) — value-keyed and order-independent, it would reattach to whichever
+/// values survive the reload and cannot conflict by construction.
 class DataSetSyncer : public QObject
 {
 	Q_OBJECT

@@ -7,6 +7,8 @@
 #include "columnmodel.h"
 #include "columnutils.h"
 #include "datasetpackage.h"
+#include "jaspclient/dataedit.h"
+#include "log.h"
 #include "gui/preferencesmodel.h"
 
 ColumnModel::ColumnModel() : QIdentityProxyModel(DataSetPackage::pkg())
@@ -66,6 +68,11 @@ QString ColumnModel::columnNameQ()
 {
 	if (_virtual) return _dummyColumn.name;
 
+	// NEO adapter: the SCHEMA is the name truth — the mirror never renames, so its name
+	// goes stale the moment a NEO rename lands (the "edit didn't stick" disease).
+	if (const ColumnInfo * info = laneSchemaColumn())
+		return QString::fromStdString(info->name);
+
 	return QString::fromStdString(column() ? column()->name() : "");
 }
 
@@ -73,6 +80,43 @@ QString ColumnModel::columnNameQ()
 void ColumnModel::setColumnNameQ(QString newColumnName)
 {
 	if (_beingRefreshed || newColumnName == columnNameQ()) return;
+
+	// NEO (R2 write-routing): the commit is a wire op, never a legacy Column command — the
+	// mirror is grow-only metadata; a rename there would silently diverge from the lane
+	// schema the grid renders. The virtual branch is the worst legacy offender (it inserts
+	// ghost Columns with no null guard at all): one insert_cols replaces the whole macro.
+	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
+	if (neoDataSet && neoDataSet->isOpen())
+	{
+		if (_virtual)
+		{
+			// The editor's position, clamped to the schema extent (a -1 index appends).
+			const uint64_t at = (_columnIndex >= 0 && size_t(_columnIndex) <= neoDataSet->schema().size())
+								? uint64_t(_columnIndex) : uint64_t(neoDataSet->schema().size());
+			undoStack()->endMacro(new DataEditCommand(
+				neoDataSet,
+				DataEdit::insertColsOp(at, fq(newColumnName), _dummyColumn.type),
+				QByteArray(),
+				tr("Insert column")));
+		}
+		else
+		{
+			// The chosen column by SCHEMA identity: the lane mirror is grown in schema order
+			// but never RENAMED, so its names go stale after prior NEO renames — the index is
+			// the stable correspondence (chosenColumn() is the mirror index).
+			const int idx = chosenColumn();
+			const ColumnInfo * info = idx >= 0 ? neoDataSet->schemaColumnAt(size_t(idx)) : nullptr;
+			if (info)
+				undoStack()->endMacro(new DataEditCommand(
+					neoDataSet,
+					DataEdit::schemaChangeRenameOp(neoDataSet, info->name, fq(newColumnName)),
+					QByteArray(),
+					tr("Rename column")));
+			else
+				Log::log() << "ColumnModel::setColumnNameQ: chosen column not found in the lane schema — rename refused" << std::endl;
+		}
+		return;
+	}
 
 	if (_virtual)
 	{
@@ -84,7 +128,7 @@ void ColumnModel::setColumnNameQ(QString newColumnName)
 		QMap<QString, QVariant> props;
 		props["name"]			= newColumnName;
 		props["type"]			= int(_dummyColumn.type);
-		props["computed"]		= int(_dummyColumn.computedType);
+		props["computed"]	= int(_dummyColumn.computedType);
 		props["computeFilter"]	= _dummyColumn.computeFilter;
 		undoStack()->endMacro(new InsertColumnCommand(DataSetPackage::pkg()->dataSet(), _columnIndex, props));
 	}
@@ -96,6 +140,10 @@ QString ColumnModel::columnTitle() const
 {
 	if (_virtual) return _dummyColumn.title;
 
+	// NEO adapter: display_name IS the "Long name" (P4) — the schema is its truth.
+	if (const ColumnInfo * info = laneSchemaColumn())
+		return QString::fromStdString(info->displayName);
+
 	return QString::fromStdString(column() ? column()->title() : "");
 }
 
@@ -104,8 +152,34 @@ void ColumnModel::setColumnTitle(const QString & newColumnTitle)
 	if (_beingRefreshed)
 		return;
 
+	// NEO: "Long name" IS the wire display_name — the same rename gesture as the Name
+	// field (P4 couples them: declaring display_name derives the field name).
+	// NEO: "Long name" IS the wire display_name; declaring it renames (P4 couples the
+	// field name's derivation to it). Same op as the Name field — one gesture. The
+	// equality guard matters here: the switch-time force-commit and focus-out handlers can
+	// both re-fire with unchanged text, and a no-guard submit would mint a spurious
+	// revision (and undo entry) on every such event.
+	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
+	if (neoDataSet && neoDataSet->isOpen())
+	{
+		if (!_virtual && !newColumnTitle.isEmpty())
+		{
+			const int idx = chosenColumn();
+			const ColumnInfo * info = idx >= 0 ? neoDataSet->schemaColumnAt(size_t(idx)) : nullptr;
+			if (info && info->displayName != fq(newColumnTitle))
+				undoStack()->endMacro(new DataEditCommand(
+					neoDataSet,
+					DataEdit::schemaChangeRenameOp(neoDataSet, info->name, fq(newColumnTitle)),
+					QByteArray(),
+					tr("Rename column")));
+			else
+				Log::log() << "ColumnModel::setColumnTitle: chosen column not found in the lane schema — rename refused" << std::endl;
+		}
+		return;
+	}
+
 	if (_virtual)
-		_dummyColumn.title = newColumnTitle;
+	_dummyColumn.title = newColumnTitle;
 
 	if(column() && column()->title() != fq(newColumnTitle))
 		undoStack()->pushCommand(new SetColumnPropertyCommand(column(), newColumnTitle, SetColumnPropertyCommand::ColumnProperty::Title));
@@ -115,6 +189,15 @@ void ColumnModel::setDropLevels(QString dropLevels)
 {
 	if (_beingRefreshed)
 		return;
+
+	// NEO gate: the lane dictionary never prunes (≡ keep, by engine invariant), so the
+	// drop/keep distinction has no lane meaning until data goes to R (analyses era).
+	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
+	if (neoDataSet && neoDataSet->isOpen())
+	{
+		Log::log() << "ColumnModel::setDropLevels: not applicable to lane datasets (the dictionary never prunes) — ignored" << std::endl;
+		return;
+	}
 
 	dropLevelsType dropEm = dropLevelsType::drop;
 	
@@ -127,6 +210,11 @@ void ColumnModel::setDropLevels(QString dropLevels)
 QString ColumnModel::columnDescription() const
 {
 	if (_virtual) return _dummyColumn.description;
+
+	// NEO adapter: honest "" — the wire carries no description yet (it lands with the
+	// labels editor as jasp:description field metadata).
+	if (const ColumnInfo * info = laneSchemaColumn())
+		return tq(info->description);
 
 	return tq(column() ? column()->description() : "");
 }
@@ -280,6 +368,10 @@ QString ColumnModel::currentColumnType() const
 {
 	if (_virtual) return columnTypeToQString(_dummyColumn.type);
 
+	// NEO adapter: the schema's type (the mirror's goes stale after a NEO retype).
+	if (const ColumnInfo * info = laneSchemaColumn())
+		return columnTypeToQString(info->type);
+
 	columnType type = column() ? column()->type() : columnType::scale;
 
 	return columnTypeToQString(type);
@@ -329,6 +421,16 @@ void ColumnModel::setColumnDescription(const QString & newColumnDescription)
 	if (_beingRefreshed)
 		return;
 
+	// NEO gate: description has no wire field yet (the lane never emits it; schema_change
+	// has no entry key). Support lands with the labels-editor slice as jasp:description
+	// field metadata — the same family as jasp:labels.
+	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
+	if (neoDataSet && neoDataSet->isOpen())
+	{
+		Log::log() << "ColumnModel::setColumnDescription: description not yet on the lane wire — ignored (jasp:description lands with the labels editor)" << std::endl;
+		return;
+	}
+
 	if (_virtual)
 		_dummyColumn.description = newColumnDescription;
 
@@ -343,6 +445,15 @@ void ColumnModel::setComputedType(QString type)
 
 	computedColumnType cType = computedColumnTypeFromString(type.toStdString());
 
+	// NEO gate: computed columns on lane data are a future era (no analyses run on lane
+	// data yet).
+	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
+	if (neoDataSet && neoDataSet->isOpen())
+	{
+		Log::log() << "ColumnModel::setComputedType: computed columns are not yet available on lane datasets — ignored" << std::endl;
+		return;
+	}
+
 	if (_virtual)
 		_dummyColumn.computedType = cType;
 	else if(column())
@@ -355,6 +466,14 @@ void ColumnModel::setComputeFilter(const QString &newComputeFilter)
 {
 	if(_beingRefreshed || !column() || column()->computeFilter() == fq(newComputeFilter))
 		return;
+
+	// NEO gate: computed columns on lane data are a future era.
+	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
+	if (neoDataSet && neoDataSet->isOpen())
+	{
+		Log::log() << "ColumnModel::setComputeFilter: computed columns are not yet available on lane datasets — ignored" << std::endl;
+		return;
+	}
 
 	if (_virtual)
 		_dummyColumn.computeFilter = newComputeFilter;
@@ -371,6 +490,28 @@ void ColumnModel::setColumnType(QString type)
 		return;
 
 	columnType cType = columnTypeFromString(type.toStdString());
+
+	// NEO (R2 write-routing): the variables-window dropdown is the THIRD type-switching
+	// surface (the header menu + status-bar toggle route through the proxy since e2) —
+	// same schema_change op, so all three surfaces agree on lane datasets.
+	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
+	if (neoDataSet && neoDataSet->isOpen())
+	{
+		if (!_virtual && !DataEdit::wireTypeOf(cType).isEmpty())
+		{
+			const int idx = chosenColumn();
+			const ColumnInfo * info = idx >= 0 ? neoDataSet->schemaColumnAt(size_t(idx)) : nullptr;
+			if (info)
+				undoStack()->endMacro(new DataEditCommand(
+					neoDataSet,
+					DataEdit::schemaChangeTypeOp(neoDataSet, { info->name }, cType),
+					QByteArray(),
+					tr("Change column type")));
+			else
+				Log::log() << "ColumnModel::setColumnType: chosen column not found in the lane schema — retype refused" << std::endl;
+		}
+		return;
+	}
 
 	if (_virtual)
 		_dummyColumn.type = cType;
@@ -533,6 +674,12 @@ Column * ColumnModel::column() const
 
 int ColumnModel::chosenColumn() const
 {
+	// NEO (R2 step 4): no mirror Column exists on lane data — the maintained index is the
+	// truth (the variables list binds this for its currentIndex).
+	DataSet * laneDataSet = _shownDataSet ? _shownDataSet : DataSetPackage::pkg()->dataSet();
+	if (laneDataSet && laneDataSet->isOpen())
+		return _virtual ? -1 : _columnIndex;
+
 	Column * c = column();
 	
 	if(!c)
@@ -557,14 +704,26 @@ void ColumnModel::setChosenColumnByName(const QString chosenNameQ, int colIndex)
 	DataSet * data = DataSetPackage::pkg()->dataSet();
 	clearVirtual();
 	
-	Column * chosenColumn = data->column(chosenName);
+	// NEO (R2 step 4): resolve by the SCHEMA name; NO mirror Column exists — the schema
+	// index becomes the chosen index, and the legacy bindings (labels/computed) stay
+	// inert-by-null on lane data (both are gated future eras).
+	int laneSchemaIdx = -1;
+	Column * chosenColumn = nullptr;
+	if (data && data->isOpen())
+		laneSchemaIdx = data->schemaColumnIndex(chosenName);
+	else
+		chosenColumn = data ? data->column(chosenName) : nullptr;
 
 	//Drop any per-column connections to the *previous* column before switching to the new one,
 	//otherwise the old column (still alive in the dataset) keeps firing into this model.
 	if(_column && _column != chosenColumn)
 		disconnect(_column, nullptr, this, nullptr);
 	
-	_virtual = !chosenColumn;
+	// NEO (R2 step 4): no mirror Column exists on lane — virtual means NOT FOUND IN THE
+	// SCHEMA, not "no Column pointer" (leaving it `!chosenColumn` marked every clicked
+	// lane column virtual: the editor showed an empty "new column" form and typing a name
+	// INSERTED one instead of renaming).
+	_virtual = !chosenColumn && laneSchemaIdx < 0;
 	emit isVirtualChanged();
 
 	setSourceModel(chosenColumn);
@@ -579,6 +738,8 @@ void ColumnModel::setChosenColumnByName(const QString chosenNameQ, int colIndex)
 
 	
 	_columnIndex = colIndex != -1 || _virtual || !chosenColumn || !chosenColumn->data() ? colIndex : chosenColumn->data()->columnIndex(chosenColumn);
+	if (laneSchemaIdx >= 0)
+		_columnIndex = laneSchemaIdx;	// NEO: the schema index IS the chosen index (no mirror to ask)
 
 	refresh();
 	notifyColumnChanged();
@@ -593,6 +754,23 @@ void ColumnModel::setChosenColumnByName(const QString chosenNameQ, int colIndex)
 
 void ColumnModel::setChosenColumn(int columnIndex)
 {
+	// NEO (R2 step 4): resolve the index against the SCHEMA directly. The legacy responder
+	// (DataSetTableModel::columnName — MainWindow's columnNameForIndex connection) reads
+	// the legacy model, EMPTY on lane datasets, and the "" fallthrough below opened the
+	// virtual "new column" form for every click: empty fields, and typing a name then
+	// INSERTED a column instead of editing the clicked one.
+	DataSet * laneDataSet = _shownDataSet ? _shownDataSet : DataSetPackage::pkg()->dataSet();
+	if (laneDataSet && laneDataSet->isOpen())
+	{
+		const ColumnInfo * info = columnIndex >= 0 ? laneDataSet->schemaColumnAt(size_t(columnIndex)) : nullptr;
+		if (info)
+		{
+			setChosenColumnByName(tq(info->name));
+			return;
+		}
+		// an index at/past the schema extent IS the virtual new-column slot — fall through
+	}
+
 	QString name = emit columnNameForIndex(columnIndex);
 	
 	if(name != "")
@@ -691,6 +869,11 @@ void ColumnModel::shownDataSetChangedHandler(DataSet * newDataSet)
 	//signal to keep `filteredOut`/`columnIsFiltered` reactive while the chosen column is unchanged.
 	connect(newDataSet, &DataSet::labelFilterChanged, this, &ColumnModel::refreshFilteredOut, Qt::UniqueConnection);
 
+	// NEO adapter: a lane edit lands as schemaChanged (applyRevision → landWireSchema) —
+	// nothing bridges it to this model's legacy refresh chain (datasetChanged), so without
+	// this hook the editor's fields would keep serving the pre-edit state forever.
+	connect(newDataSet, &DataSet::schemaChanged, this, &ColumnModel::laneSchemaRefreshed, Qt::UniqueConnection);
+
 	if(!column())
 		return;
 
@@ -702,6 +885,30 @@ void ColumnModel::shownDataSetChangedHandler(DataSet * newDataSet)
 	//against the new shown dataset so the Variables/label editor follows the tab switch instead of
 	//silently editing a non-shown dataset's column.
 	setChosenColumnByName(currentName);
+}
+
+const ColumnInfo * ColumnModel::laneSchemaColumn() const
+{
+	DataSet * dataSet = _shownDataSet ? _shownDataSet : DataSetPackage::pkg()->dataSet();
+	if (!dataSet || !dataSet->isOpen())
+		return nullptr;
+
+	// The chosen column by SCHEMA index: _columnIndex is maintained by the choose paths
+	// (setChosenColumn stores the view's index — schema order; setChosenColumnByName's
+	// NEO branch stores schemaColumnIndex) — no mirror Column exists to ask (R2 step 4).
+	return !_virtual && _columnIndex >= 0 ? dataSet->schemaColumnAt(size_t(_columnIndex)) : nullptr;
+}
+
+void ColumnModel::laneSchemaRefreshed()
+{
+	// Only the SHOWN dataset's schema matters (a background dataset landing must not
+	// disturb the editor) — and only lane datasets fire this usefully.
+	DataSet * dataSet = _shownDataSet ? _shownDataSet : DataSetPackage::pkg()->dataSet();
+	if (dataSet && sender() == dataSet && dataSet->isOpen())
+	{
+		refresh();
+		notifyColumnChanged();	// re-fires chosenColumnChanged/columnTitleChanged/… — the QML re-reads the schema
+	}
 }
 
 void ColumnModel::removeAllSelected()
@@ -763,6 +970,14 @@ void ColumnModel::notifyColumnChanged()
 	emit emptyValuesChanged();
 	emit dropLevelsChanged();
 	emit columnIsFilteredChanged();
+	// The editor-field properties (the R2 adapter rebinds ColumnBasicInfo's TextFields to
+	// these): without these emits the Long-name/Description/Use-labels fields NEVER rebind
+	// on a column switch — they kept serving the PREVIOUS column's values (the "infection"
+	// seen as values that "keep and get set"). Name heals via chosenColumnChanged; these
+	// three were simply missing from the notify set.
+	emit columnTitleChanged();
+	emit columnDescriptionChanged();
+	emit hasLabelsChanged();
 }
 
 void ColumnModel::setSelected(int row, int modifier)
@@ -907,6 +1122,11 @@ void ColumnModel::languageChangedHandler()
 
 bool ColumnModel::hasLabels() const
 {
+	// NEO adapter: no labels on lane data until B2 (the jasp:labels overlay era) — and
+	// notably the mirror's flag is meaningless there anyway (it is a STORAGE mode).
+	if (laneSchemaColumn())
+		return false;
+
 	return column() ? column()->hasLabels() : false;
 }
 
@@ -915,6 +1135,15 @@ void ColumnModel::setHasLabels(bool newHasLabels)
 	if (_beingRefreshed)
 		return;
 
+	// NEO gate: hasLabels is legacy's STORAGE MODE; the NEO equivalent is the jasp:labels
+	// overlay (P11), which arrives with the labels editor (B2). When built, this control
+	// enables off ColumnInfo::distinctCount vs WIRE_LEVELS_CAP — one source of truth.
+	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
+	if (neoDataSet && neoDataSet->isOpen())
+	{
+		Log::log() << "ColumnModel::setHasLabels: labels arrive with the labels editor (B2) on lane datasets — ignored" << std::endl;
+		return;
+	}
 
 	if(column())
 		undoStack()->pushCommand(new SetColumnPropertyCommand(column(), newHasLabels, SetColumnPropertyCommand::ColumnProperty::HasLabels));
@@ -923,6 +1152,11 @@ void ColumnModel::setHasLabels(bool newHasLabels)
 bool ColumnModel::isColumnNameFree(const QString & name)
 {
 	DataSet * dataSet = DataSetPackage::pkg()->dataSet();
+
+	// NEO: the lane schema is the name space (GridModel's twin) — the mirror's names go
+	// stale after NEO renames (grow-only, never renamed).
+	if (dataSet && dataSet->isOpen())
+		return dataSet->schemaColumnIndex(fq(name)) < 0;
 
 	return dataSet && !dataSet->column(fq(name));
 }
@@ -933,6 +1167,13 @@ void ColumnModel::createComputedColumn(const QString & name, int colType, bool u
 
 	if(!dataSet || !isColumnNameFree(name))
 		return;
+
+	// NEO gate: computed columns on lane data are a future era (analyses).
+	if (dataSet->isOpen())
+	{
+		Log::log() << "ColumnModel::createComputedColumn: computed columns are not yet available on lane datasets — ignored" << std::endl;
+		return;
+	}
 
 	Column * column = Workspace::singleton()->createComputedColumn(
 		fq(name),

@@ -82,6 +82,8 @@ private slots:
 		void	testLaneRevisionSchemaSwap();
 		void	testLaneRevisionRowGrowthWithoutSchema();
 		void	testLaneRevisionOutOfOrderPushes();
+		void	testLaneDatasetsHaveNoMirrorColumns();	///< the R2 canary: lane ⇒ zero legacy Columns
+		void	testLaneColumnModelServesSchema();	///< the R2 canary 2: the variable editor's model serves the schema on lane
 
 	private:
 		DataSetPackage		*	_pkg	= nullptr;

@@ -112,6 +112,13 @@ public:
 	/// schemaChanged — which restarts the view lane at the new revision (the v1 whole-buffer
 	/// drop; the invalidation descriptor makes range-aware invalidation a drop-in later,
 	/// §11 open item 2). Only a lane-bound dataset takes revisions.
+	///
+	/// NB — external changes (backend sync, not yet built; DataSetSyncer's header has the
+	/// pinned policy): a cause:"external" push lands HERE and means a FRESH RELOAD — nothing
+	/// survives: no edit rebase, and _undoStack must be cleared (external revision bumps fork
+	/// history; every stored inverse blob is then base_revision < current — not stale-refused,
+	/// but meaningless against the reloaded data). Candidate later exception: the labels
+	/// overlay (value-keyed; reattaches to surviving values).
 	void				applyRevision(uint64_t revision, uint64_t rows, bool hasRows, const Json::Value & schema, const Json::Value & invalidation);
 			bool			dataFileSynch()			const { return _dataFileSynch;			}
 			

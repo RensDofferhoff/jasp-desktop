@@ -1379,6 +1379,12 @@ int DataSet::rowCount(const QModelIndex &) const
 
 int DataSet::columnCount(const QModelIndex &) const
 {
+	// NEO (R2 step 4): the schema is the column truth for lane datasets — the legacy mirror
+	// no longer exists, and this previously served its grow-only count (stale after
+	// delete_cols edits).
+	if (!_laneDatasetId.empty())
+		return int(_schemaColumns.size());
+
 	return _columns.size();
 }
 
@@ -2310,16 +2316,13 @@ void DataSet::landWireSchema(const std::string & datasetId, uint64_t rows, const
 			_schemaColumns.push_back(std::move(info));
 		}
 
-	// Mirror the metadata into the legacy columns so the per-dataset provider chain (shown
-	// filter -> forms/headers/variable info) serves lane metadata — names, types, row count.
-	// NEVER row data: the grid reads cells through the view lane, not from here.
-	// Levels/labels are NOT mirrored: their label store is value-indexed (labels belong to
-	// data values) and wiring it by hand would corrupt the by-value/by-display maps; the
-	// label editor stays inert for lane datasets until the edit era (data-model-design
-	// decision 11).
-	if (_columns.size() < _schemaColumns.size())
-		for (size_t i = _columns.size(); i < _schemaColumns.size(); i++)
-			createColumn(_schemaColumns[i].name, _schemaColumns[i].type);
+	// R2 step 4 — THE MIRROR IS GONE (2026-08-31): lane datasets never materialize legacy
+	// Columns. The provider chain serves from `schema()` (ColumnModel's NEO adapter;
+	// ColumnsModel binds the lane directly), the grid serves from the view lane, and the
+	// legacy readers (label editor, computed columns) are gated/inert on lane data — no
+	// mirror Column exists to go stale, and the row-sized bug class (§1e3) is extinct by
+	// construction. `columnCount()` serves the schema when lane-bound; `column(...)` is
+	// nullptr. Legacy datasets keep their Columns untouched.
 
 	setRowCountMetadata(size_t(rows));	// metadata only — never load row data, never materialize legacy vectors
 

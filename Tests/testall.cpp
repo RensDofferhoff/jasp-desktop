@@ -19,7 +19,7 @@
 #include "dataset.h"
 #include "workspace.h"
 #include "undostack.h"
-#include "data/asyncloader.h"
+#include "data/columnmodel.h"
 
 #include <QSignalSpy>
 #include <QFile>
@@ -1555,11 +1555,95 @@ void TestAll::testLaneRevisionOutOfOrderPushes()
 	// The delayed revision-2 push now arrives: OLDER than the landed state — dropped,
 	// no matter what it carries (mid-fill interleaves resolve the same way: the stale
 	// push cannot resurrect superseded state).
-	dataSet->applyRevision(2, 42, true, laneSchema({laneColumn("ghost", "scale")}), Json::objectValue);
+	dataSet->applyRevision(2, 42, true, laneSchema({laneColumn("ghost", "scale")}), Json::Value(Json::objectValue));
 	QCOMPARE(dataSet->laneRevision(),	uint64_t(3));
 	QCOMPARE(dataSet->schemaRows(),		uint64_t(6));
 	QVERIFY(dataSet->schemaColumn("ghost") == nullptr);
 	QCOMPARE(restarts.count(), restartsAfter3);
+}
+
+void TestAll::testLaneDatasetsHaveNoMirrorColumns()
+{
+	// THE R2 CANARY (step 4): a lane dataset NEVER materializes legacy Columns. The mirror
+	// was grow-only metadata that went stale after renames (the "edit didn't stick"
+	// disease) and carried the row-sized bug class (§1e3). If this test fails, someone
+	// reintroduced mirror creation on the lane path — point the consumer at schema()
+	// instead.
+	DataSet * dataSet = _newLaneDataSet(laneSchema({
+		laneColumn("score", "scale"),
+		laneColumn("group", "nominal", {"A", "B"}),
+	}), 3);
+
+	// After the open: no mirror, and the counts serve the SCHEMA (not _columns).
+	QVERIFY(dataSet->columns().empty());
+	QVERIFY(dataSet->column("score") == nullptr);
+	QCOMPARE(dataSet->columnCount(),		2);
+	QCOMPARE(int(dataSet->schema().size()),	2);
+
+	// After a schema-carrying revision (a rename + a column DROP — the old mirror's
+	// grow-only failure mode): still no mirror, counts still honest.
+	dataSet->applyRevision(1, 3, true, laneSchema({
+		laneColumn("points", "scale"),	// renamed (P4)
+	}), Json::Value(Json::objectValue));
+
+	QVERIFY(dataSet->columns().empty());
+	QVERIFY(dataSet->column("points") == nullptr);
+	QCOMPARE(dataSet->columnCount(),		1);
+	QCOMPARE(dataSet->schemaColumnIndex("score"),	-1);	// the old name is GONE
+	QCOMPARE(dataSet->schemaColumnIndex("points"),	0);
+}
+
+void TestAll::testLaneColumnModelServesSchema()
+{
+	// THE R2 CANARY 2 (the variable editor's model — GUI-side, previously UNTESTED, which
+	// is exactly how the mirror removal's _virtual bug shipped: choosing a lane column
+	// marked the model virtual, the editor showed an empty "new column" form, and typing
+	// a name INSERTED a column instead of renaming). A schema column chosen BY NAME is a
+	// real (non-virtual) choice serving the schema's metadata; an unknown name is the
+	// virtual new-column state.
+	_newLaneDataSet(laneSchema({
+		laneColumn("score", "scale"),
+		laneColumn("group", "nominal", {"A", "B"}),
+	}), 3);
+
+	ColumnModel model;
+
+	model.setChosenColumnByName("score");
+	QVERIFY(!model.isVirtual());
+	QCOMPARE(model.columnNameQ(),			QString("score"));
+	QCOMPARE(model.chosenColumn(),		0);
+	QCOMPARE(model.currentColumnType(),	columnTypeToQString(columnType::scale));
+
+	model.setChosenColumnByName("group");
+	QVERIFY(!model.isVirtual());
+	QCOMPARE(model.columnNameQ(),			QString("group"));
+	QCOMPARE(model.chosenColumn(),		1);
+	QCOMPARE(model.currentColumnType(),	columnTypeToQString(columnType::nominal));
+
+	// The CLICK path (setChosenColumn(int)): resolves via the SCHEMA on lane — the legacy
+	// responder (DataSetTableModel::columnName over the empty legacy model) returned "",
+	// and the fallthrough opened the virtual "new column" form for every click (the
+	// second shipped step-4 bug). An index at the extent stays virtual (the "+" slot).
+	model.setChosenColumn(0);
+	QVERIFY(!model.isVirtual());
+	QCOMPARE(model.columnNameQ(),			QString("score"));
+	model.setChosenColumn(2);		// one past the schema extent = the new-column slot
+	QVERIFY(model.isVirtual());
+
+	// A rename landing (a schema-carrying revision) on the CHOSEN column is served by the
+	// SAME choice — the editor's fields follow the schema, no re-choose needed (the
+	// refresh hook: schemaChanged → laneSchemaRefreshed → notifyColumnChanged).
+	DataSet * dataSet = DataSetPackage::pkg()->dataSet();
+	model.setChosenColumnByName("score");		// the column about to be renamed (P4)
+	dataSet->applyRevision(1, 3, true, laneSchema({
+		laneColumn("points", "scale"),			// the chosen column, renamed
+		laneColumn("group", "nominal", {"A", "B"}),
+	}), Json::Value(Json::objectValue));
+	QCOMPARE(model.columnNameQ(), QString("points"));
+
+	// An unknown name IS the virtual new-column state (typing then inserts).
+	model.setChosenColumnByName("nope");
+	QVERIFY(model.isVirtual());
 }
 
 QTEST_MAIN(TestAll)

@@ -62,6 +62,50 @@ Json::Value DataEdit::schemaChangeTypeOp(DataSet * dataSet, const std::set<std::
 	return op;
 }
 
+Json::Value DataEdit::schemaChangeRenameOp(DataSet * dataSet, const std::string & currentName, const std::string & newDisplayName)
+{
+	// Same count-match shape as the retype builder: every column by its CURRENT field
+	// name, `display_name` declared only on the target. Per P4 the lane derives the new
+	// field name from the declared display name (uniquified per P6) — Name and Long name
+	// move together; absent any consumer of an independent field name, that is the v1
+	// rename gesture.
+	Json::Value targetSchema(Json::arrayValue);
+	for (const ColumnInfo & info : dataSet->schema())
+	{
+		Json::Value entry(Json::objectValue);
+		entry["name"] = info.name;
+		if (info.name == currentName)
+			entry["display_name"] = newDisplayName;
+		targetSchema.append(entry);
+	}
+
+	Json::Value op(Json::objectValue);
+	op["op"]				= "schema_change";
+	op["target_schema"]	= targetSchema;
+	return op;
+}
+
+Json::Value DataEdit::insertColsOp(uint64_t at, const std::string & name, columnType type)
+{
+	// One NewColumnSpec (d5): name + declared type when representable. P7: a non-empty
+	// spec list; names are INPUTS here (uniquified by the lane per P6 — unlike a paste
+	// window's declared target_schema, where a name is an assertion).
+	Json::Value spec(Json::objectValue);
+	spec["name"]	= name;
+	const QString wireType = wireTypeOf(type);
+	if (!wireType.isEmpty())
+		spec["type"]	= wireType.toStdString();
+
+	Json::Value columns(Json::arrayValue);
+	columns.append(spec);
+
+	Json::Value op(Json::objectValue);
+	op["op"]		= "insert_cols";
+	op["at"]			= Json::UInt64(at);
+	op["columns"]	= columns;
+	return op;
+}
+
 // ── §1.2 authoring ──────────────────────────────────────────────────────────────────────
 
 QString DataEdit::escapeCell(const QVariant & cell)

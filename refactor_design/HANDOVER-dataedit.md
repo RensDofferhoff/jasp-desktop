@@ -665,6 +665,7 @@ JSON shape exactly):
 | P11 | Labels are legacy's two mappings KEPT, not collapsed (neo-jasp.md §8): dictionary values = the DATA VALUES; `jasp:labels` = a sparse JSON value→label overlay in FIELD METADATA (entry only where label ≠ value — absent when identity, which is why CSV-open v1 never emits the key). Relabel = O(k) metadata edit (validated ~15–20× vs rebuild); reorder never touches the overlay (value-keyed, order-independent) | "The label is what you read; the value is what you compute with and what identifies a level" — presentation-only relabel survives with no sidecar (field metadata IS the schema). REVISED 2026-08-29: an earlier draft of this row wrongly claimed a labels≡levels collapse |
 | P12 | Undo contract (d7a): `apply_inverse` refuses unknown `format`/malformed programs with Fatal (a corrupt blob is infrastructure, not a user error) but `base_revision > current` with `stale_edit` ValidationError; undo results always invalidate `all:true` (v1 honesty) and always ship the schema; every result carries its own inverse (redo) | Defensive-never-trust (§5); the all:true descriptor is the conservative drop — refinement is a later optimization, not a correctness need |
 | P13 | `insert_block`'s declared `target_schema` (d6b): a **window-scoped POSITIONAL array of NULLABLE entries** — entry *i* binds to output column `col+i`; array length ≠ paste width → `schema_mismatch`. `null` ≡ undeclared for that column (exactly the no-schema behavior: covered columns absorb/promote, new columns infer per D5 + auto-name `V{j+1}`); a non-null entry is a strict **per-field** postcondition — declared fields adhere-or-error, absent fields take the auto path (ChangeEntry's absent=keep semantics, per-field granularity). `name` on a COVERED entry (one binding an existing column the paste overwrites) is optional but must echo the current field name when present (shifted-declaration guard); a covered entry declaring a type ≠ current → `schema_mismatch` in v1 (retype is `schema_change`'s job — two ops; EXTENDABLE later to atomic paste+retype, see §6); covered `display_name`/`labels` keys refuse (rename/relabel are schema_change's job). `levels` on a covered entry REPLACE per d6 Remap rules (coverage validation: `level_in_use` + the cap rule, against the POST-edit in-use set; verbatim lookup, never canonicalized — invariant 9); paste cells must exist in declared lists. A declared name colliding with a live column → `schema_mismatch` (a postcondition is never silently uniquified; `insert_cols`' P6 differs — its names are inputs, not assertions). Full-column inverse capture iff any touched column re-encodes (I4 widened from "promotes" to "re-encodes": promotion OR declared Remap) | §0's "complete post-edit column list" was written with `schema_change` (the whole-schema op) as the archetype — each op declares only its own degrees of freedom (`insert_cols` already declares per-new-column). Entry-null ≡ undeclared is I2's philosophy one level down (field-null ≡ absent). The nullable-window pattern was discussed pre-d1 but never recorded anywhere — recovered from memory + pinned 2026-08-29 |
+| P14 | Backend sync (future era, not this one) is orchestrator-owned: watch source → reconvert via the data_open machinery → revision bump + `data_changed` (cause `external`). An external change is a FRESH RELOAD — **nothing survives**: no rebase of local edits, and the dataset's undo stack is **cleared** (dropped, not refused: every stored inverse blob is then `base_revision < current` — not the `stale_edit` refusal, but meaningless against reloaded data). Candidate later exception ONLY: the labels overlay — value-keyed (P11), it reattaches to surviving values and cannot conflict. Pinned in code: `DataSetSyncer`'s class comment + `DataSet::applyRevision`'s doc | "For now we simply say nothing survives" (user, 2026-08-31); levels/dictionaries cannot survive a reload (re-derived from the new source), labels are the one sane candidate |
 
 ## 3. Invariants — easy to break silently
 
@@ -744,13 +745,106 @@ work, ordered by safety and payoff (audit grounded 2026-08-31):
   sustained-CPU suspect), the sqlite interval machinery, and the cross-thread
   QObject warning. The (c) syncer tests cover the LEGACY path — they must stay green
   (they use legacy-loaded fixtures, so the gate should not affect them — verify).
-- **R2 — stop creating the legacy Column mirror for lane datasets (needs a short
-  audit).** `landWireSchema`'s mirror exists so the provider chain (forms/headers)
-  serves metadata. Audit who reads `dataSet->column(s)` on LANE paths; findings so
-  far: `ColumnModel::isColumnNameFree` (L924) — GridModel already has a schema-based
-  twin. Point stragglers at `schema()` then gate the mirror creation
-  (`if (_columns.size() < _schemaColumns.size()) …` block). After this, lane datasets
-  touch ZERO legacy row/column storage — the class of bugs §1e3 hunted goes extinct.
+- **R2 — kill the legacy Column mirror (audit DONE 2026-08-31; four-step plan pinned).**
+  The mirror (`landWireSchema` L2320-2322, grow-only) exists to serve the variable
+  editor's legacy paths — and those paths DIVERGE silently on lane datasets (mirror
+  edited, schema untouched, grid never shows it). Pinned decisions: the variable editor
+  gets a ColumnInfo ADAPTER, not a gate ("make sure nothing uses the old shit"); the
+  mirror's fate is DELETION (stage 1 gate now, stage 2 physically delete once zero
+  lane-path readers remain). The four steps, in order:
+  1. **Write-routing** (the divergence hazards) — **LANDED 2026-08-31** (uncommitted):
+     rename — the editor's Name AND "Long
+     name:" fields → `schema_change` (d6 Keep-class; legacy title == wire display_name,
+     P4, so one op covers both; JSON-only inverse, invalidation `{}`); new column — the
+     `_virtual` commit (`setColumnNameQ` — was NO null guard: inserted ghost Columns
+     the grid never sees) → `insert_cols` with `NewColumnSpec{name, type}`; the
+     copy-columns gesture (`DataSetView::_copy` → `serializedColumn`) → guarded (null
+     serializations never pushed; plain cell copy works). New builders
+     `DataEdit::schemaChangeRenameOp` + `insertColsOp` (dataedit.{h,cpp}); NEO branches
+     in `setColumnNameQ`/`setColumnTitle`/`setColumnType` (the variables-window dropdown
+     was a THIRD type-switching surface still on `SetColumnTypeCommand` — now the same
+     `schema_change` op as the proxy path); gates on description/dropLevels/hasLabels/
+     computed-type/filter/createComputedColumn (each logs the never-swallow line for why);
+     `isColumnNameFree` serves the schema on lane (GridModel's twin). Identity note: the
+     chosen column resolves by SCHEMA INDEX (`chosenColumn()` is the mirror index; the
+     mirror is grown in schema order but never renamed, so names go stale after NEO
+     renames — the index correspondence holds). Runnable C++ set 16/16 after.
+  2. **Gates on the no-wire-yet controls**: description (zero `description` in
+     orchestrator/src — C++ ColumnInfo reads a key the lane never emits; support later
+     as `jasp:description` field metadata + a schema_change entry key, folded into the
+     labels-editor slice — same metadata family as jasp:labels), dropLevels (the lane
+     dictionary never prunes ≡ keep; meaningless until the analyses era), "Use labels"
+     (hasLabels — NEO semantics = the jasp:labels overlay, B2; when built, enable off
+     `distinctCount` vs WIRE_LEVELS_CAP — legacy has NO threshold, we do), computed
+     type/filter (future era). NB: with the adapter making `column()` null on lane,
+     most of these self-neutralize via their `if(column())` guards — the virtual branch
+     is the exception (routed in step 1).
+  3. **The adapter** — **LANDED 2026-08-31** (uncommitted, with step 1): ColumnModel serves
+     reads from `schema()` when `isOpen()`. New `laneSchemaColumn()` helper (chosen column
+     by SCHEMA index — `chosenColumn()` is the mirror index, and the mirror is grown in
+     schema order, the correspondence the adapter relies on); schema-backed
+     `columnNameQ`/`columnTitle`/`currentColumnType`/`columnDescription` (honest "" until
+     the wire carries description)/`hasLabels` (false until B2). New Q_PROPERTYs
+     columnName/columnTitle/columnDescription/hasLabels + the QML rebinds
+     (ColumnBasicInfo name/Long-name/description, VariablesWindow's "Use labels" checkbox)
+     — the fields previously bound `columnModel.column.*`, serving STALE MIRROR names: a
+     NEO rename landed but the editor kept showing the old name, the user retyped, and
+     the retypes raced (see the §6 RACE bug). `setChosenColumnByName` resolves by SCHEMA
+     name on lane (a failed MIRROR lookup silently turned the editor into a virtual
+     "new column" — a renamed column couldn't be chosen anymore). And the refresh hook:
+     `DataSet::schemaChanged` never reached ColumnModel (only GridModel/ColumnsModel
+     listen to it; the legacy chain runs on datasetChanged) — shownDataSetChangedHandler
+     now also connects schemaChanged → laneSchemaRefreshed (refresh + notifyColumnChanged).
+  4. **The mirror gate + canary** — **LANDED 2026-08-31 (uncommitted, with steps 1+3):
+     THE MIRROR IS GONE.** `landWireSchema` no longer creates legacy Columns for lane
+     datasets; `columnCount()` serves `schema()` when `isOpen()` (was the grow-only
+     mirror count — stale after delete_cols); `ColumnModel` needs no mirror on lane:
+     `laneSchemaColumn()` reads `_columnIndex` (maintained by the choose paths —
+     setChosenColumn stores the view's schema-order index, setChosenColumnByName's NEO
+     branch stores schemaColumnIndex), `chosenColumn()` serves it, `setChosenColumnByName`
+     resolves by schema name with `_column = nullptr` (labels/computed stay inert-by-null
+     — gated future eras). CANARY: `testLaneDatasetsHaveNoMirrorColumns` — after applySchema
+     AND after a rename+drop revision: `columns().empty()`, `column(...)` nullptr,
+     columnCount == schema size. Runnable set 17/17. **What still reads `column.*` in QML:
+     ComputeColumnWindow + LabelEditorWindow only (gated: computed/labels eras; their
+     ternary guards handle null).** The phantom-rename guard also landed: the Name/Long-name
+     fields' `editingFinished` fires on plain FOCUS-OUT (clicking another column) with the
+     previous column's text still in the field — it renamed the NEWLY CHOSEN column to the
+     previous one's name (the smoke log's w3: col_7 → "x" the instant the user switched;
+     the engine uniquified field names to x_6/x_8, hence the garbage). Fix: a
+     `textEdited`-set dirty flag per field — only a real user edit may submit
+     (ColumnBasicInfo.qml). The same phantom exists for legacy datasets' description field
+     (TextArea, untouched — same pattern applies if it ever bites).
+     **Step-4 followup bug (found by the user's smoke, fixed same day):** removing the
+     mirror left `_virtual = !chosenColumn` in setChosenColumnByName — chosenColumn is
+     ALWAYS null on lane now, so every clicked column opened as the empty "new column"
+     form and typing a name INSERTED one. Fix: `_virtual = !chosenColumn &&
+     laneSchemaIdx < 0`. Lesson pinned: ColumnModel was GUI-side and completely untested —
+     canary 2 now exists (`testLaneColumnModelServesSchema`: choose-by-name is non-virtual
+     + serves the schema's name/index/type; the CLICK path setChosenColumn(int) resolves
+     via the schema (the legacy responder `DataSetTableModel::columnName` — MainWindow's
+     `columnNameForIndex` connection — reads the EMPTY legacy model on lane and the ""
+     fallthrough opened the virtual form for every click: the SECOND shipped step-4 bug);
+     an index at the extent stays virtual (the "+" slot); a rename landing on the CHOSEN
+     column is served by the same choice — the refresh hook; an unknown name IS virtual).
+     Runnable set 18/18.
+     **Infection era, fully closed (three layers, found by the user's smokes):**
+     (1) `editingFinished` fires on plain FOCUS-OUT with the previous column's text —
+     guarded by `textEdited`-set dirty flags (ColumnBasicInfo). (2) VariablesWindow's
+     `onBeforeChangingColumn` force-committed ALL FIVE fields on EVERY switch — now
+     dirty-flag-guarded (name/title, aliased up from ColumnBasicInfo) + equality-guarded
+     (description); type/computed have C++ equality guards. (3) THE READ SIDE —
+     `notifyColumnChanged()` never emitted `columnTitleChanged`/`columnDescriptionChanged`/
+     `hasLabelsChanged`, so those fields NEVER REBOUND on a switch and kept serving the
+     previous column's values (why "name fixed but longname/description not") — now
+     emitted. Plus `setColumnTitle`'s NEO branch got the missing equality guard (a no-op
+     force-commit would otherwise mint a spurious revision).
+  Audit findings (lane-path mirror readers): ColumnModel (the big one), `columnCount()`
+  itself, `ExpandDataProxyModel::serializedColumn` L636, `DataSetPackage::refreshColumn`
+  L350 (null-safe already). Legacy-only rails (NOT lane-reachable, no work): undostack's
+  Column commands, DatabaseInterface, Importer::syncDataSet, the computed-column
+  machinery (naturally dormant — no analyses on lane data; NEO guard already at
+  analysis.cpp L990).
 - **R3 — delete the bypassed caches' dead branches** (cosmetic, last): after R2, the
   `_storedDisplayText`/`_storedLineFlags` legacy branches and the `DataSetTableModel`
   edit paths are dead on the lane route; remove when comfortable.
@@ -818,6 +912,22 @@ QT_QPA_PLATFORM=offscreen build/Desktop_Qt_6_11_0-Debug/Tests/JASPTest testSavLa
 
 ## 6. Open items / known debts
 
+- **THE RACE (found 2026-08-31, the rename smoke test — REAL, UNFIXED)**: two edits
+  dispatched at the same base before either completes → the orchestrator MINTS THE SAME
+  NEXT REVISION TWICE (the dataset entry's revision bumps at COMPLETION, not dispatch:
+  `route_result` is the bump point) and both write the SAME `<id>_<rev+1>.arrow` path
+  concurrently — last writer wins, the revision ladder desyncs from the data, and every
+  later edit fails count-match against the race's winner (log: w2+w3 both `base=2 -> rev 3`,
+  both wrote ds-3_3.arrow; w4–w6 all refused, `col_420` no longer existed). Triggered by
+  any back-to-back submissions (stale-mirror retypes did it instantly; fast cell tab-typing
+  can too). **Fix (two parts, both needed):** (a) orchestrator — one in-flight edit per
+  dataset: at dispatch, if an Edit work for this dataset is already outstanding, reject
+  with the `stale_edit`-shaped validationError (never mint, never race); (b) frontend —
+  serialize submissions per dataset in JaspClient (a small pending queue that chains on
+  each result/data_changed so the base revision is read at ACTUAL send time), because
+  rejection alone would drop the user's second keystroke. D11's dispatch check cannot see
+  it: base == current is still true while the first edit is in flight.
+
 - Design §11 items stand (mirror-collapse detail, range-aware invalidation on the
   FRONTEND — the descriptor is normative and now computed correctly, map-to-null level
   deletion, undo stack memory cap).
@@ -825,6 +935,10 @@ QT_QPA_PLATFORM=offscreen build/Desktop_Qt_6_11_0-Debug/Tests/JASPTest testSavLa
   threshold, then DROP OLDEST-first. Decide from RSS once real edits exist; nothing to
   build until (e).
 - **LZ4 vs ZSTD for inverse blobs**: deferred (P10) — measure on real columns first.
+- **Backend sync (future era)**: orchestrator-owned (watch source → reconvert → revision bump +
+  `data_changed` cause `external`); policy P14 — nothing survives a reload, undo stack cleared,
+  labels overlay the candidate later exception. The legacy `DataSetSyncer` stays for legacy
+  datasets until that lands; lane datasets get NO sync (R1 gates the starts).
 - **Labels-vs-levels (P11, revised)**: the two-mappings model stands (dictionary values =
   data; `jasp:labels` = sparse field-metadata overlay) and d6 implements it. STILL OPEN,
   in rough order of need: (1) the VIEW lane renders dictionary values today — it must

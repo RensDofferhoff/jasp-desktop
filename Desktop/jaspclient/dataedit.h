@@ -32,6 +32,19 @@ namespace DataEdit
 	/// lossy-intent direction, coerce-or-error: text values refuse a retype to scale).
 	Json::Value	schemaChangeTypeOp(DataSet * dataSet, const std::set<std::string> & columnNames, columnType newType);
 
+	/// `schema_change` rename (d6 Keep-class, P4): `display_name` declared on the target
+	/// — the lane updates BOTH jasp:display_name and the field name (derived from it,
+	/// uniquified per P6). v1 coupling per P4: the editor's Name and "Long name" fields
+	/// converge on this one gesture (declaring either is declaring the display name);
+	/// JSON-only inverse, invalidation `{}`.
+	Json::Value	schemaChangeRenameOp(DataSet * dataSet, const std::string & currentName, const std::string & newDisplayName);
+
+	/// `insert_cols` (d5): one new column at index `at` from a spec `{name, type}` —
+	/// the variable editor's virtual-column commit. `at` is clamped by the caller against
+	/// the schema size; an unrepresentable type (unknown) is left ABSENT so the lane infers
+	/// (D5 over zero cells = nominal).
+	Json::Value	insertColsOp(uint64_t at, const std::string & name, columnType type);
+
 	/// The wire type string of a columnType (nominalText rides as nominal; unknown is
 	/// not representable — callers refuse).
 	QString		wireTypeOf(columnType type);

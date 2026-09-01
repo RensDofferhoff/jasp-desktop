@@ -8,6 +8,8 @@
 #include "undostack.h"
 #include <QTimer>
 
+struct ColumnInfo;	///< dataset.h — the lane schema's column record (NEO adapter reads)
+
 class Column;
 class DataSet;
 
@@ -17,6 +19,15 @@ class DataSet;
 class ColumnModel : public QIdentityProxyModel
 {
 	Q_OBJECT
+
+	// NEO adapter (R2 step 3): schema-backed reads for lane datasets. The legacy mirror is
+	// grow-only — it never renames — so binding the editor's fields to `column.*` served
+	// stale names after NEO renames (the edit "didn't stick"). These properties serve
+	// ColumnInfo when the dataset isOpen(), the legacy Column otherwise, and rebind below.
+	Q_PROPERTY(QString		columnName					READ columnNameQ												NOTIFY chosenColumnChanged		)
+	Q_PROPERTY(QString		columnTitle					READ columnTitle												NOTIFY columnTitleChanged		)
+	Q_PROPERTY(QString		columnDescription			READ columnDescription											NOTIFY columnDescriptionChanged)
+	Q_PROPERTY(bool			hasLabels					READ hasLabels													NOTIFY hasLabelsChanged		)
 
     Q_PROPERTY(int			filteredOut					READ filteredOut                                                NOTIFY filteredOutChanged				)
 	Q_PROPERTY(Column *		column						READ column														NOTIFY chosenColumnChanged				)
@@ -194,9 +205,15 @@ signals:
 
 	
 private:
-	std::vector<size_t>		getSortedSelection()					const;
+	std::vector<size_t>		getSortedSelection()				const;
 	void					setValueMaxWidth();
 	void					clearVirtual();
+	// NEO adapter: the chosen column's ColumnInfo when the shown dataset is lane-bound
+	// (nullptr otherwise, or when nothing valid is chosen). The SCHEMA is the truth for
+	// name/display/type — the mirror's names go stale after NEO renames (grow-only).
+	const ColumnInfo *	laneSchemaColumn() const;
+	// The shown dataset's schemaChanged (a lane edit landed): refresh the editor's reads.
+	void					laneSchemaRefreshed();
 	// Fires the notify signals of the (GUI-side) properties that depend on the chosen column,
 	// as well as chosenColumnChanged which drives the `column` Q_PROPERTY.
 	void					notifyColumnChanged();

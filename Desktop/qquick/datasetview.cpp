@@ -130,7 +130,13 @@ void DataSetView::_copy(QPoint where, bool clear)
 		for(int c=minIdx.x(); c<=maxIdx.x(); c++)
 			if(_selectionModel->columnIntersectsSelection(c))
 			{
-				_copiedColumns.push_back(_expandedModel->serializedColumn(c));
+				// NEO: serializedColumn reads legacy Column storage — nullValue on lane
+				// datasets (no lossless JASP↔JASP column format for lane data yet; the plain
+				// clipboard path works). Push only real serializations so internal column-paste
+				// never sees ghost entries.
+				Json::Value serialized = _expandedModel->serializedColumn(c);
+				if(!serialized.isNull())
+					_copiedColumns.push_back(serialized);
 				headerRow.push_back(_expandedModel->headerData(c, Qt::Horizontal).toString());
 			}
 
