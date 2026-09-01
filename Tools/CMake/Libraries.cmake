@@ -165,30 +165,8 @@ if(LINUX)
 
   if(NOT JASP_SYNTAX_INTERFACE_ONLY)
 
-    if(FLATPAK_USED)
-      set(LIBREADSTAT_INCLUDE_DIRS /app/include)
-      set(LIBREADSTAT_LIBRARY_DIRS /app/lib)
-    else()
-      set(LIBREADSTAT_INCLUDE_DIRS /usr/local/include /usr/include)
-      # The last two library paths handle the two most common multiarch cases.
-      # Other multiarch-compliant paths may come up but should be rare.
-      set(LIBREADSTAT_LIBRARY_DIRS /usr/local/lib /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
-    endif()
-
-    message(CHECK_START "Looking for libreadstat.so")
-    find_library(LIBREADSTAT_LIBRARIES libreadstat.so
-              HINTS ${LIBREADSTAT_LIBRARY_DIRS} REQUIRED)
-
-    if(EXISTS ${LIBREADSTAT_LIBRARIES})
-      message(CHECK_PASS "found")
-      message(STATUS "  ${LIBREADSTAT_LIBRARIES}")
-    else()
-      message(CHECK_FAIL "not found")
-      message(
-        FATAL_ERROR
-          "ReadStat is required for building on Windows, please follow the build instruction before you continue."
-      )
-    endif()
+    # The excision, Cut 2: the ReadStat / FreeXL / librdata lookups died with the importers
+    # (only libsodium remains below — pending its own owner verification).
 
     # ---- libsodium ----
     message(CHECK_START "Looking for `libsodium`")
@@ -210,46 +188,6 @@ if(LINUX)
       )
     endif()
 
-    # ---- FreeXL ----
-    message(CHECK_START "Looking for `libfreexl`")
-    set(LIBFREEXL_INCLUDE_DIRS /usr/include /app/lib64/)
-    set(LIBFREEXL_LIBRARY_DIRS /usr/local/lib /usr/lib /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /app/include/)
-
-    message(CHECK_START "Looking for libfreexl.so")
-    find_library(LIBFREEXL_LIBRARIES libfreexl.so
-              HINTS ${LIBFREEXL_LIBRARY_DIRS} REQUIRED)
-
-    if(EXISTS ${LIBFREEXL_LIBRARIES})
-      message(CHECK_PASS "found")
-      message(STATUS "  ${LIBFREEXL_LIBRARIES}")
-    else()
-      message(CHECK_FAIL "not found")
-      message(
-        FATAL_ERROR
-          "FreeXL is required for building on Linux, please follow the build instruction before you continue."
-      )
-    endif()
-
-    # ---- librdata ----
-    message(CHECK_START "Looking for `librdata`")
-    set(LIBRDATA_INCLUDE_DIRS /usr/include/ /usr/include/rdata /usr/local/include /usr/local/include/rdata /app/include)
-    set(LIBRDATA_LIBRARY_DIRS /usr/local/lib /usr/lib /app/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
-
-    message(CHECK_START "Looking for librdata.so")
-    find_library(LIBRDATA_LIBRARIES librdata.so
-              HINTS ${LIBRDATA_LIBRARY_DIRS} REQUIRED)
-
-    if(EXISTS ${LIBRDATA_LIBRARIES})
-      message(CHECK_PASS "found")
-      message(STATUS "  ${LIBRDATA_LIBRARIES}")
-    else()
-      message(CHECK_FAIL "not found")
-      message(
-        FATAL_ERROR
-          "librdata is required for building on Linux(e.g. librdata-dev on debian/ubuntu), please follow the build instruction before you continue."
-      )
-    endif()
-
     find_package(PkgConfig)
     #pkg_check_modules(_PKGCONFIG_LIB_JSONCPP REQUIRED jsoncpp>=1.9)
 
@@ -262,8 +200,7 @@ if(APPLE AND NOT JASP_SYNTAX_INTERFACE_ONLY)
   message(CHECK_START "Looking for 'libbrotlicommon'")
 
   find_package(Brotli 1.0.9 REQUIRED)
-  find_package(freexl 2.0.99 REQUIRED)
-  find_package(librdata REQUIRED)
+  # The excision, Cut 2: freexl / librdata died with the importers.
   find_package(libsodium 1.0.20 REQUIRED)
 
 endif()
@@ -272,23 +209,17 @@ if(WIN32 AND NOT JASP_SYNTAX_INTERFACE_ONLY)
 
   include(FindRToolsDLLPath)
 
-  find_package(freexl 2.0.99 REQUIRED)
+  # The excision, Cut 2: freexl / readstat / librdata died with the importers (their
+  # rtools header copies, dll lookups and bundle entries went with them).
   find_package(libsodium 1.0.20 REQUIRED)
-
-  copy_rtools_header(RTOOLS_LIBREADSTAT_H	readstat.h		${CMAKE_SOURCE_DIR}/Desktop/data/importers/readstat/readstat.h)
-  copy_rtools_header(RTOOLS_LIBRDATA_H		rdata.h			${CMAKE_SOURCE_DIR}/Desktop/data/importers/rdata/rdata.h)
 
   find_rtools_dll_path(RTOOLS_ZLIB_DLL            "zlib1.dll")
   find_rtools_dll_path(RTOOLS_MSYS_DLL            "msys-2.0.dll")
   find_rtools_dll_path(RTOOLS_LIBBZ2_DLL          "libbz2-1.dll")
   find_rtools_dll_path(RTOOLS_LIBLZMA_DLL         "liblzma-5.dll")
   find_rtools_dll_path(RTOOLS_LIBICONV_DLL        "libiconv-2.dll")
-  find_rtools_dll_path(RTOOLS_LIBRDATA_DLL        "librdata-0.dll")
   find_rtools_dll_path(RTOOLS_LIBSTDCPP_DLL       "libstdc++-6.dll")
-  find_rtools_dll_path(RTOOLS_LIBRDATA_DLL_A      "librdata.dll.a")
-  find_rtools_dll_path(RTOOLS_LIBREADSTAT_DLL     "libreadstat-1.dll")
   find_rtools_dll_path(RTOOLS_LIBGCC_S_SEH_DLL    "libgcc_s_seh-1.dll")
-  find_rtools_dll_path(RTOOLS_LIBREADSTAT_DLL_A   "libreadstat.dll.a")
   find_rtools_dll_path(RTOOLS_LIBWINPTHREAD_DLL   "libwinpthread-1.dll")
 
   # ICU DLL: needed by Qt 6.1+ on Windows Server 2019 (build < 18362)

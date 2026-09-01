@@ -531,6 +531,16 @@ std::map<std::string,columnType> DataSet::getColumnTypesMap()
 {
 	std::map<std::string,columnType> theMap;
 
+	//The excision, Cut 2: the encoder's name set must also come from the schema when
+	//lane-bound — the legacy Columns are gone, and `encode()` validates against this map
+	//(a lane open with a stale/empty map made every schema name "not a columnName").
+	if (!_laneDatasetId.empty())
+	{
+		for (const ColumnInfo & col : _schemaColumns)
+			theMap[col.name] = col.type;
+		return theMap;
+	}
+
 	for(const Column * col : columns())
 		theMap[col->name()] = col->type();
 
@@ -2257,55 +2267,8 @@ void DataSet::setShownColumn(Column *newShownColumn)
 	emit shownColumnChanged();
 }
 
-
-void DataSet::writeToOStream(std::ostream & out, bool includeComputed)
-{
-	std::vector<const Column*> cols;
-
-	//Add a UTF-8 BOM
-	out.put(0xEF);
-	out.put(0xBB);
-	out.put(0xBF);
-
-
-	for (Column		*	column : columns())
-		if(!column->isComputed() || includeComputed)
-			cols.push_back(column);
-	
-
-	for (size_t i = 0; i < cols.size(); i++)
-	{
-		const Column *	column	= cols[i];
-		std::string		name	= column->name();
-
-		if (stringUtils::escapeValue(name))	out << '"' << name << '"';
-		else								out << name;
-
-		if (i < cols.size()-1)	out << ",";
-		else					out << "\n";
-
-	}
-
-	size_t		rows = rowCount();
-	std::string value;
-
-	for (size_t r = 0; r < rows; r++)
-		for (size_t i = 0; i < cols.size(); i++)
-		{
-			const Column * column = cols[i];
-
-			value = column->getValue(r);
-			
-			if (value != "")
-			{
-				if (stringUtils::escapeValue(value))	out << '"' << value << '"';
-				else									out << value;
-			}
-
-			if (i < cols.size()-1)		out << ",";
-			else if (r != rows-1)		out << "\n";
-		}
-}
+// DataSet::writeToOStream is gone with the exporters (the excision, Cut 2): data export
+// returns as a lane conversion in a later NEO era.
 
 // ————— NEO lane identity + wire schema (multi-dataset fold; data-model-design.md §3.2) —————
 
@@ -2367,6 +2330,12 @@ void DataSet::landWireSchema(const std::string & datasetId, uint64_t rows, const
 	// nullptr. Legacy datasets keep their Columns untouched.
 
 	setRowCountMetadata(size_t(rows));	// metadata only — never load row data, never materialize legacy vectors
+
+	//The excision, Cut 2: re-register the encoder's names from the fresh schema. setupEncoderPrefix
+	//last ran at dbCreate (empty), so without this a lane dataset could never encode a schema name
+	//(forms/analyses asking for "V1" would hit "not a columnName"). The prefix itself is
+	//id-derived and unchanged; only the name set refreshes.
+	_encoder->setCurrentNames(getColumnTypesMap());
 
 	Log::log() << "DataSet: lane schema applied for " << datasetId << " (" << rows << " rows, " << _schemaColumns.size() << " columns)" << std::endl;
 	emit schemaChanged();

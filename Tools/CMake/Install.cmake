@@ -398,8 +398,7 @@ if(WIN32)
           ${RTOOLS_MSYS_DLL}
           ${RTOOLS_LIBWINPTHREAD_DLL}
           #${RTOOLS_LIBJSONCPP_DLL}
-          ${RTOOLS_LIBREADSTAT_DLL}
-          ${RTOOLS_LIBRDATA_DLL}
+          # The excision, Cut 2: the readstat/librdata DLLs died with the importers.
           ${RTOOLS_ZLIB_DLL}
           ${RTOOLS_LIBBZ2_DLL}
           ${RTOOLS_LIBLZMA_DLL}

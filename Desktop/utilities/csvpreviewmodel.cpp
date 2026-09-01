@@ -152,8 +152,8 @@ void CsvPreviewModel::setVisible(bool newVisible)
 	_visible = newVisible;
 	emit visibleChanged();
 	
-	if(!_visible)
-		DesktopCommunicator::singleton()->delimiterChosen(_delimiter.toLatin1());
+	// The excision, Cut 2: the "report the chosen delimiter back to the importer" dial is
+	// gone with the importer — nothing waits on the other end anymore.
 }
 
 

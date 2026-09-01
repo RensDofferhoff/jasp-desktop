@@ -39,18 +39,14 @@ build_type=${CMAKE_BUILD_TYPE}
 ")
     # For conan install: use profile so JASP builds as RelWithDebInfo, deps as Release
     set(CONAN_INSTALL_BUILD_TYPE_ARGS "--profile=${CONAN_PROFILE_PATH}")
-    # For conan create (freexl): always build the dependency in Release
-    set(CONAN_FREEXL_BUILD_TYPE_ARGS "-s build_type=Release")
   else()
     set(CONAN_INSTALL_BUILD_TYPE_ARGS "-s build_type=${CMAKE_BUILD_TYPE}")
-    set(CONAN_FREEXL_BUILD_TYPE_ARGS "-s build_type=${CMAKE_BUILD_TYPE}")
   endif()
 
   # Parse the args strings into CMake lists so each flag becomes a separate
   # argument in execute_process(COMMAND ...). Without this, "-s build_type=X"
   # is passed as a single combined argument and Conan rejects it.
   separate_arguments(CONAN_INSTALL_BUILD_TYPE_ARGS NATIVE_COMMAND "${CONAN_INSTALL_BUILD_TYPE_ARGS}")
-  separate_arguments(CONAN_FREEXL_BUILD_TYPE_ARGS NATIVE_COMMAND "${CONAN_FREEXL_BUILD_TYPE_ARGS}")
 
   if(JASP_SYNTAX_INTERFACE_ONLY)
     set(CONAN_SYNTAX_OPTION "-o syntax_interface_only=True")
@@ -59,16 +55,8 @@ build_type=${CMAKE_BUILD_TYPE}
   endif()
 
   # We use our own recipe with some patches to cook up a functional version of freexl, so get the recipe:
-  if(NOT JASP_SYNTAX_INTERFACE_ONLY)
-    message(STATUS "Cloning freexl dependency")
-    set(FREEXL_VERSION "2.0.99.cci.20260225")
-    FetchContent_Declare(
-      freexl
-      GIT_REPOSITORY   https://github.com/jasp-stats/conan-recipes.git
-      GIT_TAG          620019a56c6ba94936c9844ab5c79e8db9baa06b
-    )
-    FetchContent_MakeAvailable(freexl)
-  endif()
+  # The excision, Cut 2: the freexl recipe provisioning died with the importers (nothing
+  # links freexl anymore — see conanfile.py).
 
   # Configure Conan for windows
   if(WIN32)
@@ -76,23 +64,7 @@ build_type=${CMAKE_BUILD_TYPE}
 
     message(STATUS "  ${CONAN_COMPILER_RUNTIME}")
 
-    if(NOT JASP_SYNTAX_INTERFACE_ONLY)
-      if(freexl_POPULATED)
-        message(STATUS "Compiling freexl dependency ${freexl_SOURCE_DIR}")
-        execute_process(
-            COMMAND_ECHO STDOUT
-            WORKING_DIRECTORY ${freexl_SOURCE_DIR}/freexl
-            COMMAND
-            conan create ${freexl_SOURCE_DIR}/freexl --version=${FREEXL_VERSION}
-            ${CONAN_FREEXL_BUILD_TYPE_ARGS}
-            -c tools.cmake.cmaketoolchain:generator=${CMAKE_GENERATOR}
-            -s compiler.runtime=${CONAN_COMPILER_RUNTIME} --build=missing
-            --test-missing
-        )
-      else()
-        message(CHECK_FAIL "build freexl failed")
-      endif()
-    endif()
+    # The excision, Cut 2: the freexl conan-create step died with the importers.
 
     # Clean stale Conan-generated CMake files so CMakeDeps creates fresh find
     # modules with correct paths for the resolved build types.
@@ -118,15 +90,10 @@ build_type=${CMAKE_BUILD_TYPE}
 
     set(CONAN_RESULT_FILE "conanbuild.sh")
 
-    # We set CC and CCX to nothing because that was the only difference between running conan in a terminal (where it worked) and in qt creator (where it did not)
+    # We set CC and CCX to nothing because that was the only difference between running conan in a terminal (where it worked) and in qt creator (where it did not) 
     # They were set to bona fide looking xtools stuff but apparently this was too much for conan.
 
-    if(NOT JASP_SYNTAX_INTERFACE_ONLY)
-      execute_process(
-        COMMAND_ECHO STDOUT
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMAND zsh -c -l "export CC=\"\"; export CCX=\"\"; conan create ${freexl_SOURCE_DIR}/freexl --version=${FREEXL_VERSION} -s build_type=${CMAKE_BUILD_TYPE} -s os.version=${CMAKE_OSX_DEPLOYMENT_TARGET} --build=missing --test-missing")
-    endif()
+    # The excision, Cut 2: the freexl conan-create step died with the importers.
 
     execute_process(
         COMMAND_ECHO STDOUT

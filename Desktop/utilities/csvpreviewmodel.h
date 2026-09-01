@@ -21,7 +21,7 @@
 #include <QAbstractTableModel>
 #include <QStringList>
 #include <QChar>
-#include "data/importers/csv/csvparser.h"
+#include "utilities/csvparser.h"
 
 class CsvPreviewModel : public QAbstractTableModel
 {

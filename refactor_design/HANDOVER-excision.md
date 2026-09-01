@@ -49,9 +49,27 @@ new producers on the existing rail.
       MainWindow / DatabaseFileMenu call sites deleted (R1 gates become deletions);
       testall's 7 syncer tests go. Preserve the P14 policy comment here (it moves to §the
       main handover / this file).
-- [ ] **Cut 2 — Importers/Exporters + legacy open path**: delete the directories; the
-      AsyncLoader/FileMenu legacy open arms go; non-CSV formats fail with a clear
-      "not supported in NEO yet" message (no silent nothing); their test blocks go.
+- [x] **Cut 2 — Importers/Exporters + legacy open path** (2026-09-01): `Desktop/data/
+      importers/` and `Desktop/data/exporters/` deleted (csvparser moved to `Desktop/utilities/` —
+      CsvPreviewModel + its test keep it); `datasetloader.{h,cpp}` deleted; AsyncLoader keeps
+      ONLY the lane CSV-family open — every other route (other formats, OSF nodes, database
+      sources, .jasp, FileSyncData, FileSave/autosave, FileExportResults/Data/GenerateData)
+      completes with `FileEvent::notSupportedInNeoMsg(...)` and MainWindow surfaces it (never a
+      silent nothing); FileEvent lost the Exporter machinery; autosave is a quiet no-op (no
+      modal nag); DesktopCommunicator lost the delimiter ask-API (the lane sniffs itself);
+      `DataSet::writeToOStream` gone. **Bug fixed en route:** lane datasets never registered
+      schema names in the ColumnEncoder (`setupEncoderPrefix` ran at dbCreate, before the
+      schema) — `getColumnTypesMap()` serves the schema when lane-bound and `landWireSchema`
+      refreshes the encoder, else `encode("V1")` threw "not a columnName". Deps dropped:
+      ReadStat/librdata/freexl everywhere (Desktop links, Libraries finds, APPLE readstat dep,
+      Windows rtools headers/DLLs, Install bundle list, Conan provisioning + conanfile) and
+      `Tools/CMake/Dependencies.cmake` + root `include(Dependencies)` deleted. Test fallout:
+      testall's import/export blocks died; the CSVImporter *fixture* users were reworked onto
+      `applySchema` lane fixtures (cycle/close/encoder tests); **JASPTestDebugData deleted
+      whole** (its fixture loader was CSVImporter; every test drove legacy Column/Label APIs —
+      Cut-5 death row anyway); testUndoColumnDropLevels died early (same reason). Known
+      pre-existing (NOT Cut 2): JASPTestDbMigration crashes in `DatabaseInterface::load()` —
+      an in-memory `:memory:` load can never pass `filesystem::exists` (Cut-3 territory).
 - [ ] **Cut 3 — DatabaseInterface**: delete; strip DataSet/Column/Filter/Workspace/
       DataSetPackage db* methods; fixture fallout in tests.
 - [ ] **Cut 4 — legacy undo commands**: delete the Column-command family; UndoStack keeps
@@ -85,11 +103,11 @@ Grounded in the CMake files (2026-09-01):
 |---|---|---|
 | `SQLite::SQLite3` | `CommonData/CMakeLists.txt` (CommonData links it twice) | **Cut 3** (DatabaseInterface) |
 | `LibArchive::LibArchive` | CommonData | .jasp zip packaging — Cut 3 (verify no other user; archivereader lives in CommonData too!) |
-| `LIBREADSTAT_LIBRARIES` (+ rtools/apple variants) | `Desktop/CMakeLists.txt` | **Cut 2** (readstat importer: SPSS/Stata/SAS) |
-| `LIBRDATA_LIBRARIES` | Desktop | **Cut 2** (rdata importer) |
-| `freexl::freexl` (non-Linux) | Desktop | **Cut 2** (excel/ods importers) |
+| `LIBREADSTAT_LIBRARIES` (+ rtools/apple variants) | `Desktop/CMakeLists.txt` | **DONE — Cut 2** (readstat importer: SPSS/Stata/SAS) |
+| `LIBRDATA_LIBRARIES` | Desktop | **DONE — Cut 2** (rdata importer) |
+| `freexl::freexl` (non-Linux) | Desktop | **DONE — Cut 2** (excel/ods importers; conan provisioning + conanfile requirement dropped too) |
 | `find_package(nng)` | Desktop | **KEEPS** — the NEO client transport (jaspclient) |
-| `include(Dependencies)` (the ReadStat prep, root CMakeLists) | root | Cut 2 cleanup |
+| `include(Dependencies)` (the ReadStat prep, root CMakeLists) | root | **DONE — Cut 2** (file deleted) |
 | libsodium | Desktop | check: orchestrator session auth? verify before touching |
 
 Rules: every cut ends with a grep for the removed lib's targets/includes — no orphan

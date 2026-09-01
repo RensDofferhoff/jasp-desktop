@@ -12,15 +12,8 @@ qt_add_executable(
   testinfo.h
 )
 
-qt_add_executable(
-  JASPTestDebugData
-  ${SYSTEM_TYPE}
-  $<$<PLATFORM_ID:Darwin>:${_R_Framework}>
-  $<$<PLATFORM_ID:Windows>:${CMAKE_SOURCE_DIR}/Desktop/JASP.exe.manifest>
-  testdebugdata.h testdebugdata.cpp
-)
-
-# NEO gut: JASPTestEngine removed — it drove the deleted EngineSync/EngineRepresentation.
+# NEO gut (the excision, Cut 2): JASPTestDebugData removed — its fixture loader was the
+# CSVImporter and every test in it drove the legacy Column/Label API (Cut-5 death row).
 
 qt_add_executable(
   JASPQuickTest
@@ -62,7 +55,6 @@ qt_add_executable(
 
 
 add_dependencies(JASPTest           JASPDesktopLib)
-add_dependencies(JASPTestDebugData  JASPDesktopLib)
 add_dependencies(JASPQuickTest      JASPDesktopLib)
 add_dependencies(JASPTestCsvPrev    JASPDesktopLib)
 add_dependencies(JASPTestDbMigration JASPDesktopLib)
@@ -72,15 +64,6 @@ target_include_directories(
   JASPTest
   PUBLIC
   JASPDesktopLib
-)
-
-target_include_directories(
-  JASPTestDebugData
-  PUBLIC
-  JASPDesktopLib
-
-  PRIVATE
-  Qt6::Core
 )
 
 target_include_directories(
@@ -109,16 +92,6 @@ target_include_directories(
 
 target_link_libraries(
   JASPTest
-  PUBLIC
-  JASPDesktopLib
-  Qt::Test
-
-  PRIVATE
-  Qt6::Core
-)
-
-target_link_libraries(
-  JASPTestDebugData
   PUBLIC
   JASPDesktopLib
   Qt::Test
@@ -169,11 +142,6 @@ target_compile_definitions(
 )
 
 target_compile_definitions(
-  JASPTestDebugData
-  PUBLIC TESTLIBRARY_DIR=${CMAKE_SOURCE_DIR}/Tests/TestLibrary
-)
-
-target_compile_definitions(
   JASPTestCsvPrev
   PUBLIC TESTLIBRARY_DIR=${CMAKE_SOURCE_DIR}/Tests/TestLibrary
 )
@@ -192,7 +160,6 @@ enable_testing(true)
 add_test(NAME testDataImport               COMMAND JASPTest)
 add_test(NAME testCsvPreview               COMMAND JASPTestCsvPrev)
 add_test(NAME testDbMigration              COMMAND JASPTestDbMigration)
-add_test(NAME testDebugData                COMMAND JASPTestDebugData)
 add_test(NAME testQuick                    COMMAND JASPQuickTest)
 add_test(NAME testColumnEncoderContext     COMMAND JASPTestColumnEncoderContext)
 

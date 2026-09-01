@@ -24,10 +24,8 @@
 #include <QMutex>
 #include <QTimer>
 
-#include "datasetloader.h"
 #include "datasetpackage.h"
 #include "data/fileevent.h"
-#include "data/exporters/exporter.h"
 
 #include "osf/onlinedatamanager.h"
 #include "timers.h"
@@ -40,9 +38,10 @@ struct LoaderException : public std::runtime_error
 };
 
 ///
-/// Used to run importers and exporters in a different thread from the main event loop.
-/// This way we can keep the interface responsive but it is important to make sure the right kind of qt connections are used.
-/// And no direct calls to the other threads...
+/// Runs the (remaining) file-open work in a different thread from the main event loop.
+/// NEO (the excision, Cut 2): importers, exporters and the legacy import branch are gone —
+/// this now only registers lane-owned CSV opens; every other route fails with a clear
+/// "not supported in NEO yet" message (FileEvent::notSupportedInNeoMsg).
 class AsyncLoader : public QObject
 {
 	Q_OBJECT
@@ -55,36 +54,17 @@ public:
 
 signals:
 	void beginLoad(FileEvent*);
-	void beginSave(FileEvent*);
 	void progress(QString status, int progress);
-	void beginFileUpload(QString nodePath, QString sourcePath);
-	bool checkDoSync();
-	void syncCompleted(int dataSetId, bool success);
-	///Emitted after a (non-sync) load added a dataset to the workspace. The workspace table model
+	///Emitted after a load added a dataset to the workspace. The workspace table model
 	///was mutated on the loader thread, so the GUI thread connects to this to refresh it (and any
 	///views bound to it, e.g. the dataset tabbuttons) from the correct thread.
 	void dataSetsChanged();
 
-public slots:
-	///Carries the DataSet (not just its id) so the loader never has to reach into the GUI-owned
-	///workspace map from its worker thread. The id is kept only for the syncCompleted completion
-	///routing, which runs back on the GUI thread.
-	void onSyncRequired(int dataSetId, DataSet * dataSet, const QString & locator, const QString & extension, const QString & databaseJson);
-
 private slots:
 	void loadTask(FileEvent *event);
-	void saveTask(FileEvent *event);
 	void loadPackage(QString id);
-	void uploadFileFinished(QString id);
-	//void errorFlagged(QString msg, QString id);
-
-protected:
-	void progressHandler(int progress);
 
 private:
-	QString fileChecksum(const QString &fileName, QCryptographicHash::Algorithm hashAlgorithm);
-
-	DataSetLoader			_loader;
 	FileEvent			*	_currentEvent	= nullptr;
 	OnlineDataManager	*	_odm			= nullptr;
 };

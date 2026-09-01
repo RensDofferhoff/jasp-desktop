@@ -2,30 +2,23 @@
 #include <QTemporaryDir>
 
 class DataSetPackage;
-class Importer;
 class DataSet;
 namespace Json { class Value; }	///< moc-compiles standalone — the fixture below only references it
 
 class TestAll: public QObject
 {
     Q_OBJECT
-	
+
 private slots:
     void    initTestCase();
     void    init();
 	void	cleanup();
-	void    testDataImport();
-	void	testDataImport_data();
-	void	testJaspDataImport();
-	void	testJaspDataImport_data();
-	void	testJaspRoundRobin_data();
-	void	testJaspRoundRobin();
-	void	testSavLabels();
-	void	testFilterLabels();
 
-
-	// DataExporter tests
-	void	testDataExporterShownDataSetOnly();
+	// The excision, Cut 2: the importer/exporter test blocks (testDataImport,
+	// testJaspDataImport, testJaspRoundRobin, testSavLabels, testFilterLabels,
+	// testDataExporterShownDataSetOnly) died with Desktop/data/importers and
+	// Desktop/data/exporters — those formats return as lane conversions in later
+	// NEO eras (refactor_design/HANDOVER-excision.md).
 
 	// DatabaseInterface regressions
 	void	testFilterRevisionInvalidatedRoundTrip();
@@ -37,9 +30,8 @@ private slots:
 	// (transitively) depends on it, or the recompute cascade would livelock.
 	void	testComputedDataSetCycleDetection();
 
-	// Undo regression: the drop-levels command stores its old value as the enum name so undo/redo
-	// (which restore via dropLevelsTypeFromQString) do not throw missingEnumVal.
-	void	testUndoColumnDropLevels();
+	// Undo regression: testUndoColumnDropLevels died in Cut 2 (its fixture was the importer-built
+	// legacy Column; the Column undo-command family is Cut-4 death row anyway).
 
 	// Encoder regression: each dataset's encoder prefix must carry the dataset id (not -1), so
 	// colliding column names across datasets cannot encode to the same name.
@@ -49,36 +41,28 @@ private slots:
 	// runFilters() must stay safe afterwards.
 	void	testFilterRemoveFilter();
 
-	// Sync + export integration tests
+	// Closing/removing datasets and workspaces must never crash (regression for the dataset-close crash
+	// and the workspace teardown paths).
+	void	testCloseWorkspaceAndDataSets();
 
-	// AsyncLoader FileEvent sync flow test
-
-	// SQLite database sync test
-
-	    // Closing/removing datasets and workspaces must never crash (regression for the dataset-close crash
-	    // and the workspace teardown paths).
-		void	testCloseWorkspaceAndDataSets();
-
-		// Lane data_changed / applyRevision scenarios (data-edit-design §6, Increment 4 step (c)):
-		// the DataSet-side contract of every edit's return leg — revision adoption, rows/schema
-		// landing, the view-restart signal, and the staleness/idempotence guards. The GridModel
-		// restart itself is wired in Desktop (bindToShown) and covered by the Rust e2e rail; here
-		// we pin what applyRevision promises its callers.
-		void	testLaneRevisionLandsRowsAndSchema();
-		void	testLaneRevisionIgnoresStalePushes();
-		void	testLaneRevisionSchemaSwap();
-		void	testLaneRevisionRowGrowthWithoutSchema();
-		void	testLaneRevisionOutOfOrderPushes();
-		void	testLaneDatasetsHaveNoMirrorColumns();	///< the R2 canary: lane ⇒ zero legacy Columns
-		void	testLaneColumnModelServesSchema();	///< the R2 canary 2: the variable editor's model serves the schema on lane
+	// Lane data_changed / applyRevision scenarios (data-edit-design §6, Increment 4 step (c)):
+	// the DataSet-side contract of every edit's return leg — revision adoption, rows/schema
+	// landing, the view-restart signal, and the staleness/idempotence guards. The GridModel
+	// restart itself is wired in Desktop (bindToShown) and covered by the Rust e2e rail; here
+	// we pin what applyRevision promises its callers.
+	void	testLaneRevisionLandsRowsAndSchema();
+	void	testLaneRevisionIgnoresStalePushes();
+	void	testLaneRevisionSchemaSwap();
+	void	testLaneRevisionRowGrowthWithoutSchema();
+	void	testLaneRevisionOutOfOrderPushes();
+	void	testLaneDatasetsHaveNoMirrorColumns();	///< the R2 canary: lane ⇒ zero legacy Columns
+	void	testLaneColumnModelServesSchema();	///< the R2 canary 2: the variable editor's model serves the schema on lane
 
 	private:
 		DataSetPackage		*	_pkg	= nullptr;
-		Importer			*	_importer	= nullptr;
 		bool					_newPkgWithDataSet();
-		bool					_checkDoSyncFake();
 		/// A lane-bound DataSet WITHOUT any import: `applySchema` plays the open result (the
 		/// orchestrator's kind:"data" terminal), revision space starting at 0 — the minimal
 		/// fixture for the applyRevision scenarios above.
 		DataSet				*	_newLaneDataSet(const Json::Value & schema, uint64_t rows);
-	};
+};

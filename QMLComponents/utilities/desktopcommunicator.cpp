@@ -76,32 +76,8 @@ bool DesktopCommunicator::queryEncryptionSettings(bool readingMode)
 #endif
 }
 
-char DesktopCommunicator::askCsvDelimiter(char autoDelimiter, const QString &data)
-{
-#ifdef BUILDING_JASP
-	if (_knownCsvDelimiter != '\0')
-		return _knownCsvDelimiter;
-
-	if(QThread::currentThread() == qApp->thread()) {
-		int x = 1;
-	}
-
-	_csvCondition = false;
-	_csvSubmitted = autoDelimiter;
-	
-	if(!QObject::isSignalConnected(QMetaMethod::fromSignal(&DesktopCommunicator::askCsvDelimiterSignal)))
-		return autoDelimiter;
-	
-	emit askCsvDelimiterSignal(data, autoDelimiter);
-
-	std::unique_lock<std::mutex> lock(_csvLock);
-	_csv_cv.wait(lock, [&] { return _csvCondition; });
-
-	return _csvSubmitted;
-#else
-	return ',';
-#endif
-}
+// DesktopCommunicator::askCsvDelimiter is gone with the importers (the excision, Cut 2):
+// the data lane sniffs the CSV delimiter itself, so no dialog is ever needed.
 
 void DesktopCommunicator::encryptionSettingsQueryComplete(bool submit)
 {
@@ -109,12 +85,4 @@ void DesktopCommunicator::encryptionSettingsQueryComplete(bool submit)
 	_queryCondition = true;
 	_querySubmitted = submit;
 	_query_cv.notify_one();
-}
-
-void DesktopCommunicator::delimiterChosen(char delimiter)
-{
-	std::lock_guard<std::mutex> lock(_csvLock);
-	_csvCondition = true;
-	_csvSubmitted = delimiter;
-	_csv_cv.notify_one();
 }

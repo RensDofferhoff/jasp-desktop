@@ -271,7 +271,8 @@ public:
 			void			setEmptyValuesFromStrings(	const stringset& values);
 			void			setDescription(				const std::string& desc);
 			Json::Value		jsonForCompare() const;
-			void			writeToOStream(std::ostream & out, bool includeComputed);
+			// writeToOStream died with the exporters (the excision, Cut 2); export returns as a
+			// lane conversion in a later NEO era.
 
 signals:
 			void			schemaChanged();	///< applySchema landed (id/rows/schema ready or refreshed)

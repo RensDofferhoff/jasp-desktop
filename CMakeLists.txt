@@ -129,8 +129,7 @@ include(Programs)
 # Looking for libraries, e.g., Boost, Qt
 include(Libraries)
 
-# Preparing irregular dependencies, e.g., ReadStat
-include(Dependencies)
+# The excision, Cut 2: include(Dependencies) (the ReadStat prep) died with the importers.
 
 # Setting JASP's parameters, e.g., JASP_VERSION
 include(JASP)

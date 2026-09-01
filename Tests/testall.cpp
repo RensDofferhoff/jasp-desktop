@@ -5,16 +5,7 @@
 #include "qutils.h"
 #include "databaseinterface.h"
 #include "data/datasetpackage.h"
-#include "data/importers/csvimporter.h"
-#include "data/importers/odsimporter.h"
-#include "data/importers/jaspimporter.h"
-#include "data/exporters/jaspexporter.h"
-#include "data/exporters/dataexporter.h"
-#include "data/importers/excelimporter.h"
-#include "data/importers/rdataimporter.h"
-#include "data/importers/readstatimporter.h"
 #include "utilities/settings.h"
-#include "utilities/desktopcommunicator.h"
 #include "dataset.h"
 #include "workspace.h"
 #include "undostack.h"
@@ -26,6 +17,37 @@
 #include <sqlite3.h>
 #include "data/asyncloader.h"
 
+// ---------- Lane fixture builders (data-edit-design §6 / data-model-design §3.2) ----------
+// Wire-schema builders — the lane's column-info JSON exactly as column_info_json emits it
+// (name / type / levels). The excision, Cut 2: these also replaced the CSVImporter fixture
+// loading — `applySchema` is how a test makes a dataset non-empty now (zero legacy Columns).
+static Json::Value laneColumn(const std::string & name, const std::string & type, std::initializer_list<const char *> levels = {})
+{
+	Json::Value col;
+	col["name"]	= name;
+	col["type"]	= type;
+	if (levels.size())
+	{
+		col["levels"] = Json::Value(Json::arrayValue);
+		for (const char * level : levels)
+			col["levels"].append(level);
+	}
+	return col;
+}
+
+static Json::Value laneSchema(std::initializer_list<Json::Value> columns)
+{
+	Json::Value schema(Json::arrayValue);
+	for (const Json::Value & col : columns)
+		schema.append(col);
+	return schema;
+}
+
+///The minimal "non-empty dataset" fixture: one scale column, three rows.
+static Json::Value fixtureSchema()
+{
+	return laneSchema({ laneColumn("V1", "scale") });
+}
 
 void TestAll::initTestCase()
 {
@@ -35,18 +57,10 @@ void TestAll::initTestCase()
 void TestAll::init()
 {
 	Settings::informSettingsThatThisIsATest();
-	//The CSV delimiter scratchpad (_knownCsvDelimiter) is a per-import value in production
-	//(reset by DataSetLoader); make sure a leftover value can never leak between tests.
-	DesktopCommunicator::singleton()->setKnownCsvDelimiter('\0');
-	//_pkg->reset(false);
 }
 
 void TestAll::cleanup()
 {
-	
-	delete _importer;
-	_importer = nullptr;
-
 	DatabaseInterface::singleton()->close();
 	DatabaseInterface::singleton()->closeInterfaces();
 	delete _pkg;
@@ -55,18 +69,15 @@ void TestAll::cleanup()
 
 bool TestAll::_newPkgWithDataSet()
 {
-	delete _importer;
-	_importer = nullptr;
 	delete _pkg;
 	_pkg = nullptr;
 
 	_pkg = new DataSetPackage(this);
 
-	//Reset the per-import CSV delimiter scratchpad so it can't leak from a previous import.
-	DesktopCommunicator::singleton()->setKnownCsvDelimiter('\0');
-
-	CSVImporter importer;
-	importer.loadDataSet(fq(_testLibrary().absoluteFilePath("csv/debug.csv")), _pkg->createDataSet(), [](int){});
+	//The excision, Cut 2: the CSVImporter fixture died with the importers; applySchema plays
+	//a non-empty dataset instead — same shape (one column, some rows), zero legacy Columns.
+	DataSet * dataSet = _pkg->createDataSet();
+	dataSet->applySchema("ds-test-fixture", 3, fixtureSchema(), "");
 
 	return _pkg->dataSet() != nullptr;
 }
@@ -74,403 +85,10 @@ bool TestAll::_newPkgWithDataSet()
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
 
-
-void TestAll::testDataImport_data()
-{
-	QTest::addColumn<QString>("folder");
-	QTest::addColumn<QString>("dataFileAbsolutePath");
-
-	for(const QString & folder : _testLibrary().entryList(QDir::Filter::Dirs | QDir::Filter::NoDotAndDotDot | QDir::Filter::NoSymLinks))
-	{
-		if(folder == "jasp")
-			continue;
-
-		QDir subDir(_testLibrary());
-		subDir.cd(folder);
-
-		for(QFileInfo & i : subDir.entryInfoList(QDir::Filter::Files | QDir::Filter::NoDotAndDotDot | QDir::Filter::NoSymLinks))
-			if(i.suffix() != "json")
-				QTest::newRow(i.fileName().toUtf8()) << folder << i.absoluteFilePath();
-	}
-}
-
-void TestAll::testDataImport()
-{
-	QFETCH(QString, folder);
-	QFETCH(QString, dataFileAbsolutePath);
-
-	QDir subDir(_testLibrary());
-	subDir.cd(folder);
-
-	auto getImporter = [&]() -> Importer *
-	{
-		if(folder == "readstat")	return new ReadStatImporter();
-		if(folder == "rdata")		return new RDataImporter();
-		if(folder == "excel")		return new ExcelImporter();
-		if(folder == "ods")			return new ods::ODSImporter();
-		if(folder == "csv")			return new CSVImporter();
-
-		return nullptr;
-	};
-
-	if(_pkg)
-		delete _pkg;
-
-	if(_importer)
-		delete _importer;
-
-	_pkg = new DataSetPackage(this);
-	_importer = getImporter();
-
-	QVERIFY2(_importer, "Getting importer failed...");
-
-	//Reset the per-import CSV delimiter scratchpad so one file's delimiter can't leak into the next.
-	DesktopCommunicator::singleton()->setKnownCsvDelimiter('\0');
-
-	std::cerr << "Testing " << dataFileAbsolutePath << std::endl;
-	_importer->loadDataSet(fq(dataFileAbsolutePath), _pkg->createDataSet(), [](int i){});
-
-	DataSet * dataSet = _pkg->dataSet();
-	QVERIFY2(dataSet,						"No dataset!");
-
-	Json::Value compareMe = dataSet->jsonForCompare();
-
-	QString jsonFilePath = dataFileAbsolutePath,
-			ext			 = QFileInfo(dataFileAbsolutePath).suffix();
-
-	jsonFilePath.replace(jsonFilePath.size() - (ext.size() + 1), ext.size() + 1, ".json");
-
-	QFileInfo jsonFileIn(jsonFilePath);
-
-	if(!jsonFileIn.exists())
-	{
-		std::cerr << "Json does not exist yet, creating it now!" << std::endl;
-		QFile jsonFile(jsonFilePath);
-		jsonFile.open(QFile::OpenModeFlag::WriteOnly);
-		jsonFile.write(compareMe.toStyledString().c_str());
-		jsonFile.close();
-	}
-
-	QVERIFY(jsonFileIn.exists());
-
-	QFile jsonFile(jsonFilePath);
-
-	jsonFile.open(QFile::OpenModeFlag::ReadOnly);
-
-	std::string jsonTxt  = fq(jsonFile.readAll());
-
-	Json::Reader parser;
-	Json::Value  hardcoded;
-
-	QVERIFY2(parser.parse(jsonTxt, hardcoded),	"Parsing json failed!");
-
-	bool hardcodedIsSame = hardcoded == compareMe;
-
-	if(!hardcodedIsSame)
-		std::cerr << stringUtils::replaceBy(compareMe.toStyledString(), "\n", " ") << std::endl;
-
-	QVERIFY2(hardcodedIsSame,			"Hardcoded json is different!");
-
-	
-	DataSet loadMe(nullptr, dataSet->id());
-	QVERIFY2(dataSet->jsonForCompare() == loadMe.jsonForCompare(), "DataSet isnt the same after dbload!");
-}
-
-
-void TestAll::testJaspDataImport_data()
-{
-	QTest::addColumn<QString>("folder");
-	QTest::addColumn<QString>("dataFileAbsolutePath");
-
-	for(const QString & folder : _testLibrary().entryList(QDir::Filter::Dirs | QDir::Filter::NoDotAndDotDot | QDir::Filter::NoSymLinks))
-	{
-		if(folder != "jasp")
-			continue;
-
-		QDir subDir(_testLibrary());
-		subDir.cd(folder);
-
-		for(QFileInfo & i : subDir.entryInfoList(QDir::Filter::Files | QDir::Filter::NoDotAndDotDot | QDir::Filter::NoSymLinks))
-			if(i.suffix() != "json")
-				QTest::newRow(i.fileName().toUtf8()) << folder << i.absoluteFilePath();
-	}
-}
-
-void TestAll::testJaspRoundRobin_data()
-{
-	testJaspDataImport_data();
-}
-
-void TestAll::testJaspRoundRobin()
-{
-	QFETCH(QString, folder);
-	QFETCH(QString, dataFileAbsolutePath);
-
-	QDir subDir(_testLibrary());
-	subDir.cd(folder);
-
-	if(_pkg)
-		delete _pkg;
-
-	if(_importer)
-		delete _importer;
-
-	_pkg = new DataSetPackage(this);
-	
-	std::cerr << "Testing " << dataFileAbsolutePath << std::endl;
-	JASPImporter::loadDataSet(fq(dataFileAbsolutePath),		[](int){});
-	
-	DataSet *	dataSet		= _pkg->dataSet();
-	QVERIFY2(dataSet,			"No dataset!");
-	
-	Json::Value compareMe	= dataSet->jsonForCompare();
-	std::string jaspFile	= TempFiles::createSpecific("testjasp", "temp.jasp");
-
-	std::cerr << "Storing jasp file temporarily to: " << jaspFile << std::endl;
-	// Create snapshot before exporting
-	JASPExporter::createSnapshot("testjasp_snapshot_");
-	JASPExporter().saveDataSet(jaspFile, [](int){});
-	
-	_pkg->reset();
-	QVERIFY2(_pkg->dataSet()->jsonForCompare() != compareMe, "DataSet should be different after resetting DataSetPackage!");
-	
-	JASPImporter::loadDataSet(jaspFile, [](int){});
-	
-	dataSet = _pkg->dataSet();
-	QVERIFY2(dataSet,									"No dataset!");
-	QVERIFY2(dataSet->jsonForCompare() == compareMe,	"DataSet should be the same after reloading!");
-}
-
-
-void TestAll::testJaspDataImport()
-{
-	QFETCH(QString, folder);
-	QFETCH(QString, dataFileAbsolutePath);
-
-	QDir subDir(_testLibrary());
-	subDir.cd(folder);
-
-	if(_pkg)
-		delete _pkg;
-
-	if(_importer)
-		delete _importer;
-
-	_pkg = new DataSetPackage(this);
-	
-	std::cerr << "Testing " << dataFileAbsolutePath << std::endl;
-
-	JASPImporter::loadDataSet(fq(dataFileAbsolutePath),		[](int){});
-	
-	DataSet * dataSet = _pkg->dataSet();
-	QVERIFY2(dataSet,						"No dataset!");
-
-	Json::Value compareMe = dataSet->jsonForCompare();
-
-	QString jsonFilePath = dataFileAbsolutePath,
-			ext			 = QFileInfo(dataFileAbsolutePath).suffix();
-
-	jsonFilePath.replace(jsonFilePath.size() - (ext.size() + 1), ext.size() + 1, ".json");
-
-	QFileInfo jsonFileIn(jsonFilePath);
-
-	if(!jsonFileIn.exists())
-	{
-		std::cerr << "Json does not exist yet, creating it now!" << std::endl;
-		QFile jsonFile(jsonFilePath);
-		jsonFile.open(QFile::OpenModeFlag::WriteOnly);
-		jsonFile.write(compareMe.toStyledString().c_str());
-		jsonFile.close();
-
-	}
-
-	QVERIFY(jsonFileIn.exists());
-
-	QFile jsonFile(jsonFilePath);
-	
-	
-	jsonFile.open(QFile::OpenModeFlag::ReadOnly);
-
-	std::string jsonTxt  = fq(jsonFile.readAll());
-
-	Json::Reader parser;
-	Json::Value  hardcoded;
-
-	QVERIFY2(parser.parse(jsonTxt, hardcoded),	"Parsing json failed!");
-
-	bool hardcodedIsSame = hardcoded == compareMe;
-
-	if(!hardcodedIsSame)
-		std::cerr << stringUtils::replaceBy(compareMe.toStyledString(), "\n", " ") << std::endl;
-
-	QVERIFY2(hardcodedIsSame,			"Hardcoded json is different!");
-
-	
-	DataSet loadMe(nullptr, dataSet->id());
-	QVERIFY2(dataSet->jsonForCompare() == loadMe.jsonForCompare(), "DataSet isnt the same after dbload!");
-}
-
-// Regression test for https://github.com/jasp-stats/jasp-desktop/commit/0a90b9a34e9d754f55bc32ec1efd2f67940ef756
-// setDataSetSize() pre-allocates rows before initFromLookups() is called, causing rowCount() > 0
-// when setValues() checks allTheSame — which skipped the label-detection loop and silently dropped
-// all SPSS value labels.
-void TestAll::testSavLabels()
-{
-	if(_pkg)	delete _pkg;
-	if(_importer)	delete _importer;
-
-	_pkg		= new DataSetPackage(this);
-	_importer	= new ReadStatImporter();
-
-	const QString savPath = _testLibrary().absoluteFilePath("readstat/Labelled_data.sav");
-	_importer->loadDataSet(fq(savPath), _pkg->createDataSet(), [](int){});
-
-	DataSet * dataSet = _pkg->dataSet();
-	QVERIFY2(dataSet, "No dataset!");
-
-	// These columns have SPSS value labels (e.g. 1->"Soha", 2->"Havonta vagy kevesebbszer", …)
-	// and must be imported as labelled (nominal/ordinal) columns.
-	const QStringList labelledColumns = {
-		"AUDIT_gyakorisag",
-		"AUDIT_mennyiség",
-		"PHQ14_fejfajas",
-		"PHQ14_szivveres",
-		"PHQ9_energia"
-	};
-
-	for(const QString & colName : labelledColumns)
-	{
-		Column * col = dataSet->column(fq(colName));
-		QVERIFY2(col,				qPrintable("Column not found: "	+ colName));
-		QVERIFY2(col->hasLabels(),			qPrintable("Column has no labels: "  + colName));
-		QVERIFY2(col->labels().size() > 0,	qPrintable("Label list is empty: "   + colName));
-	}
-
-	// Spot-check: AUDIT_gyakorisag label 1 should be "Soha"
-	Column * audit = dataSet->column("AUDIT_gyakorisag");
-	QVERIFY2(audit, "AUDIT_gyakorisag column not found");
-
-	bool foundSoha = false;
-	for(const Label * label : audit->labels())
-		if(label->labelDisplay() == "Soha") { foundSoha = true; break; }
-
-	QVERIFY2(foundSoha, "Expected label 'Soha' not found in AUDIT_gyakorisag");
-
-	// Scale columns must NOT have labels
-	const QStringList scaleColumns = { "Eletkor", "MHC_SF_Emo", "PSS_10" };
-	for(const QString & colName : scaleColumns)
-	{
-		Column * col = dataSet->column(fq(colName));
-		QVERIFY2(col, qPrintable("Column not found: " + colName));
-		QVERIFY2(!col->hasLabels(), qPrintable("Scale column should not have labels: " + colName));
-	}
-}
-
-// Regression test for https://github.com/jasp-stats/jasp-issues/issues/4293
-void TestAll::testFilterLabels()
-{
-	if(_pkg)	delete _pkg;
-	if(_importer)	delete _importer;
-
-	_pkg		= new DataSetPackage(this);
-	_importer	= new ReadStatImporter();
-
-	const QString filePath = _testLibrary().absoluteFilePath("jasp/Directed Reading Activities.jasp");
-	JASPImporter::loadDataSet(fq(filePath),		[](int){});
-
-	DataSet * dataSet = _pkg->dataSet();
-	QVERIFY2(dataSet, "No dataset!");
-
-	std::string colName = "group";
-	Column * col = dataSet->column(colName);
-	QVERIFY2(col,										qPrintable("Group Column not found"));
-	QVERIFY2(col->hasLabels(),							qPrintable("Group has no labels"));
-	QVERIFY2(col->labelsNonEmptyCount() == 2,			qPrintable(tq("Number of labels is not 2: ")) + col->labelsNonEmptyCount());
-
-	Label * controlLabel = col->labelByIndexNonEmpty(0);
-	Label * treatLabel = col->labelByIndexNonEmpty(1);
-	QVERIFY2(controlLabel->label() == "Control",		qPrintable("First label is not 'Control'"));
-	QVERIFY2(controlLabel->filterAllows(),				qPrintable("'Control' label is filtered"));
-	QVERIFY2(treatLabel->label() == "Treat",			qPrintable("Second label is not 'Treat'"));
-	QVERIFY2(treatLabel->filterAllows(),				qPrintable("'Treat'label is filtered"));
-
-	// Do as if the user clicked on Filter for the Control label in the Label window
-	col->setLabelAllowFilter(0, false);
-	QVERIFY2(!controlLabel->filterAllows(),				qPrintable("'Control' label is not filtered"));
-	QVERIFY2(treatLabel->filterAllows(),				qPrintable("'Treat'label is filtered"));
-
-	// Not all labels can be unset: nothing should change
-	col->setLabelAllowFilter(1, false);
-	QVERIFY2(!controlLabel->filterAllows(),				qPrintable("'Control' label is not filtered"));
-	QVERIFY2(treatLabel->filterAllows(),				qPrintable("'Treat'label is filtered"));
-
-	// Set first the Control label, and unset the Treat label: this time it should work
-	col->setLabelAllowFilter(0, true);
-	col->setLabelAllowFilter(1, false);
-	QVERIFY2(controlLabel->filterAllows(),				qPrintable("'Control' label is filtered"));
-	QVERIFY2(!treatLabel->filterAllows(),				qPrintable("'Treat'label is not filtered"));
-}
-
-
-void TestAll::testDataExporterShownDataSetOnly()
-{
-	_pkg = new DataSetPackage(this);
-
-	QTemporaryDir tempDir;
-	QVERIFY(tempDir.isValid());
-	QString csvPath = tempDir.filePath("export.csv");
-
-	// Import debug.csv — this creates the first dataset
-	DataSet * firstDs = nullptr;
-	{
-		CSVImporter importer;
-		importer.loadDataSet(fq(_testLibrary().absoluteFilePath("csv/debug.csv")), _pkg->createDataSet(), [](int){});
-		firstDs = _pkg->dataSet();
-		QVERIFY(firstDs);
-		QVERIFY(firstDs->rowCount() > 0);
-		QVERIFY(firstDs->columnCount() > 0);
-	}
-
-	// Create a second, empty dataset and make it the shown one
-	DataSet * secondDs = _pkg->createDataSet();
-	QVERIFY(secondDs);
-	_pkg->workspace()->setShownDataSet(secondDs);
-	secondDs = _pkg->dataSet();
-	QVERIFY(secondDs);
-	QVERIFY(secondDs != firstDs);
-
-	secondDs->setColumnCount(1);
-	secondDs->setRowCount(1, false);
-	secondDs->column(0)->setName("mycol");
-	secondDs->column(0)->setDefaultValues(columnType::scale, false);
-	QCOMPARE(secondDs->rowCount(), 1);
-	QCOMPARE(secondDs->columnCount(), 1);
-
-	// Set a value manually
-	QModelIndex idx = secondDs->index(0, 0);
-	secondDs->setData(idx, "testval", Qt::DisplayRole);
-
-	// Export using DataExporter — should export the shownDataSet only
-	DataExporter exporter(false);
-	exporter.saveDataSet(fq(csvPath), [](int){});
-
-	// Read back and verify
-	QFile csvFile(csvPath);
-	QVERIFY(csvFile.open(QIODevice::ReadOnly));
-	QString content = QString::fromUtf8(csvFile.readAll());
-	csvFile.close();
-
-	QStringList lines = content.split('\n', Qt::SkipEmptyParts);
-
-	// Only the shown dataset (mycol) should be written
-	QCOMPARE(lines.size(), 2); // header + 1 data row
-	QVERIFY(lines[1].contains("testval"));
-
-	// Verify that debug.csv columns are NOT present
-	QVERIFY(!lines[0].contains("contNormal"));
-	QVERIFY(!lines[0].contains("contGamma"));
-}
-
+// The excision, Cut 2: testDataImport/_data, testJaspDataImport/_data, testJaspRoundRoundRobin/_data,
+// testSavLabels, testFilterLabels and testDataExporterShownDataSetOnly died with
+// Desktop/data/importers and Desktop/data/exporters. Those formats return as lane
+// conversions in later NEO eras (refactor_design/HANDOVER-excision.md).
 
 void TestAll::testFilterSetFilterVectorResizesToResult()
 {
@@ -514,19 +132,17 @@ void TestAll::testComputedDataSetCycleDetection()
 	QVERIFY(ws);
 
 	//Workspace::createDataSet reuses the currently-shown (empty) dataset, so make each one
-	//non-empty (by importing) before creating the next, to get three distinct datasets.
-	CSVImporter importer;
-	const std::string csvPath = fq(_testLibrary().absoluteFilePath("csv/debug.csv"));
-
+	//non-empty before creating the next, to get three distinct datasets. The excision, Cut 2:
+	//the CSVImporter fixture is gone — applySchema plays a non-empty dataset instead.
 	DataSet * a = ws->createDataSet();
 	QVERIFY(a);
-	importer.loadDataSet(csvPath, a, [](int){});
+	a->applySchema("ds-test-cycle-a", 3, fixtureSchema(), "");
 	DataSet * b = ws->createDataSet();
 	QVERIFY(b);
-	importer.loadDataSet(csvPath, b, [](int){});
+	b->applySchema("ds-test-cycle-b", 3, fixtureSchema(), "");
 	DataSet * c = ws->createDataSet();
 	QVERIFY(c);
-	importer.loadDataSet(csvPath, c, [](int){});
+	c->applySchema("ds-test-cycle-c", 3, fixtureSchema(), "");
 
 	QVERIFY(a->id() != b->id());
 	QVERIFY(b->id() != c->id());
@@ -558,34 +174,9 @@ void TestAll::testComputedDataSetCycleDetection()
 	QVERIFY(!ws->computedDataSetsHaveLoop(err));
 }
 
-void TestAll::testUndoColumnDropLevels()
-{
-	QVERIFY(_newPkgWithDataSet());
-
-	DataSet * ds = _pkg->dataSet();
-	QVERIFY(ds);
-	Column * col = ds->column("contNormal");
-	QVERIFY(col);
-
-	UndoStack::setCurrent(ds->undoStack());
-
-	col->setDropLevels(dropLevelsType::drop);
-	QCOMPARE(col->dropLevels(), dropLevelsType::drop);
-
-	//Regression: the old value used to be stored as an int (0/1/2) while undo/redo restore it via
-	//dropLevelsTypeFromQString (which needs the enum name) -> undo threw missingEnumVal.
-	ds->undoStack()->pushCommand(new SetColumnPropertyCommand(col,
-		dropLevelsTypeToQString(dropLevelsType::keep),
-		SetColumnPropertyCommand::ColumnProperty::DropLevels));
-
-	QCOMPARE(col->dropLevels(), dropLevelsType::keep); //push() redoes the command
-
-	ds->undoStack()->undo();
-	QCOMPARE(col->dropLevels(), dropLevelsType::drop);
-
-	ds->undoStack()->redo();
-	QCOMPARE(col->dropLevels(), dropLevelsType::keep);
-}
+// testUndoColumnDropLevels died in Cut 2 as well: its fixture was the importer-built legacy
+// Column with labels, and its code-under-test (the Column undo-command family) is Cut-4
+// death row — there is no honest way to build that Column anymore.
 
 void TestAll::testEncoderPrefixPerDataset()
 {
@@ -595,29 +186,28 @@ void TestAll::testEncoderPrefixPerDataset()
 	QVERIFY(a);
 	QVERIFY(a->columnCount() > 0);
 
-	const std::string colName	= a->column(0)->name();
+	//The excision, Cut 2: the fixture is lane-bound (schema, no legacy Columns), so the
+	//column name comes from the schema-served getter.
+	QVERIFY(!a->getColumnNames().empty());
+	const std::string colName	= a->getColumnNames()[0];
 	const std::string prefixA	= "JASPColumn_" + std::to_string(a->id()) + "_";
 	const std::string encodedA	= a->encoder().encode(colName);
 
 	QVERIFY2(encodedA.find(prefixA) == 0,	qPrintable("Encoder prefix must carry the dataset id"));
 	QVERIFY2(encodedA.find("-1") == std::string::npos,	qPrintable("Encoder prefix must not be the -1 sentinel"));
 
-	//Reload from the DB (the .jasp restore path): the prefix must still carry the id, not -1.
-	DataSet loadMe(nullptr, a->id());
-	QCOMPARE(loadMe.id(), a->id());
-	const std::string encodedReload = loadMe.encoder().encode(colName);
-	QVERIFY2(encodedReload.find(prefixA) == 0,	qPrintable("Reloaded dataset must keep the id-based prefix"));
-	QCOMPARE(encodedReload, encodedA);
+	//The db-reload (the old .jasp restore path) check died in Cut 2 with the importers: lane
+	//schema columns are not written to sqlite, so a dbLoad of this id has no names to encode.
+	//Prefix persistence across a real reload returns when .jasp persistence does (a later era).
 
 	//A second dataset with a colliding column name must get a distinct prefix.
-	CSVImporter importer;
 	DataSet * b = _pkg->workspace()->createDataSet();
 	QVERIFY(b);
-	importer.loadDataSet(fq(_testLibrary().absoluteFilePath("csv/debug.csv")), b, [](int){});
+	b->applySchema("ds-test-encoder-b", 3, fixtureSchema(), "");
 	QVERIFY(b->id() != a->id());
 
 	const std::string prefixB	= "JASPColumn_" + std::to_string(b->id()) + "_";
-	const std::string encodedB	= b->encoder().encode(b->column(0)->name());
+	const std::string encodedB	= b->encoder().encode(b->getColumnNames()[0]);
 	QVERIFY2(encodedB.find(prefixB) == 0,	qPrintable("Second dataset must get its own id-based prefix"));
 	QVERIFY(encodedB != encodedA);
 
@@ -714,18 +304,16 @@ void TestAll::testCloseWorkspaceAndDataSets()
 	QVERIFY(_pkg->dataSet());
 
 	//Give the workspace several distinct (non-empty) datasets so deleteShownDataSet has to
-	//re-pick another shown dataset after each removal.
-	CSVImporter importer;
-	const std::string csvPath = fq(_testLibrary().absoluteFilePath("csv/debug.csv"));
-
+	//re-pick another shown dataset after each removal. The excision, Cut 2: applySchema
+	//replaces the CSVImporter fixture.
 	DataSet * second = ws->createDataSet();
 	QVERIFY(second);
-	importer.loadDataSet(csvPath, second, [](int){});
+	second->applySchema("ds-test-close-2", 3, fixtureSchema(), "");
 	QVERIFY(second->columnCount() > 0);
 
 	DataSet * third = ws->createDataSet();
 	QVERIFY(third);
-	importer.loadDataSet(csvPath, third, [](int){});
+	third->applySchema("ds-test-close-3", 3, fixtureSchema(), "");
 	QVERIFY(third->columnCount() > 0);
 
 	QCOMPARE(ws->dataSets().size(), size_t(3));
@@ -749,7 +337,7 @@ void TestAll::testCloseWorkspaceAndDataSets()
 	//Re-populate, then tear the whole workspace down (deleteWorkspace/reset) — must not crash either.
 	DataSet * again = ws->createDataSet();
 	QVERIFY(again);
-	importer.loadDataSet(csvPath, again, [](int){});
+	again->applySchema("ds-test-close-again", 3, fixtureSchema(), "");
 	QVERIFY(ws->dataSets().size() == size_t(1));
 
 	_pkg->deleteWorkspace();
@@ -766,19 +354,19 @@ void TestAll::testCloseWorkspaceAndDataSets()
 	QVERIFY(ws);
 
 	//Regression: after closing the workspace, opening (i.e. adding) datasets again must keep working
-	//instead of targeting a stale/removed workspace. Load data into the fresh dataset and add a couple
+	//instead of targeting a stale/removed workspace. Make the fresh dataset non-empty and add a couple
 	//more, then make sure the workspace holds them all and can still close them without crashing.
-	importer.loadDataSet(csvPath, fresh, [](int){});
+	fresh->applySchema("ds-test-close-fresh", 3, fixtureSchema(), "");
 	QVERIFY(fresh->columnCount() > 0);
 
 	DataSet * secondAfterClose = ws->createDataSet();
 	QVERIFY(secondAfterClose);
-	importer.loadDataSet(csvPath, secondAfterClose, [](int){});
+	secondAfterClose->applySchema("ds-test-close-2b", 3, fixtureSchema(), "");
 	QVERIFY(secondAfterClose->columnCount() > 0);
 
 	DataSet * thirdAfterClose = ws->createDataSet();
 	QVERIFY(thirdAfterClose);
-	importer.loadDataSet(csvPath, thirdAfterClose, [](int){});
+	thirdAfterClose->applySchema("ds-test-close-3b", 3, fixtureSchema(), "");
 	QVERIFY(thirdAfterClose->columnCount() > 0);
 
 	QCOMPARE(ws->dataSets().size(), size_t(3));
@@ -791,36 +379,9 @@ void TestAll::testCloseWorkspaceAndDataSets()
 	QVERIFY(!ws->shownDataSet());
 }
 
-bool TestAll::_checkDoSyncFake()
-{
-	return true;
-}
-
 // ---------- Lane data_changed / applyRevision scenarios (data-edit-design §6) ----------
-
-// Wire-schema builders for the scenarios below — the lane's column-info JSON exactly as
-// column_info_json emits it (name / type / levels).
-static Json::Value laneColumn(const std::string & name, const std::string & type, std::initializer_list<const char *> levels = {})
-{
-	Json::Value col;
-	col["name"]	= name;
-	col["type"]	= type;
-	if (levels.size())
-	{
-		col["levels"] = Json::Value(Json::arrayValue);
-		for (const char * level : levels)
-			col["levels"].append(level);
-	}
-	return col;
-}
-
-static Json::Value laneSchema(std::initializer_list<Json::Value> columns)
-{
-	Json::Value schema(Json::arrayValue);
-	for (const Json::Value & col : columns)
-		schema.append(col);
-	return schema;
-}
+// (laneColumn/laneSchema/fixtureSchema are defined at the top of the file — the excision,
+// Cut 2 moved them up when they replaced the CSVImporter fixture loading.)
 
 DataSet * TestAll::_newLaneDataSet(const Json::Value & schema, uint64_t rows)
 {

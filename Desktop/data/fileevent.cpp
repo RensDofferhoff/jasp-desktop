@@ -17,20 +17,12 @@
 //
 
 #include "fileevent.h"
-#include "exporters/exporter.h"
-#include "exporters/dataexporter.h"
-#include "exporters/resultexporter.h"
-#include "exporters/jaspexporter.h"
 #include "dataset.h"
 #include "log.h"
 
 #include <QTimer>
-#include "fileevent.h"
 #include "processinfo.h"
 #include "utilities/appdirs.h"
-#include "exporters/dataexporter.h"
-#include "exporters/jaspexporter.h"
-#include "exporters/resultexporter.h"
 
 
 void FileEvent::setSyncDataSet(DataSet * ds)			
@@ -49,20 +41,9 @@ DataSet * FileEvent::syncDataSet() const
 FileEvent::FileEvent(QObject *parent, FileEvent::FileMode fileMode)
 	: QObject(parent), _operation(fileMode)
 {
-	switch (_operation)
-	{
-	case FileEvent::FileExportResults:	_exporter = new ResultExporter();		break;
-	case FileEvent::FileExportData:		_exporter = new DataExporter(true);		break;
-	case FileEvent::FileGenerateData:	_exporter = new DataExporter(false);	break;
-	case FileEvent::FileSave:			_exporter = new JASPExporter();			break;
-	default:							_exporter = nullptr;					break;
-	}
-}
-
-FileEvent::~FileEvent()
-{
-	   delete _exporter;
-	   _exporter = nullptr;
+	// NEO (the excision, Cut 2): the exporter family is deleted — saving/exporting returns
+	// as lane conversions in a later era. Save-ish modes now fail with a clear message in
+	// AsyncLoader::io instead of instantiating an Exporter here.
 }
 
 void FileEvent::setDataFilePath(const QString & path)
@@ -81,38 +62,11 @@ bool FileEvent::setPath(const QString & path)
 	_path = path;
 	_type = Utils::getTypeFromFileName(path.toStdString());
 
-	if(_exporter != nullptr)
-	{
-		if (_type == Utils::FileType::unknown)
-		{
-			_type = _exporter->getDefaultFileType();
-			_path.append('.' + FileTypeBaseToQString(_type));
-		}
-		else if(!_exporter->isFileTypeAllowed(_type)) //Because an exporter should always support it's own default
-		{
-			_last_error = "File must be of type ";
-
-			Utils::FileTypeVector allowedFileTypes = _exporter->getAllowedFileTypes();
-
-			for (size_t i=0; i< allowedFileTypes.size(); i++)
-			{
-				if(i > 0)
-				{
-					if (i == allowedFileTypes.size() - 1)	_last_error.append(" or ");
-					else									_last_error.append(", ");
-				}
-
-				_last_error.append(FileTypeBaseToQString(allowedFileTypes[i]));
-			}
-
-			return false;
-		}
-
-		_exporter->setFileType(_type);
-	}
+	// NEO (the excision, Cut 2): exporter-driven type negotiation (default extension,
+	// allowed-type validation) died with the exporter family. Save-ish events fail later
+	// with a clear "not supported in NEO yet" message; nothing else needed this branch.
 
 	return true;
-
 }
 
 void FileEvent::setComplete(bool success, const QString & message, bool cancelled)
@@ -231,5 +185,14 @@ QString FileEvent::getProgressMsg() const
 void FileEvent::setSilent(bool newSilent)
 {
 	_cancelled = newSilent;
+}
+
+QString FileEvent::notSupportedInNeoMsg(const QString & what)
+{
+	// The excision, Cut 2: one shared, HONEST message for every removed route — never a
+	// silent nothing. Each feature here returns as a NEO-era reimplementation
+	// (refactor_design/HANDOVER-excision.md).
+	return QObject::tr("%1 is not supported in this NEO rebuild of JASP yet — it returns in a later era. "
+					  "For now only the CSV family (.csv/.txt/.tsv) can be opened, through the data lane.").arg(what);
 }
 

@@ -24,7 +24,6 @@
 #include "json/json.h"
 #include "utilenums.h"
 
-class Exporter;
 class DataSet;
 
 ///
@@ -38,7 +37,11 @@ public:
 	enum FileMode { FileSave, FileNew, FileOpen, FileExportResults, FileExportData, FileGenerateData, FileSyncData, FileClose };
 
 	FileEvent(QObject *parent = nullptr, FileMode fileMode = FileEvent::FileOpen);
-	virtual ~FileEvent();
+	virtual ~FileEvent() = default;
+
+	/// The excision, Cut 2: shared "this route is gone for now" message for every removed
+	/// load/save/export/sync route. Never fail silently.
+	static QString		notSupportedInNeoMsg(const QString & what);
 
 	bool				setPath(		const QString & path);
 	QString path() const { return !_tmp ? _path : pathTmp(); }
@@ -70,8 +73,7 @@ public:
 	static bool			autoSaveExists();
 	static void			removeAutoSaveIfItExists();
 
-	Exporter *			exporter()		const { return _exporter;		}
-	FileMode			operation()		const { return _operation;		}
+	FileMode		operation()	const { return _operation;		}
 	Utils::FileType		type()			const { return _type;			}
 
 	const std::string	databaseStr()	const;
@@ -102,8 +104,7 @@ private:
 						_cancelled		= false,
 						_tmp			= false,
 						_isOnlineNode		= false;
-	FileEvent		*	_chainedTo		= nullptr;
-	Exporter		*	_exporter		= nullptr;
+	FileEvent	*	_chainedTo		= nullptr;
 	Json::Value			_database		= Json::nullValue;
 };
 

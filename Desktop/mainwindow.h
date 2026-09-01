@@ -302,7 +302,6 @@ private slots:
 	void setProgressStatus(QString status, int progress);
 	void showAnalysis();
 
-	bool checkDoSync();
 	void unitTestTimeOut();
 	void saveJaspFileHandler();
 	void saveTmpFileHandler();

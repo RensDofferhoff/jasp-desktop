@@ -40,7 +40,6 @@
 #include "mainwindow.h"
 
 #include "gui/preferencesmodel.h"
-#include "data/exporters/jaspexporter.h"
 #include "data/gridmodel.h"			// NEO data view (data-view-design.md §7.2/§7.3)
 #include "data/datasetpackage.h"	// NEO: Workspace (data_changed routing, data-edit-design §6)
 #include "utilities/application.h"
@@ -465,18 +464,8 @@ void MainWindow::showAnalysis()
 	_analyses->setVisible(true);
 }
 
-bool MainWindow::checkDoSync()
-{
-	//Only do this if we are *not* running in reporting mode. 
-	if (!_reporter && checkAutomaticSync() && !MessageForwarder::showYesNo(tr("Datafile changed"), tr("The datafile that was used by this JASP file was modified. Do you want to reload the analyses with this new data?")))
-	{
-		setCheckAutomaticSync(false);
-		//DataSetPackage::pkg()->setSynchingExternally(false);
-		return false;
-	}
-
-	return true;
-}
+// MainWindow::checkDoSync is gone (the excision, Cut 2): its only trigger was the importers'
+// sync flow. Sync returns as orchestrator-owned backend sync (P14, HANDOVER-excision.md).
 
 void MainWindow::startOnlineDataManager()
 {
@@ -506,9 +495,8 @@ void MainWindow::makeConnections()
 	connect(_package,				&DataSetPackage::isModifiedChanged,					this,					&MainWindow::packageChanged									);
 	connect(_package,				&DataSetPackage::workspaceChanged,					this,					&MainWindow::onWorkspaceChanged								);
 	connect(_package,				&DataSetPackage::isModifiedChanged,					_fileMenu,				&FileMenu::workspaceModified								);
-	connect(_package,				&DataSetPackage::windowTitleChanged,				this,					&MainWindow::windowTitleChanged								);
-	connect(_package,				&DataSetPackage::checkDoSync,						_loader,				&AsyncLoader::checkDoSync,									Qt::DirectConnection); //Force DirectConnection because the signal is called from Importer which means it is running in AsyncLoaderThread...
-	connect(_package,				&DataSetPackage::newDataLoaded,						this,					&MainWindow::populateUIfromDataSet							);
+	connect(_package,				&DataSetPackage::windowTitleChanged,				this,				&MainWindow::windowTitleChanged								);
+	connect(_package,				&DataSetPackage::newDataLoaded,						this,				&MainWindow::populateUIfromDataSet								);
 	connect(_package,				&DataSetPackage::newDataLoaded,						_fileMenu,				[&](){ _fileMenu->enableButtonsForOpenedWorkspace(); }		);
 	connect(_package,				&DataSetPackage::dataModeChanged,					_analyses,				&Analyses::dataModeChanged									);
 	connect(_package,				&DataSetPackage::dataModeChanged,					this,					&MainWindow::onDataModeChanged								);
@@ -532,29 +520,21 @@ void MainWindow::makeConnections()
 			setDataAvailable(ds && ds->isOpen() && ds->schemaRows() > 0);
 		});
 	}
-	connect(_package,				&DataSetPackage::askUserForExternalDataFile,		this,					&MainWindow::startDataEditorHandler							);
-	connect(_package,				&DataSetPackage::makeAnAutoSave,					this,					&MainWindow::saveTmpFileHandler								); 
+	connect(_package,				&DataSetPackage::makeAnAutoSave,						this,				&MainWindow::saveTmpFileHandler										 ); 
 	connect(_package,				&DataSetPackage::showWarning,						_msgForwarder,			&MessageForwarder::showWarningQML,							Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::workspaceEmptyValuesChanged,		_analyses,				&Analyses::refreshAllAnalyses								);
 	connect(_package,				&DataSetPackage::refreshAllAnalyses,		_analyses,				&Analyses::refreshAllAnalysesOfFilter,				Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::shownDataSetChanged,		_datasetTableModel,		&DataSetTableModel::handleDataSetChange				);
 	connect(_package,				&DataSetPackage::shownDataSetChanged,		this,				&MainWindow::updateShownFilterInQmlContext			);
 	// Legacy per-dataset sync wiring REMOVED with DataSetSyncer (the excision, Cut 1):
-	// DataSet::syncRequired is gone; sync returns as a backend feature (P14).
-  //The worker thread finishes the sync; route the completion back to the dataset's syncer on the main
-  //thread (via a QueuedConnection, since syncCompleted is emitted from the loader worker) so its
-  //re-entrancy guard (_isSyncing) is released exactly once for whichever dataset syncs.
-  //A (non-sync) load added a dataset to the workspace on the worker thread; refresh the workspace
-  //table model here, on the GUI thread, so views bound to it (dataset tabbuttons) pick it up.
-  connect(_loader,				&AsyncLoader::dataSetsChanged,				this,				[this](){
-	  if(_package->workspace())
-		  _package->workspace()->refresh();
-  },												Qt::QueuedConnection);
-  connect(_loader,				&AsyncLoader::syncCompleted,			this,				[this](int dataSetId, bool success){
-    // Legacy sync completed — the syncer is gone (the excision, Cut 1); the signal still
-    // fires from the loader for old flows. Nothing to do.
-    (void) dataSetId; (void) success;
-  },												Qt::QueuedConnection);
+	// DataSet::syncRequired is gone; sync returns as a backend feature (P14). AsyncLoader's
+	// checkDoSync/syncCompleted died with the importers (Cut 2).
+	//A load added a dataset to the workspace on the worker thread; refresh the workspace
+	//table model here, on the GUI thread, so views bound to it (dataset tabbuttons) pick it up.
+	connect(_loader,				&AsyncLoader::dataSetsChanged,				this,				[this](){
+			if(_package->workspace())
+				_package->workspace()->refresh();
+	},												Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::shownFilterChanged,		this,				&MainWindow::updateShownFilterInQmlContext			);
 	connect(_package,				&DataSetPackage::shownFilterChanged,		_filterModel,			&FilterModel::filterChanged,						Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::filtersCountChanged,		_filterModel,			&FilterModel::filterDropDownListChanged					);
@@ -630,8 +610,9 @@ void MainWindow::makeConnections()
 
 	connect(_odm,					&OnlineDataManager::progress,						this,					&MainWindow::setProgressStatus,								Qt::QueuedConnection);
 
-	connect(_loader,				&AsyncLoader::progress,								this,					&MainWindow::setProgressStatus,								Qt::QueuedConnection);
-	connect(_loader,				&AsyncLoader::checkDoSync,							this,					&MainWindow::checkDoSync,									Qt::BlockingQueuedConnection);
+	connect(_loader,				&AsyncLoader::progress,								this,				&MainWindow::setProgressStatus,								Qt::QueuedConnection);
+	// AsyncLoader::checkDoSync died with the importers (the excision, Cut 2) — nothing asks
+	// the user about reloading a changed datafile anymore (sync returns as P14 backend sync).
 
 	connect(_preferences,			&PreferencesModel::dataLabelNAChanged,				_package,				&DataSetPackage::refresh,									Qt::QueuedConnection);
 	connect(_preferences,			&PreferencesModel::plotBackgroundChanged,			this,					&MainWindow::setImageBackgroundHandler						);
@@ -667,7 +648,8 @@ void MainWindow::makeConnections()
 	connect(dCSingleton,			&DesktopCommunicator::engineSandboxSignal,			_preferences,			&PreferencesModel::engineSandbox				);
 	connect(dCSingleton,			&DesktopCommunicator::queryEncryptionSettingsSignal, _encryptionModel,		&EncryptionSettingsModel::queryEncryptionSettings);
 	connect(_encryptionModel,		&EncryptionSettingsModel::queryComplete,			dCSingleton,			&DesktopCommunicator::encryptionSettingsQueryComplete);
-	connect(dCSingleton,			&DesktopCommunicator::askCsvDelimiterSignal,		_csvPreviewModel,		&CsvPreviewModel::preparePreview);
+	// The CSV delimiter ask-dialog wiring is gone with the importers (the excision, Cut 2):
+	// the lane sniffs the delimiter itself, so no dialog is ever needed.
 
 	connect(_ribbonModel,			&RibbonModel::analysisClickedSignal,				_analyses,				&Analyses::analysisClickedHandler							);
 	connect(_ribbonModel,			&RibbonModel::showRCommander,						this,					&MainWindow::showRCommander									);
@@ -1579,10 +1561,8 @@ void MainWindow::registerRpcHandlers()
 				bool wait      = params.get("wait", true).asBool();
 				int  timeoutMs = params.get("timeoutMs", 30000).asInt();
 
-				// Set CSV delimiter before load to skip interactive preview popup
-				std::string delimStr = params.get("delimiter", ",").asString();
-				if (!delimStr.empty())
-					DesktopCommunicator::singleton()->setKnownCsvDelimiter(delimStr[0]);
+				// The CSV-delimiter scratchpad is gone with the importers (the excision, Cut 2): the
+				// lane sniffs the delimiter itself, so the "delimiter" param is simply ignored.
 
 				std::string path = params["path"].asString();
 
@@ -1831,12 +1811,9 @@ void MainWindow::dataSetIORequestHandler(FileEvent *event)
 	else if (event->operation() == FileEvent::FileSave)
 	{
 		connectFileEventCompleted(event);
-		
-		_resultsJsInterface->exportPreviewHTML();
-		_package->setAnalysesData(_analyses->asJson());
 
-		JASPExporter::createSnapshot(event->isTmp() ? "jasp_autosave_snapshot_" : "jasp_snapshot_");
-
+		// The excision, Cut 2: the exporter family (and its session-snapshot preparation) is
+		// deleted; AsyncLoader::io completes the save with a clear "not supported in NEO yet".
 		_loader->io(event);
 	}
 	else if (event->operation() == FileEvent::FileExportResults)
@@ -2082,12 +2059,23 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 	}
 	else if (event->operation() == FileEvent::FileExportResults)
 	{
-		if(!event->path().endsWith(".pdf") && _preferences->currentThemeName() != "lightTheme")
+		if (event->isSuccessful() && !event->path().endsWith(".pdf") && _preferences->currentThemeName() != "lightTheme")
 			_resultsJsInterface->setThemeCss(_preferences->currentThemeName());
+
+		// The excision, Cut 2: the results exporter is gone — show the loader's clear message.
+		if (!event->isSuccessful() && !event->isCancelled())
+			MessageForwarder::showWarning(tr("Unable to export results"), event->message());
 	}
-	//FileSyncData completion is handled solely via AsyncLoader::syncCompleted -> DataSetSyncer::setSyncingResult
-	//(see wireDataSetSync), which covers both the automatic and file-menu initiated syncs exactly once.
-	//Routing it also through FileEvent::completed here would double-release the syncer's guard.
+	else if (event->operation() == FileEvent::FileSyncData
+			  || event->operation() == FileEvent::FileExportData
+			  || event->operation() == FileEvent::FileGenerateData)
+	{
+		// The excision, Cut 2: sync/export died with the importers and exporters — surface the
+		// failure (never a silent nothing). These routes return in later NEO eras (P14 / lane
+		// conversions; refactor_design/HANDOVER-excision.md).
+		if (!event->isSuccessful() && !event->isCancelled())
+			MessageForwarder::showWarning(tr("Unable to process data file"), event->message());
+	}
 }
 
 
@@ -2534,6 +2522,11 @@ void MainWindow::startDataEditorEventCompleted(FileEvent* event)
 	else
 	{
 		Log::log() << "[MainWindow::startDataEditorEventCompleted] Event NOT successful" << std::endl;
+
+		// The excision, Cut 2: generating a data file / reloading from one died with the
+		// importers and exporters — surface the loader's clear message, never a silent nothing.
+		if (!event->isCancelled())
+			MessageForwarder::showWarning(tr("Unable to edit data in an external editor"), event->message());
 	}
 	Log::log() << "[MainWindow::startDataEditorEventCompleted] END" << std::endl;
 }
@@ -2706,12 +2699,10 @@ void MainWindow::saveJaspFileHandler()
 
 void MainWindow::saveTmpFileHandler()
 {
-	if (JASPExporter::isSaveInProgress())
-		return;
-
-	FileEvent * saveEvent = new FileEvent(this, FileEvent::FileSave);
-	saveEvent->setTmp(true);
-	dataSetIORequestHandler(saveEvent);
+	// The excision, Cut 2: .jasp autosave died with the exporter family. Deliberately a quiet
+	// no-op — a failing save here would nag the user every interval; .jasp persistence (and
+	// with it autosave) returns in a later NEO era.
+	Log::log() << "NEO: autosave is not available in this rebuild yet (the .jasp exporter is gone)." << std::endl;
 }
 
 bool MainWindow::enginesInitializing()

@@ -112,9 +112,7 @@ if(LOCAL_MODULES_BUILD)
   add_dependencies(JASP ModulesBuild)
 endif()
 
-if(APPLE)
-  add_dependencies(JASPDesktopLib readstat)
-endif()
+# The excision, Cut 2: the readstat/rdata/freexl deps died with the importers.
 
 target_include_directories(
     JASPDesktopLib
@@ -123,13 +121,10 @@ target_include_directories(
     ${PROJECT_SOURCE_DIR}/Common
     ${PROJECT_SOURCE_DIR}/CommonData
     ${PROJECT_SOURCE_DIR}/QMLComponents
-    ${LIBREADSTAT_INCLUDE_DIRS}
-    ${LIBRDATA_INCLUDE_DIRS}
     # JSONCPP
     $<$<PLATFORM_ID:Linux>:${_PKGCONFIG_LIB_JSONCPP_INCLUDEDIR}>
     $<$<BOOL:${FLATPAK_USED}>:/app/include/QtWebEngineQuick>
     $<$<BOOL:${FLATPAK_USED}>:/app/include/QtWebEngineCore>
-    ${LIBFREEXL_INCLUDE_DIRS}
     ${libsodium_INCLUDE_DIR}
 )
 
@@ -175,18 +170,8 @@ target_link_libraries(
     Iconv::Iconv
     OpenSSL::SSL
     OpenSSL::Crypto
-    # FreeXL
-    ${LIBFREEXL_LIBRARIES}
     ${libsodium_LIBRARIES}
-    $<$<NOT:$<BOOL:${LINUX}>>:freexl::freexl>
-    # ReadStat -----------------------------------
-    ${LIBREADSTAT_LIBRARIES}
-    # Rtools's ReadStat
-    $<$<PLATFORM_ID:Windows>:${RTOOLS_LIBREADSTAT_DLL_A}>
-    # librdata -----------------------------------
-    ${LIBRDATA_LIBRARIES}
-    $<$<PLATFORM_ID:Windows>:${RTOOLS_LIBRDATA_DLL_A}>
-    $<$<PLATFORM_ID:Darwin>:librdata::librdata>
+    # The excision, Cut 2: FreeXL / ReadStat / librdata died with the importers
     # JSONCPP
          #$<$<PLATFORM_ID:Linux>:${_PKGCONFIG_LIB_JSONCPP_LIBRARIES}>
          #$<$<PLATFORM_ID:Linux>:${_PKGCONFIG_LIB_JSONCPP_LINK_LIBRARIES}>
