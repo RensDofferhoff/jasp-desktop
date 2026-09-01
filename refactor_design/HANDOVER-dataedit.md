@@ -953,6 +953,19 @@ QT_QPA_PLATFORM=offscreen build/Desktop_Qt_6_11_0-Debug/Tests/JASPTest testSavLa
   find no slot and drop harmlessly. (The header comment claimed "fresh ids" all along;
   the counter reset violated it. NB the earlier 'transient' 0ms test failure was a typo'd
   test name — `testUndoColumnDropLevels`, an L — not a flake.)
+- **HOLE-COLUMN PANIC (found + fixed 2026-09-01, the far-cell smoke)**: editing a single
+  cell far outside BOTH extents (e.g. (104,32) on a small dataset) panicked the lane
+  (`dataedit.rs` BuildDict arm: `index out of bounds: len 0, index 0`) — the rail handled
+  it correctly (evict → respawn → visible fatalError; nothing corrupted) but the engine
+  must refuse, never panic. Cause: the gap between the old column extent and the block's
+  LEFT edge fills with HOLE columns (all-null `BuildDict`s with `keys: Vec::new()` — the
+  documented "empty window = underneath semantics" convention), and a hole crossing the
+  Block segment indexed its empty window. `RemapKeys`' arm already guarded
+  (`block.filter(|_| !keys.is_empty())`) — BuildDict (and defensively BuildFloat) now do
+  too. No earlier test caught it because `growth_extends_rows_and_columns` leaves NO GAP
+  (block at col 1 on a 2-col dataset); the regression test `far_anchor_creates_null_
+  holes_without_panicking` (block at (5,4) → holes V3/V4, in-block overflow V5) was
+  verified to reproduce the exact panic pre-fix. Suite 148; clippy clean; release rebuilt.
 
 - **THE RACE (found 2026-08-31, the rename smoke test — REAL)**: ~~UNFIXED~~ **FIXED
   2026-09-01 — the edit chain; see §6's first bullet for the full design.**

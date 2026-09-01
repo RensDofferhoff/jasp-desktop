@@ -628,7 +628,10 @@ fn emit_piece(
                     .map(|a| a.as_primitive::<arrow::datatypes::Float64Type>());
                 let mut b = Float64Builder::with_capacity(len as usize);
                 for i in 0..len {
-                    let v = if let Some(bs) = block {
+                    // An empty cells window = "no block content for this column" — serve
+                    // the underneath (the same convention RemapKeys guards on; hole
+                    // columns are BuildFloat-free today but the guard is cheap honesty).
+                    let v = if let Some(bs) = block.filter(|_| !cells.is_empty()) {
                         cells[(bs + i) as usize]
                     } else if let (Some(f), Some(off)) = (old_f, old_off) {
                         let ix = (off + i) as usize;
@@ -667,7 +670,12 @@ fn emit_piece(
                     .map(|a| a.as_primitive::<arrow::datatypes::Float64Type>());
                 let mut b = Int32Builder::with_capacity(len as usize);
                 for i in 0..len {
-                    let k = if let Some(bs) = block {
+                    // An empty keys window = "no block content for this column" — serve
+                    // the underneath (RemapKeys' d6b convention, now honored here too). A
+                    // A HOLE column (an anchor past the column extent: all null, keys empty)
+                    // crossing a Block segment indexed the empty vec and PANICKED — the
+                    // 2026-09-01 single-cell-far-outside-the-extent crash (len 0, index 0).
+                    let k = if let Some(bs) = block.filter(|_| !keys.is_empty()) {
                         keys[(bs + i) as usize]
                     } else if let (Some(d), Some(off)) = (old_d, old_off) {
                         let ix = (off + i) as usize;
@@ -5046,6 +5054,47 @@ mod tests {
         assert_eq!(ops["capture_rows"], 0);
         assert_eq!(ops["trim_rows_from"], 2);
         assert_eq!(ops["trim_cols_from"], 2);
+    }
+
+    /// A single cell FAR outside both extents — the 2026-09-01 lane panic (len 0,
+    /// index 0): the gap between the old column extent and the block's left edge is
+    /// filled with HOLE columns (all-null `BuildDict`s with `keys: Vec::new()`), and a
+    /// hole crossing the Block segment indexed its empty window instead of serving the
+    /// underneath (null). The block's left edge past the extent is what no earlier test
+    /// covered — `growth_extends_rows_and_columns` leaves no gap.
+    #[test]
+    fn far_anchor_creates_null_holes_without_panicking() {
+        let (cache, _) = fixture("farhole", "score,group\n1.5,A\n2.5,B\n");
+        let out_cache = cache.parent().unwrap().join("rev1.arrow");
+        // 1×1 block at (5, 4): rows grow 2→6, cols 2–3 are HOLES, col 4 is the in-block
+        // overflow column (V5 by the naming convention).
+        let job = edit_job(&cache, out_cache.to_str().unwrap(), 5, 4, "q\n");
+        let out = serve(&job).expect("applies");
+
+        assert_eq!(out.rows, 6, "row growth to the anchor + block");
+        // The untouched old column: its values, then nulls through the grown tail.
+        assert_eq!(
+            read_f64(&out_cache, "score"),
+            vec![Some(1.5), Some(2.5), None, None, None, None]
+        );
+        // A HOLE column: all null, nominal, present in the schema (the all:true path).
+        assert_eq!(
+            read_dict_values(&out_cache, "V3"),
+            vec![None, None, None, None, None, None],
+            "hole columns are all-null through every segment — including the Block's"
+        );
+        assert_eq!(
+            read_dict_values(&out_cache, "V4"),
+            vec![None, None, None, None, None, None]
+        );
+        // The in-block overflow column carries the cell at the anchor row only.
+        assert_eq!(
+            read_dict_values(&out_cache, "V5"),
+            vec![None, None, None, None, None, Some("q".into())]
+        );
+        let schema = out.schema.expect("schema");
+        assert_eq!(schema.as_array().unwrap().iter().count(), 5);
+        assert_eq!(out.invalidation.all, Some(true), "a column-set change");
     }
 
     /// Row-only growth: rows_to-open invalidation (rows_from to the end — new rows
