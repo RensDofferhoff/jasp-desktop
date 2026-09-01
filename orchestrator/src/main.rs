@@ -56,7 +56,7 @@ use nng::options::{LocalAddr, Options, RecvBufferSize, RecvMaxSize, SendBufferSi
 use nng::{Aio, AioResult, Listener, Pipe, PipeEvent, Protocol, Socket};
 use provisioner::{LaneKind, LaneSpec, ProvEvent, ProvReq, RunnerProvisioner};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{
     Arc,
@@ -579,6 +579,22 @@ struct ParkedWork {
     parked_ms: u64,
 }
 
+/// THE EDIT CHAIN — one data edit queued behind its dataset's in-flight edit. Each edit's
+/// SOURCE is the previous edit's OUTPUT, so two edits on one dataset can never run
+/// concurrently (the 2026-09-01 smoke logs caught it twice: two dispatches at the same
+/// base minted the SAME revision and wrote the SAME output path — last writer wins, the
+/// ladder desyncs, every later edit fails count-match). Extras wait in a per-dataset FIFO
+/// (`Router::queued_edits`); the terminal edit result drains it. Views never queue (they
+/// read the realized cache and self-heal on `data_changed`); different datasets never
+/// block each other.
+struct QueuedEdit {
+    frontend: Arc<FrontendRuntime>,
+    env: Envelope,
+    work: messages::Work,
+    /// The incoming frame's binary tail (§18.1), forwarded verbatim at drain.
+    tail: Vec<u8>,
+}
+
 // ── Dataset manager (identity + lifecycle, not I/O; dataset-manager-design.md) ─
 
 /// Lifecycle of a dataset in the index. A failed open removes the entry — a dataset either
@@ -641,6 +657,12 @@ struct Router {
     /// Work awaiting a runner that does not exist yet, keyed `(session_id, work_id)`. Only used when
     /// a provisioner is configured; empty otherwise.
     parked: HashMap<(String, String), ParkedWork>,
+    /// THE EDIT CHAIN: queued data edits per dataset (see `QueuedEdit`). ONE edit in
+    /// flight per dataset — the chain dependency — with extras waiting here in arrival
+    /// order. Drained at every terminal edit result (success AND failure — a failed edit
+    /// changed nothing, §3); flushed (refused, never dropped) when the dataset's identity
+    /// goes away (a failed open, a lane-evicted open).
+    queued_edits: HashMap<String, VecDeque<QueuedEdit>>,
     /// The dataset index: `dataset_id → entry` (identity + current cache file + state).
     /// Single-threaded convention: a plain `HashMap`, touched only by the router thread.
     datasets: HashMap<String, DatasetEntry>,
@@ -1375,6 +1397,22 @@ impl Router {
                 return;
             }
             let (dataset_id, old_path) = &resolved[0];
+            // A retry of an edit already in flight for this frontend: re-ack and never
+            // queue a duplicate — a second APPLICATION would be a real edit, not a retry.
+            if self
+                .data_works
+                .contains_key(&(fe.session_id.clone(), w.work_id.clone()))
+            {
+                let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
+                self.release_paths(&acquired);
+                let _ = fe.send(running_result(
+                    &w.work_id,
+                    w.revision,
+                    &fe.session_id,
+                    w.payload.kind(),
+                ));
+                return;
+            }
             let current = self
                 .datasets
                 .get(dataset_id)
@@ -1384,6 +1422,45 @@ impl Router {
                 let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
                 self.release_paths(&acquired);
                 self.send_stale_edit(&fe, w, dataset_id, w.revision, current);
+                return;
+            }
+            // THE EDIT CHAIN (one edit in flight per dataset): D11 above proved THIS edit
+            // arrived against fresh state; if another edit for this dataset is already in
+            // flight, this one WAITS — its source must be that edit's output. The running
+            // marker is the §25.5 pending-ack (the parked-work semantics: accepted, not
+            // lost); the terminal result drains the FIFO (`drain_queued_edit`), re-stamps
+            // the base, and dispatches.
+            let edit_in_flight = self
+                .data_works
+                .values()
+                .any(|e| e.op == DataOp::Edit && &e.dataset_id == dataset_id);
+            if edit_in_flight {
+                let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
+                self.release_paths(&acquired);
+                println!(
+                    "[orch] data_edit {dataset_id} queued behind the in-flight edit (session {}, work_id={})",
+                    fe.session_id, w.work_id
+                );
+                if let Err(e) = fe.send(running_result(
+                    &w.work_id,
+                    w.revision,
+                    &fe.session_id,
+                    w.payload.kind(),
+                )) {
+                    eprintln!(
+                        "[orch] running-marker to frontend {} failed: {e}",
+                        fe.session_id
+                    );
+                }
+                self.queued_edits
+                    .entry(dataset_id.clone())
+                    .or_default()
+                    .push_back(QueuedEdit {
+                        frontend: Arc::clone(&fe),
+                        env: env.clone(),
+                        work: w.clone(),
+                        tail: tail.to_vec(),
+                    });
                 return;
             }
             let new_revision = current + 1;
@@ -1849,6 +1926,9 @@ impl Router {
                 if let Some(ds) = self.datasets.remove(&entry.dataset_id) {
                     self.path_refs.remove(&ds.current_path);
                     let _ = self.janitor.send(Reclaim::File(ds.current_path));
+                    // THE EDIT CHAIN: the dataset's identity is gone — its queued edits
+                    // are refused (never silent loss).
+                    self.flush_queued_edits(&entry.dataset_id, "the dataset failed to open");
                 }
             }
         }
@@ -1987,6 +2067,15 @@ impl Router {
             if let Some(route) = self.work.remove(&key) {
                 self.release_paths(&route.dataset_paths);
             }
+            // THE EDIT CHAIN: the dataset's in-flight edit just ended (success AND failure
+            // both — a failed edit changed nothing, §3) — the next queued edit, if any,
+            // dispatches now, re-stamped to the realized revision.
+            if let Some(entry) = &data_entry
+                && entry.op == DataOp::Edit
+            {
+                let dataset_id = entry.dataset_id.clone();
+                self.drain_queued_edit(&dataset_id);
+            }
         }
     }
 
@@ -2099,6 +2188,134 @@ impl Router {
     /// The D11 rejection: an edit's declared base revision (`Work.revision`) is not the
     /// dataset's current revision — the frontend is editing a stale snapshot. Synthesized as
     /// a `validationError` RESULT (the same shape a lane validation failure takes), so the
+    /// THE EDIT CHAIN (drain): the dataset's in-flight edit just ended — dispatch the next
+    /// queued edit, if any. The queued work's base revision is RE-STAMPED to the dataset's
+    /// realized revision — the design's semantic shift: D11 proved the edit ARRIVED in
+    /// order (checked at enqueue); whether it still makes sense against the (now newer)
+    /// data is the lane's state-relative validation (count-match, ranges) — the
+    /// authoring-context check where the data lives. No eligible runner → park through the
+    /// normal lane-park path (the provisioner re-spawns the lane; `try_dispatch_parked`
+    /// dispatches it — the edit arm re-checks the chain); no provisioner → fail visibly.
+    fn drain_queued_edit(&mut self, dataset_id: &str) {
+        let Some(mut qe) = self
+            .queued_edits
+            .get_mut(dataset_id)
+            .and_then(|q| q.pop_front())
+        else {
+            return;
+        };
+        if self
+            .queued_edits
+            .get(dataset_id)
+            .is_some_and(|q| q.is_empty())
+        {
+            self.queued_edits.remove(dataset_id);
+        }
+        let Some(runner) = select_runner(&self.runners, &qe.work.payload) else {
+            if let Some(prov) = self.provisioner.clone() {
+                println!(
+                    "[orch] data_edit {dataset_id} dequeued with no lane — parking work_id={}",
+                    qe.work.work_id
+                );
+                self.park_work(
+                    prov,
+                    qe.frontend,
+                    qe.env,
+                    &qe.work,
+                    qe.tail,
+                    Awaiting::Lane {
+                        lane: LaneKind::RustData,
+                        op: DataOp::Edit,
+                        format: String::new(),
+                    },
+                );
+            } else {
+                eprintln!(
+                    "[orch] data_edit {dataset_id} dequeued with no lane and no provisioner — failing work_id={}",
+                    qe.work.work_id
+                );
+                let err = no_runner_result(
+                    &qe.work.work_id,
+                    qe.work.revision,
+                    &qe.frontend.session_id,
+                    "The data lane is unavailable.",
+                    qe.work.payload.kind(),
+                );
+                let _ = qe.frontend.send(err);
+            }
+            return;
+        };
+        let current = self
+            .datasets
+            .get(dataset_id)
+            .map(|e| e.revision)
+            .unwrap_or(0);
+        qe.work.revision = current;
+        if let Message::Work(inner) = &mut qe.env.body {
+            inner.revision = current;
+        }
+        println!(
+            "[orch] data_edit {dataset_id} dequeued (base re-stamped to {current}) -> runner {}",
+            runner.runner_id
+        );
+        self.dispatch_work(runner, qe.frontend, qe.env, &qe.work, &qe.tail);
+    }
+
+    /// Refuse every queued edit for `dataset_id` (its identity is GONE — a failed open,
+    /// a lane-evicted open). Never silent loss: each frontend gets its edit back as a
+    /// `stale_edit`-shaped refusal.
+    fn flush_queued_edits(&mut self, dataset_id: &str, why: &str) {
+        let Some(mut q) = self.queued_edits.remove(dataset_id) else {
+            return;
+        };
+        while let Some(qe) = q.pop_front() {
+            eprintln!(
+                "[orch] flushing queued data_edit work_id={} ({dataset_id}): {why}",
+                qe.work.work_id
+            );
+            let env = Envelope {
+                v: 1,
+                id: format!("orch-flush-edit-{}", qe.work.work_id),
+                reply_to: None,
+                session_id: Some(qe.frontend.session_id.clone()),
+                format: None,
+                ts: None,
+                body: Message::Result(messages::ResultMsg {
+                    work_id: qe.work.work_id.clone(),
+                    revision: qe.work.revision,
+                    status: messages::Status::ValidationError,
+                    payload: messages::ResultPayload::Data(messages::DataResult {
+                        dataset_id: Some(dataset_id.to_string()),
+                        dataset_revision: None,
+                        rows: None,
+                        schema: None,
+                        error_message: Some(format!("edit dropped: {why}; refetch and retry")),
+                        row_offset: None,
+                        row_count: None,
+                        truncated: None,
+                        invalidation: None,
+                        validation: Some(vec![messages::ValidationIssue {
+                            column: None,
+                            code: "stale_edit".to_string(),
+                            message: format!("the dataset no longer exists: {why}"),
+                            count: None,
+                            rows: None,
+                        }]),
+                        inverse: None,
+                    }),
+                    module_version: None,
+                    message: None,
+                }),
+            };
+            if let Err(e) = qe.frontend.send(frame_envelope(&env)) {
+                eprintln!(
+                    "[orch] flush refusal to frontend {} failed: {e}",
+                    qe.frontend.session_id
+                );
+            }
+        }
+    }
+
     /// frontend's edit-failure path is uniform. Nothing was applied: no revision bump, no
     /// `data_changed` (§3 atomicity).
     fn send_stale_edit(
@@ -2311,12 +2528,23 @@ impl Router {
             // failure below) — OP-AWARE: only an OPEN dies with the lane (its half-written
             // dataset is dropped). A VIEW references an existing Ready dataset, which
             // survives the lane's death untouched; the frontend may retry from its frontier.
-            if let Some(dw) = self.data_works.remove(key)
-                && dw.op == DataOp::Open
-                && let Some(entry) = self.datasets.remove(&dw.dataset_id)
-            {
-                self.path_refs.remove(&entry.current_path);
-                let _ = self.janitor.send(Reclaim::File(entry.current_path));
+            if let Some(dw) = self.data_works.remove(key) {
+                if dw.op == DataOp::Open
+                    && let Some(entry) = self.datasets.remove(&dw.dataset_id)
+                {
+                    self.path_refs.remove(&entry.current_path);
+                    let _ = self.janitor.send(Reclaim::File(entry.current_path));
+                    // THE EDIT CHAIN: the dataset's identity died with the lane — refuse
+                    // its queued edits (never silent loss).
+                    self.flush_queued_edits(&dw.dataset_id, "the data lane stopped unexpectedly");
+                }
+                if dw.op == DataOp::Edit {
+                    // THE EDIT CHAIN: the chain's head died with the lane — drain the
+                    // queue (it parks if the lane is re-spawning; the provisioner path
+                    // continues the chain). The revision stays at the realized value: the
+                    // failed edit changed nothing (§3).
+                    self.drain_queued_edit(&dw.dataset_id);
+                }
             }
             let err = no_runner_result(
                 &key.1,
@@ -2707,6 +2935,7 @@ impl Broker {
             frontends: HashMap::new(),
             work: HashMap::new(),
             parked: HashMap::new(),
+            queued_edits: HashMap::new(),
             datasets: HashMap::new(),
             path_refs: HashMap::new(),
             data_works: HashMap::new(),
@@ -5042,11 +5271,26 @@ mod tests {
 
     /// The mock edit lane's terminal answer: the view-consistency fields (rows, schema
     /// IFF changed, invalidation) the orchestrator moves into the `data_changed`
-    /// broadcast, per D6.
+    /// broadcast, per D6. The result's `revision` echoes the work's — the §23 stale guard
+    /// drops anything older than the dispatched route.
     fn lane_edit_result(
         lane: &Socket,
         session: &str,
         work_id: &str,
+        rows: u64,
+        schema: Option<Value>,
+        invalidation: messages::Invalidation,
+    ) {
+        lane_edit_result_at_rev(lane, session, work_id, 0, rows, schema, invalidation);
+    }
+
+    /// [`lane_edit_result`] with an explicit result revision — for works dispatched at a
+    /// RE-STAMPED base (the edit chain's drain).
+    fn lane_edit_result_at_rev(
+        lane: &Socket,
+        session: &str,
+        work_id: &str,
+        revision: u64,
         rows: u64,
         schema: Option<Value>,
         invalidation: messages::Invalidation,
@@ -5060,7 +5304,7 @@ mod tests {
             ts: None,
             body: Message::Result(ResultMsg {
                 work_id: work_id.to_string(),
-                revision: 0,
+                revision,
                 status: Status::Complete,
                 payload: ResultPayload::Data(DataResult {
                     dataset_id: None,
@@ -5248,6 +5492,180 @@ mod tests {
             new_path.display()
         );
         assert_ne!(new_path, old_path);
+    }
+
+    // 25f. THE EDIT CHAIN (the 2026-09-01 race): two edits submitted back-to-back, the
+    //      second BEFORE the first completes. The orchestrator must NEVER dispatch the
+    //      second concurrently (each edit's source is the previous edit's output — a
+    //      concurrent dispatch would mint the SAME revision, write the SAME output path,
+    //      and last-writer-wins, desyncing the ladder). Instead: a `running` marker, then
+    //      dispatch at the drain with the base RE-STAMPED to the realized revision. The
+    //      ladder ends at exactly 2, one `data_changed` per edit, in order.
+    #[test]
+    fn edit_chain_queues_concurrent_edits_per_dataset() {
+        let url = format!("inproc://orch-ds-editchain-{}", unique());
+        let (broker, _ctl) = start_broker(url.clone());
+        let (lane, _lid) = register_edit_lane(&url);
+        let (fe, session) = hello_frontend(&url);
+
+        let dataset_id = open_to_ready(&fe, &lane, &session); // revision 0
+
+        // Edit A submitted and dispatched (in flight on the lane)…
+        let edit_a = data_edit_work("w-a", &dataset_id, 0);
+        fe.send(frame_envelope(&edit_a).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let raw = lane.recv().expect("lane recv edit A");
+        let env_a = deframe(&raw[..]).unwrap();
+        let (work_a_rev, path_a) = match &env_a.body {
+            Message::Work(w) => match &w.payload {
+                WorkPayload::Data(d) => (w.revision, d.cache_path.clone()),
+                other => panic!("expected data work payload, got {other:?}"),
+            },
+            other => panic!("expected work, got {other:?}"),
+        };
+        assert_eq!(work_a_rev, 0);
+        assert!(path_a.ends_with("_1.arrow"), "A mints revision 1");
+
+        // …and edit B arrives BEFORE A completes — same base revision (the race window).
+        let edit_b = data_edit_work("w-b", &dataset_id, 0);
+        fe.send(frame_envelope(&edit_b).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+
+        // B is NOT dispatched: it gets the running marker (accepted, pending — §25.5) and
+        // the lane stays quiet (only A's work is outstanding).
+        match deframe(&fe.recv().expect("frontend recv B's running marker")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-b");
+                assert!(matches!(r.status, Status::Running));
+            }
+            other => panic!("expected running marker, got {other:?}"),
+        }
+        lane.set_opt::<RecvTimeout>(Some(Duration::from_millis(300)))
+            .unwrap();
+        let stray = lane.recv();
+        assert!(
+            stray.is_err(),
+            "no second work reaches the lane while A is in flight"
+        );
+        lane.set_opt::<RecvTimeout>(Some(Duration::from_secs(5)))
+            .unwrap();
+
+        // A completes: result + data_changed(rev 1) to the frontend…
+        lane_edit_result(
+            &lane,
+            &session,
+            "w-a",
+            8,
+            None,
+            messages::Invalidation {
+                all: None,
+                rows_from: Some(0),
+                rows_to: None,
+            },
+        );
+        match deframe(&fe.recv().expect("frontend recv A result")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-a");
+                assert!(matches!(r.status, Status::Complete));
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
+        match deframe(&fe.recv().expect("frontend recv A data_changed")[..])
+            .unwrap()
+            .body
+        {
+            Message::DataChanged(c) => assert_eq!(c.dataset_revision, 1),
+            other => panic!("expected data_changed, got {other:?}"),
+        }
+
+        // …and the DRAIN dispatches B — RE-STAMPED to the realized revision 1, minting 2
+        // (a DIFFERENT output path: the chain, not a collision).
+        let raw = lane.recv().expect("lane recv edit B after the drain");
+        let env_b = deframe(&raw[..]).unwrap();
+        match &env_b.body {
+            Message::Work(w) => match &w.payload {
+                WorkPayload::Data(d) => {
+                    assert_eq!(
+                        w.revision, 1,
+                        "B's base re-stamped to the realized revision"
+                    );
+                    assert!(
+                        d.cache_path.ends_with("_2.arrow"),
+                        "B mints revision 2 (never A's path): {}",
+                        d.cache_path
+                    );
+                    assert_eq!(
+                        d.source, path_a,
+                        "B's source is A's OUTPUT (the chain dependency)"
+                    );
+                }
+                other => panic!("expected data work payload, got {other:?}"),
+            },
+            other => panic!("expected work, got {other:?}"),
+        }
+
+        // B completes: the ladder ends at exactly 2, one data_changed per edit, in order.
+        // (The result echoes B's RE-STAMPED revision 1 — the §23 stale guard drops
+        // anything older than the dispatched route.)
+        lane_edit_result_at_rev(
+            &lane,
+            &session,
+            "w-b",
+            1,
+            9,
+            None,
+            messages::Invalidation {
+                all: None,
+                rows_from: Some(0),
+                rows_to: None,
+            },
+        );
+        match deframe(&fe.recv().expect("frontend recv B result")[..])
+            .unwrap()
+            .body
+        {
+            Message::Result(r) => {
+                assert_eq!(r.work_id, "w-b");
+                assert!(matches!(r.status, Status::Complete));
+                let ResultPayload::Data(d) = &r.payload else {
+                    panic!("expected data result payload")
+                };
+                assert_eq!(d.dataset_revision, Some(2), "B realizes revision 2");
+            }
+            other => panic!("expected result, got {other:?}"),
+        }
+        match deframe(&fe.recv().expect("frontend recv B data_changed")[..])
+            .unwrap()
+            .body
+        {
+            Message::DataChanged(c) => assert_eq!(c.dataset_revision, 2),
+            other => panic!("expected data_changed, got {other:?}"),
+        }
+
+        // The ladder is intact — and not wedged: a THIRD edit at the fresh base dispatches
+        // immediately (nothing in flight).
+        let edit_c = data_edit_work("w-c", &dataset_id, 2);
+        fe.send(frame_envelope(&edit_c).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let raw = lane.recv().expect("lane recv edit C immediately");
+        match deframe(&raw[..]).unwrap().body {
+            Message::Work(w) => assert_eq!(w.revision, 2, "C dispatches at the fresh base"),
+            other => panic!("expected work, got {other:?}"),
+        }
+        let snap = broker.datasets_snapshot();
+        assert_eq!(
+            snap[0].3, 1,
+            "exactly C's in-flight ref remains (the chain's queue holds none)"
+        );
     }
 
     // 26a'. The edit rail with a ROW op (d4): `insert_rows` moves nothing in the schema,

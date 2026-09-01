@@ -912,21 +912,37 @@ QT_QPA_PLATFORM=offscreen build/Desktop_Qt_6_11_0-Debug/Tests/JASPTest testSavLa
 
 ## 6. Open items / known debts
 
-- **THE RACE (found 2026-08-31, the rename smoke test — REAL, UNFIXED)**: two edits
-  dispatched at the same base before either completes → the orchestrator MINTS THE SAME
-  NEXT REVISION TWICE (the dataset entry's revision bumps at COMPLETION, not dispatch:
-  `route_result` is the bump point) and both write the SAME `<id>_<rev+1>.arrow` path
-  concurrently — last writer wins, the revision ladder desyncs from the data, and every
-  later edit fails count-match against the race's winner (log: w2+w3 both `base=2 -> rev 3`,
-  both wrote ds-3_3.arrow; w4–w6 all refused, `col_420` no longer existed). Triggered by
-  any back-to-back submissions (stale-mirror retypes did it instantly; fast cell tab-typing
-  can too). **Fix (two parts, both needed):** (a) orchestrator — one in-flight edit per
-  dataset: at dispatch, if an Edit work for this dataset is already outstanding, reject
-  with the `stale_edit`-shaped validationError (never mint, never race); (b) frontend —
-  serialize submissions per dataset in JaspClient (a small pending queue that chains on
-  each result/data_changed so the base revision is read at ACTUAL send time), because
-  rejection alone would drop the user's second keystroke. D11's dispatch check cannot see
-  it: base == current is still true while the first edit is in flight.
+- **THE RACE — FIXED 2026-09-01 (the edit chain)**: two edits dispatched at the same base
+  before either completes used to mint the SAME revision twice and write the SAME output
+  path (last writer wins, ladder desyncs, later edits fail count-match). The fix is the
+  user's design: **the orchestrator serializes — ONE edit in flight per dataset, extras in
+  a per-dataset FIFO** (`Router::queued_edits` / `QueuedEdit`), because each edit's SOURCE
+  is the previous edit's OUTPUT (the chain dependency — true concurrency is impossible;
+  two counters would only fix the symptom). Mechanics: the dispatch arm (after D11, which
+  still proves the edit ARRIVED in order against realized state) enqueues + sends the
+  §25.5 `running` marker; EVERY terminal edit result (success AND failure) drains —
+  popping, RE-STAMPING the base to the realized revision (env.body AND the Work param —
+  identity in the frame), and dispatching (fresh mint + fresh path; the lane validates the
+  op content against live data — count-match/ranges — the authoring-context check where
+  the data lives). Views never queue (they read realized + self-heal on data_changed);
+  different datasets never block each other. Edges: a retry of an in-flight work_id is
+  re-acked (never a duplicate application); no lane at drain → park_work (provisioner
+  re-spawns; try_dispatch_parked continues the chain) or a visible no-runner failure; a
+  dataset dying (failed open / lane-evicted open) FLUSHES its queue with stale_edit-shaped
+  refusals (never silent loss); a lane eviction under an in-flight edit drains the chain.
+  CROWN: `edit_chain_queues_concurrent_edits_per_dataset` (A dispatched, B → running
+  marker + the lane stays quiet, A completes, B dispatches re-stamped to 1 minting a
+  DIFFERENT path with A's output as source, ladder ends at exactly 2, C dispatches
+  immediately — not wedged; also taught the mock to echo re-stamped result revisions,
+  the §23 stale guard earning its keep). Suite 147 green; clippy clean; release binaries
+  rebuilt. C++: `DataEditCommand` ignores `running` markers (the client invokes handlers
+  for non-terminal results too — the failure log would have fired on every queued edit).
+  KNOWN residual (accepted v1): a positional op queued behind a geometry-changing edit
+  re-stamps and lands at shifted coordinates — refusal via intervening invalidation
+  descriptors is a later refinement if it ever bites.
+
+- **THE RACE (found 2026-08-31, the rename smoke test — REAL)**: ~~UNFIXED~~ **FIXED
+  2026-09-01 — the edit chain; see §6's first bullet for the full design.**
 
 - Design §11 items stand (mirror-collapse detail, range-aware invalidation on the
   FRONTEND — the descriptor is normative and now computed correctly, map-to-null level

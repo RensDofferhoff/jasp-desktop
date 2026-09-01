@@ -217,10 +217,16 @@ void DataEditCommand::submit(bool isUndo)
 				_inverseMeta	= result.inverseMeta;
 				_inverseBytes	= result.binary;
 				Log::log() << "DataEditCommand: '" << _text.toStdString() << "' applied — revision "
-						   << result.datasetRevision << ", inverse " << result.binary.size() << " bytes stored" << std::endl;
+					   << result.datasetRevision << ", inverse " << result.binary.size() << " bytes stored" << std::endl;
 			}
 			return;
 		}
+
+		// The orchestrator's pending-ack (§25.5 — the edit chain queues one edit per dataset
+		// behind the in-flight one; also the parked-work marker): NOT a failure — keep
+		// waiting for the terminal result.
+		if (result.status == "running")
+			return;
 
 		// v1 failure surfacing: log loudly with the structured detail when present.
 		// A refused edit changed nothing (§3 atomicity); a stale_edit means the revision
