@@ -198,7 +198,7 @@ void DataSetView::_copy(QPoint where, bool clear)
 			_expandedModel->removeRows(		minIdx.y(), rowsSelected);
 			_expandedModel->insertColumns(0);
 			_expandedModel->insertRows(0);
-			UndoStack::singleton()->endMacro();//new PasteSpreadsheetCommand(_expandedModel->sourceModel(), 0, 0, {{""}}, {{""}}, {}, {}));
+			UndoStack::singleton()->endMacro();
 		}
 		else if(isColumnHeader(where))
 			_expandedModel->removeColumns(minIdx.x(), 1 + (maxIdx.x() - minIdx.x()));

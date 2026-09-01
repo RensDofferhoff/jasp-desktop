@@ -93,8 +93,26 @@ new producers on the existing rail.
       (instruction at `dataset.cpp`'s second delete, deref of garbage 0xc41b). Filter has no
       dtor and nothing but the newList loop removes from `_filters`, so the early delete was
       simply dropped.
-- [ ] **Cut 4 — legacy undo commands**: delete the Column-command family; UndoStack keeps
-      macros + byte cap + DataEditCommand.
+- [x] **Cut 4 — legacy undo commands** (2026-09-01): undostack.{h,cpp} rewritten — the
+      entire Column-serializing command family deleted (SetColumnProperty/SetColumnType/
+      SetData/Insert·Remove Rows·Columns/PasteSpreadsheet/CopyColumns/the label CRUD family
+      (Add·Set·Delete·Move·Reverse·FilterLabel)/Set·Custom·UseCustomEmptyValues/
+      SetWorkspaceProperty·EmptyValues/SetJson·RFilter/CreateComputedColumn·SetComputedColumnCode
+      (zero push sites, already orphans)/ChangeSelectionCommand (zero push sites)/the
+      UndoModelCommandMultiple·SingleColumn bases). **UndoStack keeps macros + the ~250 MB
+      byte cap + the UndoModelCommand base** (DataEditCommand derives from it and the cap
+      sums its undoBytes()) — the base is slimmed to ctor/dataSet()/dataSetStillExists()
+      (columnName/rowName/column(index) helpers died with their users). Push sites stripped:
+      columnmodel (lane paths already early-returned; legacy fall-throughs deleted, pure-legacy
+      label-editor fns are logged no-ops — labels return in B2), filtermodel (editor inert;
+      filters return as derived boolean columns), workspacemodel (description has no wire
+      support — returns as jasp:description; empty values are a legacy loading concept),
+      expanddataproxymodel (all legacy arms inert: insert/remove/resize/copyColumns/
+      columnReverseValues/columnautoSortByValues no-op — the lane rail has no structural
+      delete op yet, growth is remote; lane insert_block/schema_change paths untouched;
+      columnIndexesToNames orphaned and deleted). datasetview.cpp:201 stale comment removed.
+      QML-facing signatures all kept (Cut 7 sweeps the callers). Tests: 14 JASPTest /
+      5 ColumnEncoder / 8 CsvPrev / 63 QuickTest green; orphan grep clean.
 - [ ] **Cut 5 — Column + mirror paths + DataSetTableModel**: delete Column; DataSet's
       model-API legacy branches become THE implementation; getColumnIndex/column serve
       schema (or die if nothing needs them); ExpandDataProxyModel loses its legacy arm

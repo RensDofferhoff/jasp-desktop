@@ -50,7 +50,6 @@ public:
 	void						resize(int row, int col, bool onlyExpand = true, const QString& undoText = QString());
 	bool						useUndoStack() const;
 
-	stringset columnIndexesToNames(intset columnIndexes);
 signals:
 	void						undoChanged();
 

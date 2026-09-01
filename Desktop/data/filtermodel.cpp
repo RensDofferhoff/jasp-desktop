@@ -3,7 +3,7 @@
 #include "datasetpackage.h"
 #include "filter.h"
 #include "qutils.h"
-#include "undostack.h"
+#include "log.h"
 
 FilterModel::FilterModel(QObject * parent)
 	: QObject(parent)
@@ -28,20 +28,27 @@ bool FilterModel::isJustGeneratedFilter() const
 
 void FilterModel::applyConstructorJson(QString newConstructorJson)
 {
+	Q_UNUSED(newConstructorJson);
+
 	if(!filter())
 		return;
 
+	// The excision, Cut 4: the filter's undo command is gone with the legacy data route.
+	// Filters return as derived boolean columns (HANDOVER-excision.md); until then the
+	// editor is inert on NEO data.
 	if (newConstructorJson != filter()->constructorJson())
-		UndoStack::singleton()->pushCommand(new SetJsonFilterCommand(filter(), newConstructorJson));
+		Log::log() << "FilterModel::applyConstructorJson: filters return as derived columns — ignored" << std::endl;
 }
 
 void FilterModel::applyRFilter(QString newRFilter)
 {
+	Q_UNUSED(newRFilter);
+
 	if(!filter())
 		return;
 
 	if (newRFilter != filter()->rFilter())
-		UndoStack::singleton()->pushCommand(new SetRFilterCommand(filter(), newRFilter));
+		Log::log() << "FilterModel::applyRFilter: filters return as derived columns — ignored" << std::endl;
 }
 
 void FilterModel::resetRFilter()
@@ -50,7 +57,7 @@ void FilterModel::resetRFilter()
 		return;
 
 	if (filter()->defaultRFilter() != filter()->rFilter())
-		UndoStack::singleton()->pushCommand(new SetRFilterCommand(filter(), filter()->defaultRFilter()));
+		Log::log() << "FilterModel::resetRFilter: filters return as derived columns — ignored" << std::endl;
 }
 
 

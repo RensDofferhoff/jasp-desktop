@@ -2,7 +2,7 @@
 #include "datasetpackage.h"
 #include "qutils.h"
 #include "gui/preferencesmodel.h"
-#include "undostack.h"
+#include "log.h"
 
 WorkspaceModel* WorkspaceModel::_singleton = nullptr;
 
@@ -45,38 +45,37 @@ QString WorkspaceModel::description() const
 
 void WorkspaceModel::setDescription(const QString &desc)
 {
+	Q_UNUSED(desc);
 	if (desc == description()) return;
 	if(!DataSetPackage::pkg()->dataSet()) return;
 
-	UndoStack::singleton()->pushCommand(new SetWorkspacePropertyCommand(DataSetPackage::pkg()->dataSet(), desc, SetWorkspacePropertyCommand::WorkspaceProperty::Description));
+	// The excision, Cut 4: the workspace-property undo command is gone with the legacy
+	// data route; description has no lane wire support either (returns as jasp:description
+	// metadata with the labels-editor era).
+	Log::log() << "WorkspaceModel::setDescription: description is not yet on the lane wire — ignored" << std::endl;
 }
 
 void WorkspaceModel::removeEmptyValue(const QString &value)
 {
+	Q_UNUSED(value);
 	if(!DataSetPackage::pkg()->dataSet()) return;
-	QStringList values = tql(DataSetPackage::pkg()->dataSet()->emptyValuesAsStrings());
 
-	if (values.removeAll(value) > 0)
-		UndoStack::singleton()->pushCommand(new SetWorkspaceEmptyValuesCommand(DataSetPackage::pkg()->dataSet(), values));
+	// The excision, Cut 4: empty values are a legacy loading concept (which strings read
+	// as empty); on NEO the lane backend owns the data. Returns with a NEO-era design.
+	Log::log() << "WorkspaceModel::removeEmptyValue: empty-value editing is legacy — ignored" << std::endl;
 }
 
 void WorkspaceModel::addEmptyValue(const QString &value)
 {
+	Q_UNUSED(value);
 	if(!DataSetPackage::pkg()->dataSet()) return;
-	QStringList values = tql(DataSetPackage::pkg()->dataSet()->emptyValuesAsStrings());
 
-	if (!values.contains(value))
-	{
-		values.push_back(value);
-		UndoStack::singleton()->pushCommand(new SetWorkspaceEmptyValuesCommand(DataSetPackage::pkg()->dataSet(), values));
-	}
+	Log::log() << "WorkspaceModel::addEmptyValue: empty-value editing is legacy — ignored" << std::endl;
 }
 
 void WorkspaceModel::resetEmptyValues()
 {
 	if(!DataSetPackage::pkg()->dataSet() || !PreferencesModel::prefs()) return;
-	QStringList defaultValues = PreferencesModel::prefs()->emptyValues();
 
-	if (defaultValues != emptyValues())
-		UndoStack::singleton()->pushCommand(new SetWorkspaceEmptyValuesCommand(DataSetPackage::pkg()->dataSet(), defaultValues));
+	Log::log() << "WorkspaceModel::resetEmptyValues: empty-value editing is legacy — ignored" << std::endl;
 }

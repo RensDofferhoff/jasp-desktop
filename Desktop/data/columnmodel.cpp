@@ -120,20 +120,9 @@ void ColumnModel::setColumnNameQ(QString newColumnName)
 
 	if (_virtual)
 	{
-		undoStack()->startMacro();
-
-		for (int colNr = DataSetPackage::pkg()->dataSet()->columnCount(); colNr < _columnIndex; colNr++)
-			undoStack()->pushCommand(new InsertColumnCommand(DataSetPackage::pkg()->dataSet(), colNr));
-
-		QMap<QString, QVariant> props;
-		props["name"]			= newColumnName;
-		props["type"]			= int(_dummyColumn.type);
-		props["computed"]	= int(_dummyColumn.computedType);
-		props["computeFilter"]	= _dummyColumn.computeFilter;
-		undoStack()->endMacro(new InsertColumnCommand(DataSetPackage::pkg()->dataSet(), _columnIndex, props));
+		// Legacy insert-at-index flow — lane datasets are handled above (insertColsOp /
+		// schemaChangeRenameOp and return). Nothing to do here anymore.
 	}
-	else if(column())
-		undoStack()->pushCommand(new SetColumnPropertyCommand(column(), newColumnName, SetColumnPropertyCommand::ColumnProperty::Name));
 }
 
 QString ColumnModel::columnTitle() const
@@ -179,10 +168,7 @@ void ColumnModel::setColumnTitle(const QString & newColumnTitle)
 	}
 
 	if (_virtual)
-	_dummyColumn.title = newColumnTitle;
-
-	if(column() && column()->title() != fq(newColumnTitle))
-		undoStack()->pushCommand(new SetColumnPropertyCommand(column(), newColumnTitle, SetColumnPropertyCommand::ColumnProperty::Title));
+		_dummyColumn.title = newColumnTitle;
 }
 
 void ColumnModel::setDropLevels(QString dropLevels)
@@ -201,10 +187,8 @@ void ColumnModel::setDropLevels(QString dropLevels)
 
 	dropLevelsType dropEm = dropLevelsType::drop;
 	
-	try { dropEm = dropLevelsTypeFromQString(dropLevels); } catch(...){} 
-
-	if(column())
-		undoStack()->pushCommand(new SetColumnPropertyCommand(column(), dropLevelsTypeToQString(dropEm), SetColumnPropertyCommand::ColumnProperty::DropLevels));
+	try { dropEm = dropLevelsTypeFromQString(dropLevels); } catch(...){}
+	Q_UNUSED(dropEm); // only the legacy route consumed it — that route is gone (Cut 4)
 }
 
 QString ColumnModel::columnDescription() const
@@ -258,9 +242,10 @@ bool ColumnModel::useCustomEmptyValues() const
 
 void ColumnModel::setUseCustomEmptyValues(bool useCustom)
 {
-	if (_beingRefreshed || _virtual || !column() || column()->hasCustomEmptyValues() == useCustom) return;
-
-	undoStack()->pushCommand(new SetUseCustomEmptyValuesCommand(column(), useCustom));
+	// The excision, Cut 4: the empty-values command family is gone with the legacy data
+	// route (empty values are a legacy loading concept). `column()` is always null on
+	// lane data, so this was already unreachable there — now it is honestly empty.
+	Q_UNUSED(useCustom);
 }
 
 QStringList ColumnModel::emptyValues() const
@@ -309,9 +294,9 @@ bool ColumnModel::hasSeveralNumericValues() const
 
 void ColumnModel::setCustomEmptyValues(const QStringList& customEmptyValues)
 {
-	if (_beingRefreshed || _virtual || !column() || column()->emptyValues()->emptyStrings() == fql(customEmptyValues)) return;
-
-	undoStack()->pushCommand(new SetCustomEmptyValuesCommand(column(), customEmptyValues));
+	// The excision, Cut 4: see setUseCustomEmptyValues — empty values return with a
+	// NEO-era design.
+	Q_UNUSED(customEmptyValues);
 }
 
 
@@ -433,9 +418,6 @@ void ColumnModel::setColumnDescription(const QString & newColumnDescription)
 
 	if (_virtual)
 		_dummyColumn.description = newColumnDescription;
-
-	if(column() && column()->description() != fq(newColumnDescription))
-		undoStack()->pushCommand(new SetColumnPropertyCommand(column(), newColumnDescription, SetColumnPropertyCommand::ColumnProperty::Description));
 }
 
 void ColumnModel::setComputedType(QString type)
@@ -456,8 +438,9 @@ void ColumnModel::setComputedType(QString type)
 
 	if (_virtual)
 		_dummyColumn.computedType = cType;
-	else if(column())
-		undoStack()->pushCommand(new SetColumnPropertyCommand(column(), int(cType), SetColumnPropertyCommand::ColumnProperty::ComputedColumnType));
+
+	// The excision, Cut 4: the legacy computed-column command is gone; computed columns
+	// return as derivations (ChangeKind::derived).
 
 	emit tabsChanged();
 }
@@ -478,8 +461,8 @@ void ColumnModel::setComputeFilter(const QString &newComputeFilter)
 	if (_virtual)
 		_dummyColumn.computeFilter = newComputeFilter;
 	
-	else if(column())
-		undoStack()->pushCommand(new SetColumnPropertyCommand(column(), newComputeFilter, SetColumnPropertyCommand::ColumnProperty::ComputeFilter));
+	// The excision, Cut 4: the legacy compute-filter command is gone; computed columns
+	// return as derivations (ChangeKind::derived).
 
 	emit tabsChanged();
 }
@@ -515,8 +498,9 @@ void ColumnModel::setColumnType(QString type)
 
 	if (_virtual)
 		_dummyColumn.type = cType;
-	else if(column())
-		undoStack()->pushCommand(new SetColumnTypeCommand(column()->data(), {fq(columnNameQ())}, int(cType)));
+
+	// The excision, Cut 4: the legacy retype command is gone; lane retypes route through
+	// the schema_change op above.
 }
 
 std::vector<size_t> ColumnModel::getSortedSelection() const
@@ -567,7 +551,9 @@ void ColumnModel::moveSelectionUp()
 		return;
 
 	_lastSelected = -1;
-	undoStack()->pushCommand(new MoveLabelCommand(column(), indexes, true));
+	// The excision, Cut 4: label reordering is legacy (the label editor returns in B2 on
+	// the jasp:labels overlay — value-keyed, no per-row state).
+	Log::log() << "ColumnModel::moveSelectionUp: label editing returns with the labels editor (B2) — ignored" << std::endl;
 }
 
 void ColumnModel::moveSelectionDown()
@@ -577,7 +563,7 @@ void ColumnModel::moveSelectionDown()
 		return;
 
 	_lastSelected = -1;
-	undoStack()->pushCommand(new MoveLabelCommand(column(), indexes, false));
+	Log::log() << "ColumnModel::moveSelectionDown: label editing returns with the labels editor (B2) — ignored" << std::endl;
 }
 
 void ColumnModel::reverse()
@@ -586,7 +572,7 @@ void ColumnModel::reverse()
 		return;
 
 	_lastSelected = -1;
-	undoStack()->pushCommand(new ReverseLabelCommand(column()));
+	Log::log() << "ColumnModel::reverse: label editing returns with the labels editor (B2) — ignored" << std::endl;
 }
 
 void ColumnModel::reverseValues()
@@ -595,13 +581,13 @@ void ColumnModel::reverseValues()
 		return;
 
 	_lastSelected = -1;
-	undoStack()->pushCommand(new ColumnReverseValuesCommand(column()->data(), {fq(columnNameQ())}));
+	Log::log() << "ColumnModel::reverseValues: legacy label/value ops return with the labels editor (B2) — ignored" << std::endl;
 }
 
 void ColumnModel::toggleAutoSortByValues()
 {
 	_lastSelected = -1;
-	undoStack()->pushCommand(new ColumnToggleAutoSortByValuesCommand(column()->data(), {fq(columnNameQ())}));
+	Log::log() << "ColumnModel::toggleAutoSortByValues: legacy label/value ops return with the labels editor (B2) — ignored" << std::endl;
 }
 
 bool ColumnModel::setData(const QModelIndex & index, const QVariant & value, int role)
@@ -1030,9 +1016,9 @@ bool ColumnModel::setChecked(int rowIndex, bool checked)
 	
 	setSelected(rowIndex, true);
 
-	_editing = true;
-	undoStack()->pushCommand(new FilterLabelCommand(column(), rowIndex, checked));
-	_editing = false;
+	// The excision, Cut 4: label-level filtering is legacy (filters return as derived
+	// boolean columns); the label editor returns in B2.
+	Log::log() << "ColumnModel::setChecked: label filtering is legacy — ignored" << std::endl;
 	
 	return data(index(rowIndex, 0), int(dataPkgRoles::filter)).toBool() == checked;
 }
@@ -1046,9 +1032,7 @@ void ColumnModel::setValue(int rowIndex, const QString &value)
 	if(_beingRefreshed || value == originalValue)
 		return; //Its already that value
 	
-	_editing = true;
-	undoStack()->pushCommand(new SetLabelOriginalValueCommand(column(), rowIndex, value));
-	_editing = false;
+	Log::log() << "ColumnModel::setValue: label editing returns with the labels editor (B2) — ignored" << std::endl;
 }
 
 void ColumnModel::setLabel(int rowIndex, QString label)
@@ -1060,19 +1044,20 @@ void ColumnModel::setLabel(int rowIndex, QString label)
 	if(_beingRefreshed || label == originalLabel)
 		return; //Its already that value
 	
-	_editing = true;
-	undoStack()->pushCommand(new SetLabelCommand(column(), rowIndex, label));
-	_editing = false;
+	Log::log() << "ColumnModel::setLabel: label editing returns with the labels editor (B2) — ignored" << std::endl;
 }
 
 void ColumnModel::deleteLabel(int rowIndex)
 {
-	undoStack()->pushCommand(new DeleteLabelCommand(column(), rowIndex));
+	Q_UNUSED(rowIndex);
+	Log::log() << "ColumnModel::deleteLabel: label editing returns with the labels editor (B2) — ignored" << std::endl;
 }
 
 void ColumnModel::addLabel(QString value, QString label)
 {
-	undoStack()->pushCommand(new AddLabelCommand(column(), value, label));
+	Q_UNUSED(value);
+	Q_UNUSED(label);
+	Log::log() << "ColumnModel::addLabel: label editing returns with the labels editor (B2) — ignored" << std::endl;
 }
 
 bool ColumnModel::columnIsFiltered() const
@@ -1146,7 +1131,11 @@ void ColumnModel::setHasLabels(bool newHasLabels)
 	}
 
 	if(column())
-		undoStack()->pushCommand(new SetColumnPropertyCommand(column(), newHasLabels, SetColumnPropertyCommand::ColumnProperty::HasLabels));
+	{
+		// The excision, Cut 4: hasLabels was legacy's STORAGE MODE; the NEO equivalent is
+		// the jasp:labels overlay (P11, B2). The branch is unreachable on lane (column()
+		// is null there) and inert without its command.
+	}
 }
 
 bool ColumnModel::isColumnNameFree(const QString & name)

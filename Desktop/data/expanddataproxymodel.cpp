@@ -268,15 +268,10 @@ void ExpandDataProxyModel::removeRuns(bool isRows, const std::vector<std::pair<i
 	UndoStack * stack = undoStack();
 	stack->startMacro(isRows ? tr("Remove %1 rows").arg(total) : tr("Remove %1 columns").arg(total));
 
-	// Push descending so redo removes high-index first (lower indices stay valid) and undo re-inserts ascending.
-	for (auto it = merged.rbegin(); it != merged.rend(); ++it)
-	{
-		if (isRows)
-			stack->pushCommand(new RemoveRowsCommand(ds, it->first, it->second));
-		else
-			stack->pushCommand(new RemoveColumnsCommand(ds, it->first, it->second));
-	}
-
+	// The excision, Cut 4: row/column removal was legacy-only (the lane rail has no
+	// delete op yet — growth is remote, extent edits come with the derived-columns era).
+	// The macro is ended empty, so this is an honest no-op.
+	Q_UNUSED(merged);
 	stack->endMacro();
 }
 
@@ -314,99 +309,35 @@ void ExpandDataProxyModel::removeColumnGroups(std::vector<std::pair<int, int> > 
 
 void ExpandDataProxyModel::insertRows(int row, int count)
 {
-	DataSet * ds = dataSetSourceModel();
-	if (!ds)
-		return;
-
-	undoStack()->pushCommand(new InsertRowsCommand(ds, shownToRaw(row, true), count));
+	Q_UNUSED(row);
+	Q_UNUSED(count);
+	// The excision, Cut 4: structural inserts were legacy-only; on lane the view grows
+	// remotely (an insert_block past the extent) — no local resize exists.
 }
-
 
 void ExpandDataProxyModel::insertColumns(int col, int count)
 {
-	DataSet * ds = dataSetSourceModel();
-	if (!ds)
-		return;
-
-	undoStack()->pushCommand(new InsertColumnsCommand(ds, shownToRaw(col, false), count));
+	Q_UNUSED(col);
+	Q_UNUSED(count);
 }
-
 
 void ExpandDataProxyModel::insertColumn(int col, bool computed, bool R)
 {
-	DataSet * ds = dataSetSourceModel();
-	if (!ds)
-		return;
-
-	QMap<QString, QVariant> props;
-	if (computed)
-		props["computed"] = int(R ? computedColumnType::rCode : computedColumnType::constructorCode);
-	undoStack()->pushCommand(new InsertColumnCommand(ds, shownToRaw(col, false), props));
+	Q_UNUSED(col);
+	Q_UNUSED(computed);
+	Q_UNUSED(R);
+	// Column creation on lane is ColumnModel's job (insertColsOp via the new-column
+	// editor) — this legacy entry point is inert.
 }
 
 void ExpandDataProxyModel::resize(int row, int col, bool onlyExpand, const QString& undoText)
 {
-	if (!sourceModel() || row < 0 || col < 0)
-		return;
-
-	UndoStack * stack = undoStack();
-
-	if (onlyExpand)
-	{
-		// Grow the table so the shown cell (row, col) exists. The distance to grow is computed in
-		// shown (filtered/compacted) space; the new rows/columns are appended to the raw table.
-		int colsToAdd = std::max(0, 1 + col - sourceModel()->columnCount()),
-			rowsToAdd = std::max(0, 1 + row - sourceModel()->rowCount());
-
-		if (colsToAdd == 0 && rowsToAdd == 0)
-			return;
-
-		stack->startMacro(undoText);
-		if (colsToAdd > 0)
-			stack->pushCommand(new InsertColumnsCommand(dataSetSourceModel(), dataSetSourceModel()->columnCount(), colsToAdd));
-		if (rowsToAdd > 0)
-			stack->pushCommand(new InsertRowsCommand(dataSetSourceModel(), dataSetSourceModel()->rowCount(), rowsToAdd));
-		if (!undoText.isEmpty())
-			stack->endMacro();
-		return;
-	}
-
-	// Shrink path (only used by the whole-dataset "Resize data to NxM" dialog): operate on the raw table.
-	DataSet * ds = dataSetSourceModel();
-	if (!ds)
-		return;
-
-	const int rawRows	= ds->rowCount(),
-			  rawCols	= ds->columnCount();
-
-	int targetRow = std::max(0, row),
-		targetCol = std::max(0, col);
-
-	if (targetCol == rawCols - 1 && targetRow == rawRows - 1)
-		return;
-
-	stack->startMacro(undoText);
-
-	if(targetCol >= rawCols)
-	{
-		int colC = 1 + targetCol - rawCols;
-		if(colC > 0)
-			stack->pushCommand(new InsertColumnsCommand(ds, rawCols, colC));
-	}
-	else if (targetCol < (rawCols - 1))
-		stack->pushCommand(new RemoveColumnsCommand(ds, targetCol + 1, rawCols - targetCol - 1));
-
-	if(targetRow >= rawRows)
-	{
-		int rowC = 1 + targetRow - rawRows;
-		if(rowC > 0)
-			stack->pushCommand(new InsertRowsCommand(ds, rawRows, rowC));
-	}
-	else if (targetRow < (rawRows - 1))
-		stack->pushCommand(new RemoveRowsCommand(ds, targetRow + 1, rawRows - targetRow - 1));
-
-	if (!undoText.isEmpty())
-		stack->endMacro();
+	Q_UNUSED(row);
+	Q_UNUSED(col);
+	Q_UNUSED(onlyExpand);
+	Q_UNUSED(undoText);
+	// The excision, Cut 4: local table resizing was legacy-only. On lane the dataset's
+	// extent is the backend's (growth is a remote edit; revisions restart the view).
 }
 
 bool ExpandDataProxyModel::useUndoStack() const
@@ -443,13 +374,10 @@ bool ExpandDataProxyModel::setData(const QModelIndex &index, const QVariant &val
 		return true;
 	}
 
-	resize(index.row(), index.column());
-
-	int rawRow = shownToRaw(index.row(), true),
-		rawCol = shownToRaw(index.column(), false);
-
-	undoStack()->endMacro(new SetDataCommand(dataSetSourceModel(), rawRow, rawCol, value, role));
-	return true;
+	// The excision, Cut 4: the legacy tail (local resize + SetDataCommand) is gone — the
+	// NEO edit surface above is the only route. The legacy source arm (DataSetTableModel)
+	// no longer edits.
+	return false;
 }
 
 void ExpandDataProxyModel::pasteSpreadsheet(int row, int col, const std::vector<std::vector<QString>> & values, const std::vector<std::vector<QString>> & labels, const QStringList & colNames, const std::vector<boolvec> & selected)
@@ -488,83 +416,13 @@ void ExpandDataProxyModel::pasteSpreadsheet(int row, int col, const std::vector<
 		return;
 	}
 
-	const int shownRowCount	= sourceModel()->rowCount(),
-			  shownColCount	= sourceModel()->columnCount();
-
-	const int shownCols		= values.size(),
-			  shownRows		= values[0].size();
-
-	// Map every shown cell of the paste rectangle onto its raw DataSet position (skipping hidden cells).
-	int rawMinR = INT_MAX, rawMaxR = INT_MIN,
-		rawMinC = INT_MAX, rawMaxC = INT_MIN;
-
-	for (int sc = 0; sc < shownCols; sc++)
-	{
-		int asc = col + sc;
-		int rawCol = asc < shownColCount ? shownToRaw(asc, false) : ds->columnCount() + (asc - shownColCount);
-		rawMinC = std::min(rawMinC, rawCol);
-		rawMaxC = std::max(rawMaxC, rawCol);
-	}
-
-	for (int sr = 0; sr < shownRows; sr++)
-	{
-		int asr = row + sr;
-		int rawRow = asr < shownRowCount ? shownToRaw(asr, true) : ds->rowCount() + (asr - shownRowCount);
-		rawMinR = std::min(rawMinR, rawRow);
-		rawMaxR = std::max(rawMaxR, rawRow);
-	}
-
-	const int rawCols = rawMaxC - rawMinC + 1,
-			  rawRows = rawMaxR - rawMinR + 1;
-
-	// Dense raw buffer; hidden/skipped cells stay empty and not "selected".
-	std::vector<std::vector<QString>>	newValues(rawCols, std::vector<QString>(rawRows, "")),
-										newLabels(rawCols, std::vector<QString>(rawRows, ""));
-	std::vector<boolvec>				newSelected(rawCols, boolvec(rawRows, false));
-	QStringList							newColNames;
-
-	newColNames.reserve(rawCols);
-	for (int c = 0; c < rawCols; c++)
-		newColNames.append("");
-
-	for (int sc = 0; sc < shownCols; sc++)
-	{
-		int asc = col + sc;
-		int rawCol = asc < shownColCount ? shownToRaw(asc, false) : ds->columnCount() + (asc - shownColCount);
-
-		if (sc < colNames.size())
-			newColNames[rawCol - rawMinC] = colNames[sc];
-
-		const bool colSelected = selected.size() == 0 || selected[sc].size() == 0;
-
-		for (int sr = 0; sr < shownRows; sr++)
-		{
-			int asr = row + sr;
-			int rawRow = asr < shownRowCount ? shownToRaw(asr, true) : ds->rowCount() + (asr - shownRowCount);
-
-			int C = rawCol - rawMinC,
-				R = rawRow - rawMinR;
-
-			newValues[C][R]		= values[sc][sr];
-			if (labels.size()  > sc && labels[sc].size() > sr)
-				newLabels[C][R]	= labels[sc][sr];
-			newSelected[C][R]	= colSelected || selected[sc][sr];
-		}
-	}
-
-	undoStack()->endMacro(new PasteSpreadsheetCommand(ds, rawMinR, rawMinC, newValues, newLabels, newSelected, newColNames));
+	// The excision, Cut 4: the legacy paste (raw-table mapping + PasteSpreadsheetCommand)
+	// is gone — lane pastes take the insert_block path above; there is no other route.
 }
 
 
-stringset ExpandDataProxyModel::columnIndexesToNames(intset columnIndexes)
-{
-	stringset colNames;
-
-	for(int i : columnIndexes)
-		colNames.insert(fq(headerData(i, Qt::Horizontal, int(dataPkgRoles::name)).toString()));
-
-	return colNames;
-}
+// The excision, Cut 4: columnIndexesToNames died with its last caller (the legacy
+// retype/reverse/toggle commands).
 
 int ExpandDataProxyModel::setColumnType(intset columnIndexes, int columnType)
 {
@@ -597,19 +455,21 @@ int ExpandDataProxyModel::setColumnType(intset columnIndexes, int columnType)
 		return columnType;
 	}
 
-	undoStack()->pushCommand(new SetColumnTypeCommand(dataSetSourceModel(), columnIndexesToNames(columnIndexes), columnType));
-
-	return columnType; //it always works
+	// The excision, Cut 4: the legacy retype command is gone; lane retypes take the
+	// schema_change path above and nothing else reaches here.
+	return columnType;
 }
 
 void ExpandDataProxyModel::columnReverseValues(intset columnIndexes)
 {
-	undoStack()->pushCommand(new ColumnReverseValuesCommand(dataSetSourceModel(), columnIndexesToNames(columnIndexes)));
+	Q_UNUSED(columnIndexes);
+	// The excision, Cut 4: value/label reversal was legacy-only (returns with the labels
+	// editor, B2).
 }
 
 void ExpandDataProxyModel::columnautoSortByValues(intset columnIndexes)
 {
-	undoStack()->pushCommand(new ColumnToggleAutoSortByValuesCommand(dataSetSourceModel(), columnIndexesToNames(columnIndexes)));
+	Q_UNUSED(columnIndexes);
 }
 
 void ExpandDataProxyModel::copyColumns(int startCol, const std::vector<Json::Value>& copiedColumns)
@@ -617,13 +477,9 @@ void ExpandDataProxyModel::copyColumns(int startCol, const std::vector<Json::Val
 	if (!sourceModel() || startCol < 0 || copiedColumns.size() == 0)
 		return;
 
-	DataSet * ds = dataSetSourceModel();
-	if (!ds)
-		return;
-
-	int rawStart = shownToRaw(startCol, false);
-	resize(0, startCol + copiedColumns.size() - 1);
-	undoStack()->endMacro(new CopyColumnsCommand(ds, rawStart, copiedColumns));
+	// The excision, Cut 4: column copying was legacy-only (it cloned Column serializations
+	// into the raw table); NEO column creation is the new-column editor's insertColsOp.
+	Log::log() << "ExpandDataProxyModel::copyColumns: legacy column-copy is gone — ignored" << std::endl;
 }
 
 Json::Value ExpandDataProxyModel::serializedColumn(int col)
