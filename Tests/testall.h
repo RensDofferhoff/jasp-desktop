@@ -23,8 +23,8 @@ private slots:
 	// The excision, Cut 3: testFilterRevisionInvalidatedRoundTrip died with DatabaseInterface
 	// (it pinned a sqlite filterLoad round-trip; filters are in-memory now).
 
-	// Filter cache-length regression: the engine result must be authoritative for the whole dataset.
-	void	testFilterSetFilterVectorResizesToResult();
+	// The excision, Cut 6: testFilterSetFilterVectorResizesToResult died with Filter's per-row
+	// mask — filters return as derived boolean columns.
 
 	// Computed-dataset cycle prevention: a computed dataset must not depend on a dataset that
 	// (transitively) depends on it, or the recompute cascade would livelock.

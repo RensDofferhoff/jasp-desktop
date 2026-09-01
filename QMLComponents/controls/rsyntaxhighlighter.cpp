@@ -28,8 +28,10 @@ RSyntaxHighlighter::RSyntaxHighlighter(QTextDocument *parent, VariableInfo * var
 {
 	if(!varInfo)
 	{
-		DataSet * shownDataSet = Workspace::singleton() ? Workspace::singleton()->shownDataSet() : nullptr;
-		varInfo = shownDataSet ? shownDataSet->shownFilter()->varInfo() : nullptr; //may stay null if no live dataset: VariableInfoConsumer guards on it
+		// The excision, Cut 6: the Workspace's varInfo is served by the injected form provider
+		// (ColumnsModel/DataSetProvider) — the shown Filter no longer carries one. May stay null
+		// if there is no live workspace: VariableInfoConsumer guards on it.
+		varInfo = Workspace::singleton() ? Workspace::singleton()->varInfo() : nullptr;
 	}
 	setVarInfo(varInfo);
 

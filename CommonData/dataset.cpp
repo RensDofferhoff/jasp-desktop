@@ -413,24 +413,14 @@ void DataSet::setRowCountMetadata(size_t rowCount)
 	// The LANE row count (applySchema/applyRevision): metadata ONLY — never materialize
 	// per-row value storage (gigabytes of dead weight on a large lane dataset; the grid
 	// reads cells through the view lane).
-	_rowCount = rowCount;
-
-	// The default filter's per-row mask, though, is LOAD-BEARING metadata: FilteredData's
-	// filterAcceptsRow, getRowFilter and — via Filter::rowCount = filtered().size() — every
-	// QModelIndex the forms' provider chain (Filter::provideInfo → VarInfoModelProxy) mints.
-	// With the mask empty, Filter::index(colIndex, 0) is invalid and VariableType lookups
-	// degrade to unknown (the min/max-levels class of bugs). v1 has no filter compaction:
-	// the mask is all-true at the dataset's extent (resize default-constructs true).
+	// The excision, Cut 6: the default filter's per-row mask resize died with the mask —
+	// filters return as derived boolean columns and no per-row vector ever exists in the
+	// frontend. The reset stays: views attached to this DataSet must learn the new extent
+	// (a bare int write never reaches a proxy's mapping; this runs on open and revision
+	// landings, both of which restart the consuming views anyway).
 	bool	rowDelta	= _rowCount != int(rowCount);
-	_rowCount		= int(rowCount);
+	_rowCount			= int(rowCount);
 
-	if (_defaultFilter)
-		_defaultFilter->setRowCount(size_t(rowCount));
-
-	// And because views/proxies may ALREADY be attached (the provider fixture attaches
-	// FilteredData before the schema lands), the new extent must be ANNOUNCED — a bare int
-	// write never reaches a QSortFilterProxyModel's mapping. A reset is honest: this runs on
-	// open and revision landings, both of which restart the consuming views anyway.
 	if (rowDelta)
 	{
 		beginResetModel();
@@ -745,8 +735,8 @@ QVariant DataSet::data(const QModelIndex &index, int role) const
 	JASPTIMER_SCOPE(DataSet::data);
 	
 	// The SCHEMA serves the metadata roles (the excision, Cut 5 — the legacy Column branch
-	// is gone), and the analysis-form provider chain reads through this model API
-	// (Filter → FilteredData → VarInfoModelProxy → provideInfo). Cell VALUES live in the
+	// is gone); the forms read the schema through the injected provider (Cut 6:
+	// ColumnsModel/DataSetProvider → provideInfo). Cell VALUES live in the
 	// view lane, never here: the value/display roles serve honest empties.
 	{
 		const ColumnInfo * info = schemaColumnAt(size_t(index.column()));
@@ -803,7 +793,7 @@ QVariant DataSet::headerData(int section, Qt::Orientation orientation, int role)
 			return QVariant(section + 1);
 			
 		case int(dataPkgRoles::filter):
-			return !(section >= 0 && shownFilter()->filtered().size() > 0) || shownFilter()->filtered()[section];
+			return true;	// the excision, Cut 6: the per-row mask died — v1 has no filter compaction; rows return filtered-out with derived boolean columns
 		}
 	else
 	{
@@ -921,15 +911,8 @@ void DataSet::handleDataSetChanged( int							dataSetID,
 
 
 
-bool DataSet::getRowFilter(int row) const
-{
-	const Filter * filter = shownFilter();
-	if(!filter)
-		return true;
-
-	const std::vector<bool> & filtered = filter->filtered();
-	return filtered.empty() || (row >= 0 && static_cast<size_t>(row) < filtered.size() && filtered[row]);
-}
+// The excision, Cut 6: DataSet::getRowFilter died with the default filter's per-row mask —
+// nothing serves row-filter state in the frontend anymore.
 
 QVariant DataSet::getDataSetViewLines(bool up, bool left, bool down, bool right)
 {

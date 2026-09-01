@@ -154,12 +154,34 @@ new producers on the existing rail.
       LabelEditorWindow derefs neutralized. **DatasetProvider note**: JASPQuickTest's 4-column
       fixture keeps working through the schema (TestLetters=5 levels, TestDoubles=5 numerics).
       Tests green: JASPTest 14 / QuickTest 63 / ColumnEncoder 5 / CsvPrev 8.
-- [ ] **Cut 6 — Filter internals + provider cutover**: Filter's guts (sqlite, boolvec,
-      LabelFilterGenerator, FilteredData, VarInfoModelProxy) go; the VariableInfoProvider
-      for forms becomes ColumnsModel (already schema-correct) — `AnalysisForm::
-      setAnalysisUp` and `Workspace` point at it unconditionally; wire schemaChanged →
-      provider refresh so forms update after edits. This CLOSES the "no variables /
-      no types" bug class permanently (the schema is the one home).
+- [x] **Cut 6 — Filter internals + provider cutover** (2026-09-02): `filtereddata.{h,cpp}` and
+      `varinfomodelproxy.{h,cpp}` DELETED; Filter is no longer a VariableInfoProvider and carries NO
+      per-row mask (`_filtered`/setFilterVector/setFilterValueNoDB/setRowCount/calculateFilteredRowCount/
+      filtered()/filteredRowCount/checkForUpdates/checkFilterResults/rowFiltered*/varInfo/provideInfo/
+      absorbInfo/providerModel/model-API overrides + the varInfo/filteredRowCount Q_PROPERTYs all gone) —
+      Filter keeps ONLY expression metadata (name/rFilter/generatedFilter/constructorJson/constructorR/
+      errorMsg/statusBarText/invalidated) + the datasetChanged rename-rewrite maintenance + the
+      setInvalidated→sendFilterByName engine trigger. **Provider cutover**: Workspace gained an injected
+      `formProvider()` slot (VariableInfoProvider*) — QMLComponents cannot see Desktop's ColumnsModel
+      (link DAG: QMLComponents→CommonData, JASPDesktopLib→QMLComponents), so **ColumnsModel self-registers**
+      into the Workspace in its ctor (desktop app) and **DataSetProvider self-registers** in its ctor +
+      resetDataSet (engine/test worlds — JASPQuickTest has no MainWindow/ColumnsModel; DataSetProvider is
+      already a schema-correct provider). `AnalysisForm::setAnalysisUp` points at Workspace::formProvider
+      unconditionally (the analysis'-filter/shown-Filter fallbacks + the ctor's filterChanged→setProvider
+      connect died); `RSyntaxHighlighter` falls back to `Workspace::varInfo()`; JAGSTextArea.qml binds
+      `form.varInfo`; FormulaParser callers (formulabase/formulasource) pass `form()->varInfo()->provider()`.
+      **ColumnsModel gained the missing provider-contract wiring**: its signals + per-dataset connects
+      (bindLane: schemaChanged/datasetChanged/columnTypeChanged/modelReset/dataChanged/emptyValuesChanged/
+      labelsReordered, all receiver=this so rebinds disconnect cleanly) now feed the VarInfoSignaller —
+      "schemaChanged → provider refresh" EXISTS; the relay-VariableInfo in its ctor (provider-less,
+      unconsumed) is gone; it also overrides `columnEncoder()` to serve the bound dataset's encoder.
+      **DataSet**: setRowCountMetadata no longer resizes the default filter's mask (the reset announce
+      stays); headerData's filter role returns true (v1: no filter compaction); getRowFilter deleted.
+      FilterModel::processFilterResult is a logged no-op (orphan slot — no connect sites since Cut 1);
+      ListModelFilteredDataEntry is mask-free (acceptedRows all-true; data-entry tables land with
+      data_view). Tests: testFilterSetFilterVectorResizesToResult died with the mask (14→13);
+      **13 JASPTest / 63 QuickTest (the provider gate — forms serve through DataSetProvider) / 5 / 8 green**.
+      Note: workspace.h now includes variableinfo.h directly (filter.h used to drag it in transitively).
 - [ ] **Cut 7 — sweep**: grep `_columns|column\(|Column \*|DatabaseInterface|DataSetSyncer`
       for survivors; remove now-dead QML (filter panels, label editor windows) or gate
       them; final handover consolidation.

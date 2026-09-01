@@ -5,6 +5,8 @@
 #include "mainwindow.h"
 #include "columnsmodel.h"
 #include "workspace.h"
+#include "columnencoder.h"
+#include "columninfo.h"
 
 ColumnsModel * ColumnsModel::_singleton = nullptr;
 
@@ -13,24 +15,25 @@ ColumnsModel::ColumnsModel()
 {
 	assert(!_singleton);
 	_singleton = this;
-	
-	auto * info = new VariableInfo(_singleton);
 
-	connect(this, &ColumnsModel::columnNamesChanged,					info, &VariableInfo::variableNamesChanged	);
-	connect(this, &ColumnsModel::columnsChanged,						info, &VariableInfo::variablesChanged		);
-
-	connect(this,						&ColumnsModel::labelsChanged,		info, &VariableInfo::labelsChanged			);
-	connect(this,						&ColumnsModel::labelsReordered,		info, &VariableInfo::labelsReordered		);
-	connect(this,						&ColumnsModel::filterChanged,		info, &VariableInfo::filterChanged			);
-	connect(this,						&ColumnsModel::dataSetChanged,		info, &VariableInfo::dataSetChanged			);
-	connect(this,						&QAbstractTableModel::modelReset,	info, &VariableInfo::rowCountChanged		);
-	connect(MainWindow::singleton(),	&MainWindow::dataAvailableChanged,			info, &VariableInfo::dataAvailableChanged	);
+	// The excision, Cut 6: ColumnsModel is THE VariableInfoProvider for forms. Its signals
+	// now feed the provider contract (the VarInfoSignaller that every form's VariableInfo
+	// connects to in VariableInfo::setProvider) — the relay-VariableInfo created here before
+	// (provider-less, unconsumed) is gone with Filter's provider role.
+	connect(this, &ColumnsModel::columnNamesChanged,				infoSignaller(), &VarInfoSignaller::variableNamesChanged	);
+	connect(this, &ColumnsModel::columnsChanged,					infoSignaller(), &VarInfoSignaller::variablesChanged		);
+	connect(this, &ColumnsModel::labelsChanged,					infoSignaller(), &VarInfoSignaller::labelsChanged			);
+	connect(this, &ColumnsModel::labelsReordered,					infoSignaller(), &VarInfoSignaller::labelsReordered		);
+	connect(this, &ColumnsModel::filterChanged,					infoSignaller(), &VarInfoSignaller::filterChanged			);
+	connect(this, &ColumnsModel::dataSetChanged,					infoSignaller(), &VarInfoSignaller::dataSetChanged		);
+	connect(this, &QAbstractTableModel::modelReset,				infoSignaller(), &VarInfoSignaller::rowCountChanged		);
+	connect(MainWindow::singleton(), &MainWindow::dataAvailableChanged,			infoSignaller(), &VarInfoSignaller::dataAvailableChanged	);
 
 	// Wide-data fix (2026-08-16): the cached dataset Terms (dataSetTerms()) must be rebuilt
 	// whenever the column set can have changed. Redundant invalidation is cheap (one lazy
 	// rebuild); a missed one would show stale variables, so err on the generous side.
-	connect(this, &ColumnsModel::columnNamesChanged,			this, [this](QMap<QString, QString>) { _dataSetTermsValid = false; });
-	connect(this, &ColumnsModel::dataSetChanged,				this, [this]() { _dataSetTermsValid = false; });
+	connect(this, &ColumnsModel::columnNamesChanged,				this, [this](QMap<QString, QString>) { _dataSetTermsValid = false; });
+	connect(this, &ColumnsModel::dataSetChanged,					this, [this]() { _dataSetTermsValid = false; });
 
 	// Multi-dataset fold (data-model-design.md §3.4): serve the SHOWN dataset; when it is
 	// orchestrator-backed the wire schema is the source of truth. The excision, Cut 5: the
@@ -38,9 +41,14 @@ ColumnsModel::ColumnsModel()
 	// "already schema-correct", per the excision handover).
 	if (DataSetPackage::pkg() && DataSetPackage::pkg()->workspace())
 	{
-		connect(DataSetPackage::pkg()->workspace(), &Workspace::shownDataSetChanged, this,
+		Workspace * workspace = DataSetPackage::pkg()->workspace();
+		connect(workspace, &Workspace::shownDataSetChanged, this,
 				[this](DataSet *) { bindLane(DataSetPackage::pkg()->workspace()->shownDataSet()); });
-		bindLane(DataSetPackage::pkg()->workspace()->shownDataSet());
+		bindLane(workspace->shownDataSet());
+
+		// The excision, Cut 6: register as the forms' provider (AnalysisForm::setAnalysisUp,
+		// RSyntaxHighlighter and Workspace::varInfo all ask the Workspace for it).
+		workspace->setFormProvider(this);
 	}
 }
 
@@ -65,12 +73,36 @@ void ColumnsModel::bindLane(DataSet * dataSet)
 	_laneDataSet = dataSet;
 
 	if (_laneDataSet)
+	{
 		connect(_laneDataSet, &DataSet::schemaChanged, this, [this]()
 		{
 			beginResetModel();
 			endResetModel();
+			_dataSetTermsValid = false;
 			emit dataSetChanged();
+
+			// The excision, Cut 6: this IS the "schemaChanged → provider refresh" wire — forms
+			// and their models re-query the schema through the VarInfoSignaller relays.
+			emit infoSignaller()->refresh();
+			emit infoSignaller()->dataSetChanged();
+			emit infoSignaller()->rowCountChanged();
+			emit infoSignaller()->variableCountChanged();
 		});
+
+		// The dataset-changed relays the late Filter used to own (its connectionCreation):
+		// rename/new/removed-column notifications keep the forms' variable lists live.
+		// Receiver is `this` (not the signaller itself) so a dataset switch disconnects them.
+		connect(_laneDataSet, &DataSet::datasetChanged, this, &ColumnsModel::datasetChanged);
+		connect(_laneDataSet, &DataSet::columnTypeChanged, this, [this](QString name)
+		{
+			const ColumnInfo * col = _laneDataSet ? _laneDataSet->schemaColumn(fq(name)) : nullptr;
+			emit infoSignaller()->variableTypeChanged(name, col ? col->type : columnType::unknown);
+		});
+		connect(_laneDataSet, &DataSet::modelReset,			this, [this]() { emit infoSignaller()->refresh();			});
+		connect(_laneDataSet, &DataSet::dataChanged,			this, [this]() { emit infoSignaller()->refresh();			});
+		connect(_laneDataSet, &DataSet::emptyValuesChanged,	this, [this]() { emit infoSignaller()->dataSetChanged();	});
+		connect(_laneDataSet, &DataSet::labelsReordered,	this, [this](QString colName) { emit infoSignaller()->labelsReordered(colName);	});
+	}
 
 	endResetModel();	// the ctor connects modelReset -> VariableInfo::rowCountChanged
 
@@ -267,6 +299,11 @@ bool ColumnsModel::absorbInfo(varInfoType info, const QString &colName, int row,
 	Q_UNUSED(row);
 	Q_UNUSED(value);
 	return false;
+}
+
+ColumnEncoder * ColumnsModel::columnEncoder()
+{
+	return _laneDataSet ? &_laneDataSet->encoder() : nullptr;
 }
 
 QHash<int, QByteArray> ColumnsModel::roleNames() const

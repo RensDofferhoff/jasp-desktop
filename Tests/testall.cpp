@@ -89,39 +89,8 @@ bool TestAll::_newPkgWithDataSet()
 // Desktop/data/importers and Desktop/data/exporters. Those formats return as lane
 // conversions in later NEO eras (refactor_design/HANDOVER-excision.md).
 
-void TestAll::testFilterSetFilterVectorResizesToResult()
-{
-	QVERIFY(_newPkgWithDataSet());
-
-	DataSet * ds = _pkg->dataSet();
-	QVERIFY(ds);
-	QVERIFY(ds->rowCount() > 0);
-
-	Filter * filter = ds->defaultFilter();
-	QVERIFY(filter);
-
-	const size_t originalRows = static_cast<size_t>(ds->rowCount());
-
-	//Seed a cache matching the current dataset.
-	boolvec initial(originalRows, true);
-	initial[0] = false;
-	filter->setFilterVector(initial);
-	QCOMPARE(filter->filtered().size(), originalRows);
-
-	//The dataset grew: the engine result is authoritative and must be adopted in full (new rows at
-	//the end get the engine's value), instead of silently dropping everything past the old size.
-	boolvec bigger(originalRows + 3, false);
-	bigger[0] = false, bigger[1] = true, bigger[bigger.size() - 1] = true;
-	filter->setFilterVector(bigger);
-	QCOMPARE(filter->filtered().size(), originalRows + 3);
-	QVERIFY(filter->filtered() == bigger);
-
-	//And when the result shrinks, stale tail rows must not survive.
-	boolvec smaller(originalRows - 2, true);
-	filter->setFilterVector(smaller);
-	QCOMPARE(filter->filtered().size(), originalRows - 2);
-	QVERIFY(filter->filtered() == smaller);
-}
+// The excision, Cut 6: testFilterSetFilterVectorResizesToResult died with Filter's per-row
+// mask (setFilterVector/filtered) — filters return as derived boolean columns.
 
 void TestAll::testComputedDataSetCycleDetection()
 {

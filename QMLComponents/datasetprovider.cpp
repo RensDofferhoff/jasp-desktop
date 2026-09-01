@@ -52,8 +52,12 @@ DataSetProvider::~DataSetProvider()
 DataSetProvider::DataSetProvider(bool inMemory, QObject *parent) : QAbstractTableModel(parent), _inMemory(inMemory)
 {
 	// The excision, Cut 3: the provider no longer owns a DatabaseInterface — its sqlite-backed
-	// loadDatabase/closeDatabase died with the class (.jasp persistence returns in a later era).
+	// loadDatabase/closeDatabase died with the class (.jasp persistence returns in a later NEO era).
 	_workspace = new Workspace();
+
+	// The excision, Cut 6: in the engine/test worlds there is no MainWindow/ColumnsModel —
+	// this provider (schema-correct since Cut 5) serves the forms itself.
+	_workspace->setFormProvider(this);
 
 	new VariableInfo(this);
 	_singleton = this;
@@ -65,6 +69,7 @@ void DataSetProvider::resetDataSet()
 		delete _workspace;
 	
 	_workspace = new Workspace(this);
+	_workspace->setFormProvider(this);	// the excision, Cut 6: re-register on the fresh Workspace
 	_workspace->createDataSet();
 }
 
@@ -151,6 +156,13 @@ void DataSetProvider::loadDataSet(const std::map<std::string, stringvec > & data
 
 	dataSet->applySchema("datasetprovider-fixture", rows, schema, "");
 
+	// The excision, Cut 6: this provider serves the forms — announce the fresh schema through
+	// the provider contract so any already-created VariableInfo re-queries (mirrors what
+	// ColumnsModel::bindLane does on schemaChanged in the desktop world).
+	emit infoSignaller()->refresh();
+	emit infoSignaller()->dataSetChanged();
+	emit infoSignaller()->rowCountChanged();
+	emit infoSignaller()->variableCountChanged();
 }
 
 QStringList DataSetProvider::_getColumnNames() const

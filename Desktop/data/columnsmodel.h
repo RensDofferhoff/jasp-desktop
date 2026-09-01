@@ -7,6 +7,7 @@
 #include "models/terms.h"
 
 class DataSet;
+class ColumnEncoder;
 
 /// 
 /// Model used by the filter-drag-n-drop to give all the columns and their datatypes
@@ -44,9 +45,12 @@ public:
 				QString						getColumnTransformedToolTip(const QString & name, columnType transformedTo)			const;
 	Q_INVOKABLE	QString						getColumnTransformedToolTip(const QString & name, int transformedTo)				const;
 
-				QVariant					provideInfo(varInfoType info, const QString& colName = "", int row = 0)		const	override;
-				bool						absorbInfo(	varInfoType info, const QString& name, int row, QVariant value)			override;
-				QAbstractItemModel		*	providerModel()																					override	{ return this;	}
+				QVariant				provideInfo(varInfoType info, const QString& colName = "", int row = 0)		const	override;
+				bool				absorbInfo(	varInfoType info, const QString& name, int row, QVariant value)			override;
+				QAbstractItemModel	*	providerModel()																				override	{ return this;	}
+				/// The excision, Cut 6: serve the bound dataset's own encoder (JAGS/R-syntax text
+				/// areas en-/decode against it instead of the process-global fallback).
+				ColumnEncoder		*	columnEncoder()																				override;
 
 	static		ColumnsModel			*	singleton()	{ return _singleton; }
 

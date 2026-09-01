@@ -51,6 +51,6 @@ TextArea
 	RSyntaxHighlighterQuick
 	{
 		textDocument:		parent.textDocument
-		varInfo:			form.filter.varInfo
+		varInfo:			form.varInfo	// the excision, Cut 6: the form's own varInfo (the filter no longer carries one)
 	}
 }

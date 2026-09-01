@@ -25,20 +25,12 @@ ListModelFilteredDataEntry::ListModelFilteredDataEntry(TableViewBase * parent)
 		_filterName = "ListModelFilteredDataEntry_" + std::to_string(counter++);
 	}
 	while(!Filter::filterNameIsFree(_filterName, dataSet));
-	
+
 	assert(parent->form());
 
-	//Connect to the (analysis) filter's varInfo so dataSet changes re-run the filter. Guard against
-	//form()->filter() being null before the analysis is set up, and (re)connect whenever it changes.
-	auto connectFilterVarInfo = [this, parent]()
-	{
-		if(parent->form()->filter())
-			connect(parent->form()->filter()->varInfo(), &VariableInfo::dataSetChanged, this, &ListModelFilteredDataEntry::dataSetChangedHandler, Qt::UniqueConnection);
-	};
-
-	connectFilterVarInfo();
-
-	connect(parent->form(), &AnalysisForm::filterChanged, this, connectFilterVarInfo);
+	// The excision, Cut 6: the (analysis) filter no longer carries a varInfo/provider —
+	// data-entry tables re-run when the form's own varInfo announces a dataset change.
+	connect(parent->form()->varInfo(), &VariableInfo::dataSetChanged, this, &ListModelFilteredDataEntry::dataSetChangedHandler, Qt::UniqueConnection);
 }
 
 ListModelFilteredDataEntry::~ListModelFilteredDataEntry()
@@ -81,24 +73,19 @@ void ListModelFilteredDataEntry::runFilter()
 
 void ListModelFilteredDataEntry::filterDoneHandler(int dataSetID, const QString &name, const QString & error)
 {
-	if(name.toStdString() != _filter->name() || _filter->data()->id() != dataSetID)
+	if(!_filter || name.toStdString() != _filter->name() || _filter->data()->id() != dataSetID)
 		return;
 
 	Log::log() << "ListModelFilteredDataEntry::filterDoneHandler for " << name << " and error '" << error << "'" << std::endl;
 
-	_filter->checkForUpdates();
-
-	setAcceptedRows(_filter->filtered());
-	
+	// The excision, Cut 6: the filter-result mask died — there is no per-row accept state
+	// to apply; data-entry values themselves return with data_view.
 	if(!error.isEmpty())
 		_tableView->addControlWarning(tr("Filter had error '%1'").arg(error));
 	else
 		_tableView->clearControlError();
-	
-	if(_filter->filteredRowCount() == 0)
-		runFilter();
-	else
-		informDataSetOfInitialValues();
+
+	informDataSetOfInitialValues();
 }
 
 void ListModelFilteredDataEntry::setAcceptedRows(std::vector<bool> newRows)
@@ -224,7 +211,8 @@ void ListModelFilteredDataEntry::initTableTerms(const TableTerms& terms)
 	setColName(	_tableTerms.colName	);
 	setExtraCol(_tableTerms.extraCol);
 
-	_acceptedRows = _filter->filtered();
+	// The excision, Cut 6: _acceptedRows used to copy the filter's result mask — gone.
+	_acceptedRows.clear();
 
 	_dataColumns	= _tableTerms.colNames;
 
@@ -249,10 +237,8 @@ void ListModelFilteredDataEntry::fillTable()
 	_tableTerms.rowNames.clear();
 	_tableTerms.values.clear();
 	
-	if(_filter)
-		_filter->checkForUpdates();
-	
-	size_t dataRows = _filter && _filter->filtered().size() > 0 ? _filter->filtered().size() : getDataSetRowCount();
+	// The excision, Cut 6: the mask read died with the mask — the row extent is the dataset's.
+	size_t dataRows = getDataSetRowCount();
 
 	if (_acceptedRows.size() != dataRows)
 		_acceptedRows = std::vector<bool>(dataRows, true);

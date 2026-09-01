@@ -4,6 +4,7 @@
 #include "qutils.h"
 #include "log.h"
 #include "undostack.h"
+#include "variableinfo.h"
 
 Workspace * Workspace::_singleton = nullptr;
 
@@ -105,6 +106,15 @@ DataSet *Workspace::shownDataSet() const
 	return _shownDataSet;
 }
 
+void Workspace::setFormProvider(VariableInfoProvider * provider)
+{
+	// The excision, Cut 6: the forms' provider is injected (ColumnsModel in the desktop app,
+	// DataSetProvider in the engine/test worlds) — the shown Filter no longer serves forms.
+	_formProvider = provider;
+	if (_varInfo)
+		_varInfo->setProvider(provider);
+}
+
 void Workspace::setShownDataSet(DataSet *dataSet)
 {
 	if(_shownDataSet == dataSet)
@@ -125,8 +135,10 @@ void Workspace::setShownDataSet(DataSet *dataSet)
 	_shownDataSet->encoder().setCurrentNames(_shownDataSet->getColumnTypesMap());
 	
 	connect(_shownDataSet, &DataSet::shownFilterChanged, this, &Workspace::shownFilterChanged, Qt::UniqueConnection);
-	
-	_varInfo->setProvider(_shownDataSet->shownFilter());
+
+	// The excision, Cut 6: the forms are served by the injected provider (ColumnsModel /
+	// DataSetProvider), never by the shown Filter's guts.
+	_varInfo->setProvider(_formProvider);
 			
 	emit shownDataSetChanged(_shownDataSet);
 	
@@ -194,7 +206,8 @@ void Workspace::showFilter(int id)
 	{
 		setShownDataSet(f->data());
 		f->data()->showFilter(f);
-		_varInfo->setProvider(f);
+		// The excision, Cut 6: the provider is the injected one (ColumnsModel/DataSetProvider),
+		// not the shown filter — repointing at f died with Filter's provider role.
 		refresh();
 	}
 }

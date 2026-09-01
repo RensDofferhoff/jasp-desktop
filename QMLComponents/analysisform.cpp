@@ -51,8 +51,9 @@ AnalysisForm::AnalysisForm(QQuickItem *parent) : QQuickItem(parent)
 
 	_rSyntax = new RSyntax(this);
 	_varInfo = new VariableInfo(nullptr, this);
-	
-	connect(this,									&AnalysisForm::filterChanged,					varInfo(),	&VariableInfo::setProvider	);
+
+	// The excision, Cut 6: this used to re-point the form's provider at the analysis' Filter
+	// whenever it changed — the provider is the Workspace-injected one now (see setAnalysisUp).
 
 	// _startRSyntaxTimer is used to call setRSyntaxText only once in a event loop.
 
@@ -691,11 +692,10 @@ void AnalysisForm::setAnalysisUp()
 	Log::log() << "AnalysisForm::setAnalysisUp() for " << this << std::endl;
 
 	{
-		VariableInfoProvider* fallback = Workspace::singleton() ? Workspace::singleton()->shownFilter() : nullptr;
-		if (_analysis->filter())
-			varInfo()->setProvider(_analysis->filter());
-		else if (fallback)
-			varInfo()->setProvider(fallback);
+		// The excision, Cut 6: forms are served by the Workspace-injected provider
+		// (ColumnsModel in the desktop app, DataSetProvider in the engine/test worlds) —
+		// never by the analysis'/shown Filter's guts. The schema is the one home.
+		varInfo()->setProvider(Workspace::singleton() ? Workspace::singleton()->formProvider() : nullptr);
 	}
 
 	blockValueChangeSignal(true);
@@ -1262,9 +1262,8 @@ Json::Value AnalysisForm::_controlOptionMeta(JASPControl* ctrl, bool includeDesc
 			entry["single"] = listCtrl->maxRows() == 1;
 
 			// NEO (data-model-design.md §3.6): no raw DataSet* handout — query the provider bound
-			// to this form (the analysis' own filter, else the Workspace shown-filter fallback,
-			// see setAnalysisUp), which serves the active lane dataset's schema as well as legacy
-			// imports.
+			// to this form (the Workspace-injected form provider, see setAnalysisUp), which serves
+			// the active lane dataset's schema as well as legacy imports.
 			VariableInfoProvider* provider = _varInfo ? _varInfo->provider() : nullptr;
 			if (provider)
 			{

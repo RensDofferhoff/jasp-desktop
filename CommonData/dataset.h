@@ -314,9 +314,8 @@ public:
 	// surface) died with Column.
 	
 protected:
-	bool					getRowFilter(int row)						const;
-		
-		
+	// The excision, Cut 6: getRowFilter died with the default filter's per-row mask.
+	
 private:
 	Workspace			*	_workspace				= nullptr;
 	ColumnEncoder		*	_encoder				= nullptr;

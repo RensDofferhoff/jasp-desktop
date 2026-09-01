@@ -4,7 +4,10 @@
 #include <set>
 #include "dataset.h"
 #include "datasetbasenode.h"
+#include "variableinfo.h"	// the excision, Cut 6: no longer dragged in transitively by filter.h
 // The excision, Cut 3: the databaseinterface.h include died with the class.
+
+class VariableInfoProvider;	///< the excision, Cut 6: the form provider is injected (ColumnsModel/DataSetProvider)
 
 class Workspace : public DataSetBaseNode
 {
@@ -65,8 +68,13 @@ public:
 	///sweep before running the recompute cascade.
 	bool							computedDataSetsHaveLoop(std::string & errorMessage) const;
 	static	Workspace			*	singleton() { return _singleton; }
-	
-	
+
+	// The excision, Cut 6: the VariableInfoProvider for forms is no longer the shown Filter —
+	// it is injected here (ColumnsModel in the desktop app; DataSetProvider in the engine/test
+	// worlds). Both are schema-correct; Workspace only routes the pointer.
+	void					setFormProvider(VariableInfoProvider * provider);
+	VariableInfoProvider	*	formProvider() const { return _formProvider; }
+
 public slots:
 			void					refresh();
 			DataSet				*	createDataSet();
@@ -132,6 +140,7 @@ private:
 	std::map<int,DataSet*>			_dataSets;
 	DataSet						*	_shownDataSet			= nullptr;
 	VariableInfo				*	_varInfo				= nullptr;
+	VariableInfoProvider	*	_formProvider			= nullptr;
 	bool							_showRSyntax			= false,
 									_dataMode				= false,
 									_inRefresh				= false; //instance flag (not static): works across Workspace instances
