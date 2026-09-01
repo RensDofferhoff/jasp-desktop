@@ -940,6 +940,19 @@ QT_QPA_PLATFORM=offscreen build/Desktop_Qt_6_11_0-Debug/Tests/JASPTest testSavLa
   KNOWN residual (accepted v1): a positional op queued behind a geometry-changing edit
   re-stamps and lands at shifted coordinates — refusal via intervening invalidation
   descriptors is a later refinement if it ever bites.
+- **VIEW WORK-ID REUSE (found + fixed 2026-09-01, the fast-undo smoke)**: rapid
+  undo/redo killed the view ("…" in every cell, no recovery). The chain: ViewFiller's
+  `_nextWork` counter was PER-INSTANCE starting at 0, and the filler is recreated on every
+  view restart — so every restart re-minted `data-view-0/1`. The stop-time abort erased the
+  client slot, but a late result already in flight then landed in the NEW filler's
+  same-named slot (a `complete` is terminal → slot burned), the new buffer correctly
+  rejected the stale chunk (Failed state), and the REAL chunk arrived to no handler — dead
+  view until a viewport move. The same collision could also aim a stop-time abort at a
+  restarted fetch. Fix: view work ids are a PROCESS-GLOBAL monotonic
+  (`g_nextViewWork` in viewfiller.cpp) — a restarted view NEVER reuses an id, late results
+  find no slot and drop harmlessly. (The header comment claimed "fresh ids" all along;
+  the counter reset violated it. NB the earlier 'transient' 0ms test failure was a typo'd
+  test name — `testUndoColumnDropLevels`, an L — not a flake.)
 
 - **THE RACE (found 2026-08-31, the rename smoke test — REAL)**: ~~UNFIXED~~ **FIXED
   2026-09-01 — the edit chain; see §6's first bullet for the full design.**

@@ -78,7 +78,8 @@ private:
 
 	std::string				_datasetId;	///< the orchestrator dataset id — every data-view request names it
 	DataViewBuffer	*	_buffer;
-	int					_nextWork		= 0;	///< data-view-N work_id counter (fresh ids — staleness is revision-stamped, not superseded)
+	///< view work ids are PROCESS-GLOBAL (see the counter in the .cpp) — never reset here,
+	///< or a restarted view reuses in-flight ids and its late results burn the new slots
 	bool				_filling		= false;
 	bool				_inFlight		= false;
 	bool				_planning		= false;	///< re-entrancy guard: eviction emits chunksEvicted → view rebuild → viewportChangedDelayed → setViewport → requestNext

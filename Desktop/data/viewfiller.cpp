@@ -7,7 +7,17 @@
 #include "log.h"
 
 #include <QLocale>
+#include <atomic>
 #include <string>
+
+/// View work ids are PROCESS-GLOBAL monotonics — NEVER per-filler counters. A restarted
+/// view's fetches must not reuse an id whose late result is still in flight: the client's
+/// slot map would hand the stale chunk to the NEW filler's handler (a `complete` burns the
+/// slot — the real chunk then arrives to no handler), the new buffer rejects the stale
+/// chunk (Failed state), and the view shows placeholders with nothing left to deliver —
+/// the 2026-09-01 fast-undo death ("…" in every cell, no recovery). Uniqueness also keeps
+/// the stop-time abort from ever hitting a restarted fetch that happened to reuse the id.
+static std::atomic<int64_t> g_nextViewWork{0};
 
 ViewFiller::ViewFiller(const std::string & datasetId, DataViewBuffer * buffer, QObject * parent)
 	: QObject(parent)
@@ -196,7 +206,7 @@ void ViewFiller::requestNext()
 		return;
 	}
 
-	const std::string workId = "data-view-" + std::to_string(_nextWork++);
+	const std::string workId = "data-view-" + std::to_string(g_nextViewWork.fetch_add(1));
 
 	Json::Value payload(Json::objectValue);
 	payload["op"]			= "data_view";
