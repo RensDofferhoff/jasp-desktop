@@ -4,6 +4,7 @@
 #include <QIdentityProxyModel>
 #include "utils.h"
 #include "undostack.h"
+#include "json/json.h"
 
 class ExpandDataProxyModel : public QIdentityProxyModel
 {
@@ -19,11 +20,9 @@ public:
 	bool						setData(			const QModelIndex &index, const QVariant &value, int role)								override;
 	Qt::ItemFlags				flags(				const QModelIndex &index)														const	override;
 	QModelIndex					index(				int row, int column, const QModelIndex &parent = QModelIndex())					const	override;
-	QModelIndex					parent(				const QModelIndex &index)														const	override;
-	
-	DataSet					*	dataSetSourceModel() const;
+	QModelIndex					parent(				const QModelIndex &index)									const	override;
 
-	bool						isRowVirtual(		int row)																		const;
+	bool						isRowVirtual(		int row)		const;
 	bool						isColumnVirtual(	int col)																		const;
 	bool						expandDataSet()																						const { return _expandDataSet; }
 	void						setExpandDataSet(	bool expand)																			{ _expandDataSet = expand; }
@@ -40,7 +39,7 @@ public:
 	void						columnReverseValues(intset columnIndexes);
 	void						columnautoSortByValues(intset columnIndexes);
 	void						copyColumns(		int startCol, const std::vector<Json::Value>& copiedColumns);
-	Json::Value					serializedColumn(	int col);
+	// The excision, Cut 5: serializedColumn died with legacy Column storage.
 
 	UndoStack				*	undoStack()			{ return UndoStack::singleton(); }
 	void						undo()				{ if (undoStack()) undoStack()->undo(); }
@@ -66,17 +65,14 @@ private:
 	void					connectUndoStack();
 
 	/// The NEO GridModel source's SHOWN dataset, when the source is a GridModel holding a
-	/// LIVE (open) dataset — nullptr for a legacy DataSetTableModel source or nothing shown.
-	/// The edit surface's gate: legacy edits flow through dataSetSourceModel(), NEO edits
-	/// through this — both funnel into commands on the same stack.
+	/// The NEO GridModel source's SHOWN dataset, when the source is a GridModel holding a
+	/// LIVE (open) dataset — nullptr otherwise. The edit surface's gate.
 	DataSet			*	gridSourceDataSet() const;
 
-	// Convert a shown (filtered/compacted) index into the raw DataSet index for that dimension.
-	// Indexes past the shown region map to the end of the raw table (for appends).
+	// Convert a shown index into the raw DataSet index — identity (the NEO view has no
+	// filter compaction; the excision, Cut 5).
 	int							shownToRaw(int shownIndex, bool isRow) const;
-	// Turn a contiguous run of shown indexes into a list of contiguous raw-index runs (collapsing gaps).
-	std::vector<std::pair<int,int>>	rawRunsFromShown(bool isRow, int shownStart, int shownCount) const;
-	// Remove only the shown rows/columns (as a macro of contiguous commands, high-index first).
+	// Remove shown rows/columns — inert (the lane rail has no delete op yet; Cut 4/5).
 	void						removeRuns(bool isRows, const std::vector<std::pair<int,int>>& shownGroups);
 
 	QMetaObject::Connection		_undoChangedCon;

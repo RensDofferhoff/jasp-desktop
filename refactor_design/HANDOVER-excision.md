@@ -113,11 +113,47 @@ new producers on the existing rail.
       columnIndexesToNames orphaned and deleted). datasetview.cpp:201 stale comment removed.
       QML-facing signatures all kept (Cut 7 sweeps the callers). Tests: 14 JASPTest /
       5 ColumnEncoder / 8 CsvPrev / 63 QuickTest green; orphan grep clean.
-- [ ] **Cut 5 — Column + mirror paths + DataSetTableModel**: delete Column; DataSet's
-      model-API legacy branches become THE implementation; getColumnIndex/column serve
-      schema (or die if nothing needs them); ExpandDataProxyModel loses its legacy arm
-      (GridModel only); ColumnModel's legacy branches die (adapter = the only path);
-      label editor guts go (B2 rebuilds it).
+- [x] **Cut 5 — Column + mirror paths + DataSetTableModel** (2026-09-01): `column.{h,cpp}`
+      (3.4k lines), `label.{h,cpp}`, `datasettablemodel.{h,cpp}`, `labelfiltergenerator.{h,cpp}`
+      (pulled forward from Cut 6 — its Label/Column deps died here) + stale checked-in
+      `internalDbDefinition.h`/`createIndexes.h` all DELETED. **DataSet**: the wire schema is
+      THE implementation — `_columns`/`_shownColumn`/`_changedDuringBatch` gone; every
+      Column* accessor + the legacy write API (insert/remove/create/computed/paste/·
+      reverse/autoSort/columnsApply/reorder/resetVariableTypes/setColumnTypes/insertRows·
+      Columns·removeRows·Columns as real ops...) deleted; model write overrides are inert
+      (`setData`→false etc., vtable-honest); `getColumnIndex` serves the schema; model-API
+      (data/headerData/flags/columnCount) schema-only; inert-but-kept:
+      `columnsLabelFilteredCount()`→0 (QML binds it), `resetAllFilters` signals-only.
+      **Signals died**: labelChanged(Column*)/shownColumnChanged/labelFilterChanged/
+      columnTypeChanged kept (schema type changes re-emit it). **ID minting note**: the
+      default filter's per-row mask is LOAD-BEARING metadata — `setRowCountMetadata` now
+      resizes it all-true (boolvec value-initializes false!) AND emits a model reset, or the
+      Filter/FilteredData/VarInfoModelProxy chain serves unknown types + 0 rows (the
+      min/max-levels QML test caught this). **Workspace**: shownColumn/createComputedColumn/
+      initializeComputedColumns/computedColumnSucceeded/updateComputedColumnDependenciesFor
+      Analysis/checkForDependentAnalyses(Column*) chain (Column → Workspace → DataSetPackage
+      → Analyses) deleted. **Analysis/Analyses**: computed-column machinery inert (handlers
+      log + no-op, isColumnFreeOrMine→true, isOwnComputedColumn→false, createdVariables→{},
+      asJSON columns list empty); checkForDependentAnalyses deleted. **MainWindow**:
+      _datasetTableModel + its 4 connects gone; ColumnsModel ctor takes no arg; addNewDataSet/
+      generateEmptyData play a 1×1 scale lane fixture via applySchema. **ColumnsModel**:
+      schema-only (no table fallback). **ExpandDataProxyModel**: legacy arm GONE —
+      dataSetSourceModel/rawRunsFromShown/serializedColumn deleted, shownToRaw = identity,
+      insert/remove/resize/copyColumns inert (lane rail has no structural delete op yet;
+      growth is remote). **ColumnModel**: adapter = only path — column() accessor,
+      17 legacy label-editor fns + the computed-column editor deleted (QML guarded), lane
+      schema paths untouched. **DataSetProvider**: plays a lane fixture — loadDataSet infers
+      wire types/levels/distinct counts from the string data and applySchema's them;
+      provideInfo serves from the schema (no row values). **Filter::provideInfo** answers
+      VariableType/TotalLevels/TotalNumericValues/Labels/ColumnDescription from the SCHEMA
+      directly for lane-bound datasets (the legacy FilteredData path returned 0 for scale
+      levels — broke the levels checks); this is the minimal preview of Cut 6's cutover.
+      **VariableInfo**: labelChanged(const Column*) removed. **QML guarded** (Cut 7 sweeps):
+      VariablesWindow (ComputeColumnWindow instantiation removed, label editor disabled,
+      missing-values panel hidden), ColumnBasicInfo (show-parent-analysis hidden),
+      LabelEditorWindow derefs neutralized. **DatasetProvider note**: JASPQuickTest's 4-column
+      fixture keeps working through the schema (TestLetters=5 levels, TestDoubles=5 numerics).
+      Tests green: JASPTest 14 / QuickTest 63 / ColumnEncoder 5 / CsvPrev 8.
 - [ ] **Cut 6 — Filter internals + provider cutover**: Filter's guts (sqlite, boolvec,
       LabelFilterGenerator, FilteredData, VarInfoModelProxy) go; the VariableInfoProvider
       for forms becomes ColumnsModel (already schema-correct) — `AnalysisForm::

@@ -529,20 +529,17 @@ void TestAll::testLaneDatasetsHaveNoMirrorColumns()
 		laneColumn("group", "nominal", {"A", "B"}),
 	}), 3);
 
-	// After the open: no mirror, and the counts serve the SCHEMA (not _columns).
-	QVERIFY(dataSet->columns().empty());
-	QVERIFY(dataSet->column("score") == nullptr);
+	// After the open: the counts serve the SCHEMA (the excision, Cut 5 removed columns()/
+	// column() entirely — the mirror cannot come back, there is nothing to come back TO).
 	QCOMPARE(dataSet->columnCount(),		2);
 	QCOMPARE(int(dataSet->schema().size()),	2);
 
 	// After a schema-carrying revision (a rename + a column DROP — the old mirror's
-	// grow-only failure mode): still no mirror, counts still honest.
+	// grow-only failure mode): counts still honest.
 	dataSet->applyRevision(1, 3, true, laneSchema({
 		laneColumn("points", "scale"),	// renamed (P4)
 	}), Json::Value(Json::objectValue));
 
-	QVERIFY(dataSet->columns().empty());
-	QVERIFY(dataSet->column("points") == nullptr);
 	QCOMPARE(dataSet->columnCount(),		1);
 	QCOMPARE(dataSet->schemaColumnIndex("score"),	-1);	// the old name is GONE
 	QCOMPARE(dataSet->schemaColumnIndex("points"),	0);

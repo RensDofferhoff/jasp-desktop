@@ -214,7 +214,7 @@ FocusScope
 				height:				33 * jaspTheme.uiScale
 				width:				columnModel.compactMode ? height : 0
 				iconSource:			jaspTheme.iconPath + "collapse.png"
-				onClicked:			{ computedColumnWindow.askIfChangedOrClose(); columnModel.visible = false }
+				onClicked:			{ columnModel.visible = false }
 				toolTip:			qsTr("Close variable window")
 				radius:				height
 				visible:			columnModel.compactMode
@@ -303,10 +303,9 @@ FocusScope
 					topMargin:	jaspTheme.generalAnchorMargin * 0.25
 				}
 
-				ComputeColumnWindow
-				{
-					id: computedColumnWindow
-				}
+				// The excision, Cut 5: ComputeColumnWindow dereffed columnModel.column (a legacy
+				// Column) — computed columns return as derivations; the window returns with them.
+				// (was: ComputeColumnWindow { id: computedColumnWindow })
 
 				Rectangle
 				{
@@ -319,13 +318,13 @@ FocusScope
 						id:						columnHasLabels
 						label:					qsTr("Use labels")
 						checked:			columnModel.hasLabels
-						onCheckedChanged:	if(columnModel.column) columnModel.setHasLabelsQ(checked)
+						onCheckedChanged:	// The excision, Cut 5: hasLabels rode the legacy Column (B2 rebuilds on the jasp:labels overlay)
 					}
 				
 					LabelEditorWindow
 					{
 						id:					labelEditonWindow
-						enabled:			columnModel.column && columnModel.column.hasLabels
+						enabled:			false	// The excision, Cut 5: the label editor rode the legacy Column (B2)
 						height:				labelsView.height - y
 						opacity:			enabled ? 1 : .5
 						anchors
@@ -340,34 +339,13 @@ FocusScope
 
 				Rectangle
 				{
-					id:			missingValuesView
+					id:		missingValuesView
 					color:		jaspTheme.uiBackground
-					enabled:	!columnModel.isVirtual
-
-					CheckBox
-					{
-						id:					useCustomValues
-						label:				qsTr("Use custom values")
-						checked:			columnModel.useCustomEmptyValues
-						onCheckedChanged:	columnModel.useCustomEmptyValues = checked
-					}
-
-					PrefsMissingValues
-					{
-						id:					missingValues
-						height:				missingValuesView.height - y
-						anchors
-						{
-							top:		useCustomValues.bottom
-							left:		parent.left
-							margins:	jaspTheme.generalAnchorMargin
-						}
-						enabled:			useCustomValues.checked
-						showTitle:			false
-						model:				columnModel
-						resetButtonTooltip: qsTr("Reset missing values with the ones set in your workspace")
-						splitMe:			true
-					}
+					// The excision, Cut 5: the custom-empty-values panel rode the legacy Column
+					// (per-column empty values were a legacy loading concept). Returns with a
+					// NEO-era design.
+					visible:	false
+					enabled:	false
 				}
 			
 				ColumnBasicInfo

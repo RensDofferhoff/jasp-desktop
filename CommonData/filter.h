@@ -15,7 +15,7 @@ class DataSet;
 class VariableInfo;
 class FilteredData;
 class VarInfoModelProxy;
-class LabelFilterGenerator;
+// The excision, Cut 5: the LabelFilterGenerator fwd-decl died with the class (B2).
 // The excision, Cut 3: the DatabaseInterface forward declaration is gone with the class.
 
 ///Interface to sqlite Filters table
@@ -175,7 +175,8 @@ private:
 	stringset					_columnsInConstructorJson,
 								_columnsUsedInRFilter;
 	QString						_statusBarText;
-	LabelFilterGenerator	*	_labelGen			= nullptr;
+	// The excision, Cut 5: _labelGen (LabelFilterGenerator) died with Label/Column.
+	// (The pointer member is removed entirely; Cut 6 guts the rest of Filter.)
 	FilteredData			*	_rowFilteredData	= nullptr;
 	VarInfoModelProxy		*	_rowFilteredVarInfo	= nullptr;
 	VariableInfo			*	_varInfo			= nullptr;

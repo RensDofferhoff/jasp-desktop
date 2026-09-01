@@ -198,11 +198,11 @@ signals:
 				void				sendFilterByName(	int dataSetID, const QString & name, const QString & module);
 				void				filtersCountChanged();
 				void				workspaceChanged();
-				void				runComputedColumn(int dataSetId, QString columnName, QString code, columnType columnType);
 				void				runComputedDataSet(int dataSetId, QString code, int defaultInputFilterId);
 				void				filterByNameDone(int dataSetId, const QString &name, const QString &error);
 				void				manualEditsChanged();
-				void				checkForDependentAnalyses(Column * column);
+				// The excision, Cut 5: runComputedColumn + checkForDependentAnalyses(Column*) relay
+				// signals died with Column (computed columns return as derivations).
 				
 public slots:
 				void				refreshColumn(						QString columnName);
@@ -217,12 +217,6 @@ public slots:
 				void				prepareForLanguageChange();
 				void				languageChangeDone();
 				void				handleAutoSavePrefChange();
-				
-private:
-				void				columnsApply(int dataSetId, intset	columnIndxs, std::function<bool (Column *)>				applyThis);
-				void				columnsApply(int dataSetId, stringset	columnNames, std::function<bool (Column *)>				applyThis);
-				void				columnsApply(int dataSetId, intset	columnIndxs, std::function<bool (Column *, int)>	applyThis);
-				void				columnsApply(int dataSetId, stringset	columnNames, std::function<bool (Column *, int)>	applyThis);
 
 private:
 	static DataSetPackage	*	_singleton;

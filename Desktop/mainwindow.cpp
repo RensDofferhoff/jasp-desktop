@@ -141,8 +141,7 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 			ws->applyLaneRevision(datasetId.toStdString(), revision, rows, hasRows, schema, invalidation);
 		});
 
-	_datasetTableModel		= new DataSetTableModel(this);
-	_columnModel			= new ColumnModel();
+	_columnModel				= new ColumnModel();
 	// NEO data view (data-view-design §7.3 — the burn-down seam): the grid's `dataSetModel`
 	// IS this GridModel, bound to the shown dataset + its view lane (multi-dataset fold). The legacy
 	// chain above keeps compiling (ColumnModel, label editor) but the grid never reads it
@@ -157,7 +156,7 @@ MainWindow::MainWindow(Application * application) : QObject(application), _appli
 
 		_resultsJsInterface		= new ResultsJsInterface();
 	_odm					= new OnlineDataManager(this);
-	_columnsModel			= new ColumnsModel(_datasetTableModel);			// We do not want filtered-out columns/levels to be selectable in other guis, see: https://github.com/jasp-stats/INTERNAL-jasp/issues/2322
+	_columnsModel			= new ColumnsModel();			// We do not want filtered-out columns/levels to be selectable in other guis, see: https://github.com/jasp-stats/INTERNAL-jasp/issues/2322
 	_workspaceModel			= new WorkspaceModel(this);
 	_filterModel			= new FilterModel(this);
 	_ribbonModel			= new RibbonModel();
@@ -520,7 +519,6 @@ void MainWindow::makeConnections()
 	connect(_package,				&DataSetPackage::showWarning,						_msgForwarder,			&MessageForwarder::showWarningQML,							Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::workspaceEmptyValuesChanged,		_analyses,				&Analyses::refreshAllAnalyses								);
 	connect(_package,				&DataSetPackage::refreshAllAnalyses,		_analyses,				&Analyses::refreshAllAnalysesOfFilter,				Qt::QueuedConnection);
-	connect(_package,				&DataSetPackage::shownDataSetChanged,		_datasetTableModel,		&DataSetTableModel::handleDataSetChange				);
 	connect(_package,				&DataSetPackage::shownDataSetChanged,		this,				&MainWindow::updateShownFilterInQmlContext			);
 	// Legacy per-dataset sync wiring REMOVED with DataSetSyncer (the excision, Cut 1):
 	// DataSet::syncRequired is gone; sync returns as a backend feature (P14). AsyncLoader's
@@ -537,8 +535,8 @@ void MainWindow::makeConnections()
 	// NEO: runComputedColumn / runComputedDataSet used to route to EngineSync::computeColumn / computeDataSet.
 	// Computation must route through the orchestrator R lane (R-utility-lane roadmap item) — until then
 	// the signals have no connection here (the UI must fail loudly, not silently — merge-multidataset.md §6).
-	connect(_package,				&DataSetPackage::checkForDependentAnalyses,_analyses,				&Analyses::checkForDependentAnalyses);
-	connect(_package,				&DataSetPackage::workspaceEmptyValuesChanged,		_datasetTableModel,		&DataSetTableModel::emptyValuesChanged			);
+	// The excision, Cut 5: checkForDependentAnalyses relayed a Column* through Workspace →
+	// DataSetPackage → Analyses; the whole chain died with Column.
 
 	qRegisterMetaType<columnType>();
 	qRegisterMetaType<ListModel*>();
@@ -575,9 +573,7 @@ void MainWindow::makeConnections()
 	connect(_resultsJsInterface,	&ResultsJsInterface::resultsPageLoadedSignal,		_languageModel,			&LanguageModel::resultsPageLoaded,							Qt::QueuedConnection);
 	connect(_resultsJsInterface,	&ResultsJsInterface::showRSyntaxInResults,			_analyses,				&Analyses::showRSyntaxInResults								);
 
-	connect(_columnModel,			&ColumnModel::columnNameForIndex,					_datasetTableModel,		&DataSetTableModel::columnName								);
-
-	connect(_analyses,				&Analyses::countChanged,							this,					&MainWindow::analysesCountChangedHandler					);
+	connect(_analyses,			&Analyses::countChanged,			this,				&MainWindow::analysesCountChangedHandler			);
 	connect(_analyses,				&Analyses::analysisResultsChanged,					this,					&MainWindow::analysisResultsChangedHandler					);
 	connect(_analyses,				&Analyses::analysisImageSaved,						this,					&MainWindow::analysisImageSavedHandler						);
 	connect(_analyses,				&Analyses::emptyQMLCache,							this,					&MainWindow::resetQmlCache									);
@@ -630,9 +626,8 @@ void MainWindow::makeConnections()
 	connect(_preferences,			&PreferencesModel::remoteConfigurationChanged,		_jaspConfiguration,		&JASPConfiguration::remoteChanged							);
 	connect(_preferences,			&PreferencesModel::remoteConfigurationURLChanged,	_jaspConfiguration,		&JASPConfiguration::remoteChanged							);
 	connect(_preferences,			&PreferencesModel::useConfigurationFileChanged,		_jaspConfiguration,		&JASPConfiguration::processConfiguration					);
-	connect(_preferences,			&PreferencesModel::orderByValueByDefaultChanged,	[&](){	Column::setAutoSortByValuesByDefault(PreferencesModel::prefs()->orderByValueByDefault()); });
-
-	Column::setAutoSortByValuesByDefault(PreferencesModel::prefs()->orderByValueByDefault());
+	// The excision, Cut 5: Column::setAutoSortByValuesByDefault died with Column — label
+	// autosorting returns with the labels editor (B2), driven by the lane then.
 	
 	auto * dCSingleton = DesktopCommunicator::singleton();
 
@@ -1183,10 +1178,17 @@ void MainWindow::addNewDataSet()
 
 	_package->workspace()->setShownDataSet(newSet);
 
-	newSet->setColumnCount(1);
-	newSet->setRowCount(1, false);
-	newSet->column(0)->initFromLookups(newSet->freeNewColumnName(0), 1, [](size_t){return "";}, [](size_t){return "";}, "", columnType::scale, {}, PreferencesModel::prefs()->thresholdScale(), PreferencesModel::prefs()->orderByValueByDefault());
-
+	// The excision, Cut 5: the empty dataset used to materialize a legacy Column — play a
+	// minimal lane schema instead ("New Data" = a 1×1 scale sheet).
+	Json::Value schema(Json::arrayValue);
+	Json::Value col(Json::objectValue);
+	col["name"]				= "New Column";
+	col["display_name"]	= "New Column";
+	col["type"]				= "scale";
+	col["value_count"]		= Json::UInt64(1);
+	col["distinct_count"]	= Json::UInt64(0);
+	schema.append(col);
+	newSet->applySchema("new-data", 1, schema, "");
 }
 
 void MainWindow::open(const Json::Value & dbJson)
@@ -1522,20 +1524,10 @@ void MainWindow::registerRpcHandlers()
 			if (type == columnType::nominal || type == columnType::nominalText || type == columnType::ordinal)
 			{
 				// NEO (data-model-design.md §3.6): lane datasets answer from the wire schema
-				// (levels from the wire schema) — but only when the info is asked for the SHOWN dataset,
-				// carried on the DataSet itself. Legacy imports and background
-				// datasets keep the Column path.
-				if (ds->isOpen())
-				{
-					if (const ColumnInfo * columnInfo = ds->schemaColumn(name))
-						col["distinctCount"] = static_cast<int>(columnInfo->levels.size());
-				}
-				else
-				{
-					Column * column = ds->column(name);
-					if (column)
-						col["distinctCount"] = static_cast<int>(column->labelsNonEmptyCount());
-				}
+				// (levels from the wire schema) — carried on the DataSet itself. The excision,
+				// Cut 5: the legacy Column fallback is gone; the schema is the one home.
+				if (const ColumnInfo * columnInfo = ds->schemaColumn(name))
+					col["distinctCount"] = static_cast<int>(columnInfo->levels.size());
 			}
 
 			columns.append(col);

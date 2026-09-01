@@ -4,52 +4,38 @@
 #include "dataenums.h"
 #include "mainwindow.h"
 #include "columnsmodel.h"
-#include "dataset.h"
 #include "workspace.h"
 
 ColumnsModel * ColumnsModel::_singleton = nullptr;
 
-ColumnsModel::ColumnsModel(DataSetTableModel *tableModel) 
-: QAbstractTableModel(tableModel), _tableModel(tableModel)
+ColumnsModel::ColumnsModel()
+: QAbstractTableModel(nullptr)
 {
 	assert(!_singleton);
 	_singleton = this;
-	
-	connect(_tableModel, &DataSetTableModel::columnTypeChanged,		this, &ColumnsModel::columnTypeChanged	);
-	connect(_tableModel, &DataSetTableModel::labelChanged,			this, [&](const Column * col, QString orgLabel, QString newLabel) { emit labelsChanged(col->nameQ(), QMap<QString, QString>{std::make_pair(orgLabel, newLabel) }); } );
-	connect(_tableModel, &DataSetTableModel::labelsReordered,		this, &ColumnsModel::labelsReordered	);
-	connect(_tableModel, &DataSetTableModel::emptyValuesChanged,	this, &ColumnsModel::dataSetChanged		);
-	connect(_tableModel, &DataSetTableModel::modelReset,			this, &ColumnsModel::refresh			);
-	connect(_tableModel, &DataSetTableModel::dataChanged,			this, &ColumnsModel::refresh			);
 	
 	auto * info = new VariableInfo(_singleton);
 
 	connect(this, &ColumnsModel::columnNamesChanged,					info, &VariableInfo::variableNamesChanged	);
 	connect(this, &ColumnsModel::columnsChanged,						info, &VariableInfo::variablesChanged		);
 
-	connect(this,						&ColumnsModel::labelsChanged,				info, &VariableInfo::labelsChanged			);
-	connect(this,						&ColumnsModel::labelsReordered,				info, &VariableInfo::labelsReordered		);
-	connect(this,						&ColumnsModel::filterChanged,				info, &VariableInfo::filterChanged			);
-	connect(this,						&ColumnsModel::dataSetChanged,				info, &VariableInfo::dataSetChanged			);
-	connect(this,						&QAbstractTableModel::modelReset,			info, &VariableInfo::rowCountChanged		);
-	connect(_tableModel,				&DataSetTableModel::columnsInserted,		info, &VariableInfo::rowCountChanged		);
-	connect(_tableModel,				&DataSetTableModel::columnsRemoved,			info, &VariableInfo::rowCountChanged		);
+	connect(this,						&ColumnsModel::labelsChanged,		info, &VariableInfo::labelsChanged			);
+	connect(this,						&ColumnsModel::labelsReordered,		info, &VariableInfo::labelsReordered		);
+	connect(this,						&ColumnsModel::filterChanged,		info, &VariableInfo::filterChanged			);
+	connect(this,						&ColumnsModel::dataSetChanged,		info, &VariableInfo::dataSetChanged			);
+	connect(this,						&QAbstractTableModel::modelReset,	info, &VariableInfo::rowCountChanged		);
 	connect(MainWindow::singleton(),	&MainWindow::dataAvailableChanged,			info, &VariableInfo::dataAvailableChanged	);
 
 	// Wide-data fix (2026-08-16): the cached dataset Terms (dataSetTerms()) must be rebuilt
 	// whenever the column set can have changed. Redundant invalidation is cheap (one lazy
 	// rebuild); a missed one would show stale variables, so err on the generous side.
-	connect(_tableModel, &DataSetTableModel::columnTypeChanged,	this, [this]() { _dataSetTermsValid = false; });
-	connect(_tableModel, &DataSetTableModel::modelReset,		this, [this]() { _dataSetTermsValid = false; });
-	connect(_tableModel, &DataSetTableModel::dataChanged,		this, [this]() { _dataSetTermsValid = false; });
-	connect(_tableModel, &DataSetTableModel::columnsInserted,	this, [this]() { _dataSetTermsValid = false; });
-	connect(_tableModel, &DataSetTableModel::columnsRemoved,	this, [this]() { _dataSetTermsValid = false; });
-	connect(_tableModel, &DataSetTableModel::emptyValuesChanged,this, [this]() { _dataSetTermsValid = false; });
 	connect(this, &ColumnsModel::columnNamesChanged,			this, [this](QMap<QString, QString>) { _dataSetTermsValid = false; });
 	connect(this, &ColumnsModel::dataSetChanged,				this, [this]() { _dataSetTermsValid = false; });
 
-	// Multi-dataset fold (data-model-design.md §3.4): serve the SHOWN dataset; whenever it is
-	// orchestrator-backed the wire schema is the source of truth, else the legacy table serves.
+	// Multi-dataset fold (data-model-design.md §3.4): serve the SHOWN dataset; when it is
+	// orchestrator-backed the wire schema is the source of truth. The excision, Cut 5: the
+	// DataSetTableModel wiring is gone — the schema is the only path (ColumnsModel is
+	// "already schema-correct", per the excision handover).
 	if (DataSetPackage::pkg() && DataSetPackage::pkg()->workspace())
 	{
 		connect(DataSetPackage::pkg()->workspace(), &Workspace::shownDataSetChanged, this,
@@ -163,22 +149,15 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 	columnType			colType;
 	computedColumnType	codeType;
 
-	if (_laneDataSet && _laneDataSet->isOpen())
-	{
-		const ColumnInfo * col = _laneDataSet->schemaColumnAt(size_t(index.row()));
-		if (!col)
-			return QVariant();
+	// The excision, Cut 5: the schema is the only path (the DataSetTableModel fallback is
+	// gone with the legacy table model).
+	const ColumnInfo * col = _laneDataSet && _laneDataSet->isOpen() ? _laneDataSet->schemaColumnAt(size_t(index.row())) : nullptr;
+	if (!col)
+		return QVariant();
 
-		colName		= tq(col->name);
-		colType		= col->type;
-		codeType	= col->codeType;
-	}
-	else
-	{
-		colName		=										 _tableModel->headerData(index.row(), Qt::Horizontal, int(dataPkgRoles::name				)).toString();
-		colType		= static_cast<columnType>			(_tableModel->headerData(index.row(), Qt::Horizontal, int(dataPkgRoles::columnType			)).toInt());
-		codeType	= static_cast<computedColumnType>	(_tableModel->headerData(index.row(), Qt::Horizontal, int(dataPkgRoles::computedColumnType	)).toInt());
-	}
+	colName		= tq(col->name);
+	colType		= col->type;
+	codeType	= col->codeType;
 
 	switch(role)
 	{
@@ -197,12 +176,12 @@ QVariant ColumnsModel::data(const QModelIndex &index, int role) const
 	}
 	}
 	
-	return _tableModel->data(_tableModel->index(index.column(), index.row()), role);
+	return QVariant();
 }
 
 int ColumnsModel::rowCount(const QModelIndex &) const
 {
-	return _laneDataSet && _laneDataSet->isOpen() ? int(_laneDataSet->schema().size()) : _tableModel->columnCount();
+	return _laneDataSet && _laneDataSet->isOpen() ? int(_laneDataSet->schema().size()) : 0;
 }
 
 int ColumnsModel::columnCount(const QModelIndex &) const
@@ -266,36 +245,9 @@ QVariant ColumnsModel::provideInfo(varInfoType info, const QString& colName, int
 			}
 		}
 
-		QModelIndex qColIndex	= index(colIndex, 0),
-					tableCIndex	= _tableModel->index(0, colIndex),
-					tableVIndex	= _tableModel->index(row, colIndex);
-
-		//columnType	colTypeHere	= static_cast<columnType>(colTypeInt);
-
-		switch(info)
-		{
-		case varInfoType::VariableType:				return					data(qColIndex, ColumnsModel::ColumnTypeRole).toInt();
-		case varInfoType::NameRole:					return					data(qColIndex, ColumnsModel::NameRole);
-		
-		case varInfoType::DoubleValues:				return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::valuesDblList));
-		case varInfoType::TotalNumericValues:		return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::nonFilteredNumericValuesCount));
-		case varInfoType::TotalLevels:				return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::nonFilteredLevels)).toStringList().length();
-		case varInfoType::Labels:					return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::nonFilteredLevels));
-		case varInfoType::DataSetValues:			return	_tableModel->	data(tableCIndex,						int(dataPkgRoles::valuesStrList));
-		case varInfoType::DataSetRowCount:			return  _tableModel->	rowCount();
-		case varInfoType::SignalsBlocked:			return	_tableModel->	synchingData();
-		case varInfoType::DataSetValue:				return	_tableModel->	data(tableVIndex,						int(dataPkgRoles::value));
-		
-		case varInfoType::VariableNames:			return	getColumnNames();
-		case varInfoType::DataAvailable:			return	MainWindow::singleton()->dataAvailable();
-		
-		case varInfoType::MaxWidth:					return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::maxColString)).toInt();
-		case varInfoType::PreviewScale:				return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::previewScale));
-		case varInfoType::PreviewOrdinal:			return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::previewOrdinal));
-		case varInfoType::PreviewNominal:			return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::previewNominal));
-		case varInfoType::ColumnDescription:		return	_tableModel->headerData(colIndex, Qt::Horizontal,	int(dataPkgRoles::description));
-		case varInfoType::DataSetPointer:			return	QVariant::fromValue<void*>(DataSetPackage::pkg()->dataSet());
-		}
+		// The excision, Cut 5: the legacy table-model fallback is gone — with no lane
+		// dataset bound there is nothing to serve.
+		return QVariant();
 	}
 	catch(std::exception & e)
 	{
@@ -308,36 +260,12 @@ QVariant ColumnsModel::provideInfo(varInfoType info, const QString& colName, int
 
 bool ColumnsModel::absorbInfo(varInfoType info, const QString &colName, int row, QVariant value)
 {
-	ColumnsModel* colModel = ColumnsModel::singleton();
-
-	if (!colModel)
-		return false;
-
-	if (colModel->_laneDataSet && colModel->_laneDataSet->isOpen())
-		return false;	// NEO: no frontend cell writes until data_edit lands (data-model-design.md §3.4)
-
-	try
-	{
-		int colIndex = colModel->getColumnIndex(fq(colName));
-		if (colIndex < 0)
-			return false;
-
-		QModelIndex qColIndex	= _tableModel->index(0, colIndex),
-					qValIndex	= _tableModel->index(row, colIndex);
-
-		switch(info)
-		{
-		default:										return	false;
-		case varInfoType::DataSetValue:					return	_tableModel->setData(qValIndex, value,	int(dataPkgRoles::value));
-		case varInfoType::DataSetValues:				return	_tableModel->setData(qColIndex, value,	int(dataPkgRoles::valuesStrList));
-		}
-	}
-	catch(std::exception & e)
-	{
-		Log::log() << "AnalysisForm::requestInfo had an exception! " << e.what() << std::flush;
-		throw e;
-	}
-
+	// The excision, Cut 5: writes went through the legacy table model — gone. This provider
+	// is read-only schema service (the grid edits through DataEditCommand).
+	Q_UNUSED(info);
+	Q_UNUSED(colName);
+	Q_UNUSED(row);
+	Q_UNUSED(value);
 	return false;
 }
 

@@ -151,7 +151,6 @@ public slots:
 	void dataModeChanged(bool dataMode);
 	void saveAnalysesJsonForReload();
 	void reloadSavedAnalysesJson();
-	void checkForDependentAnalyses(Column * column);
 
 signals:
 	void analysesUnselected();
@@ -183,9 +182,8 @@ signals:
 	void setResultsMeta(QString json);
 	void moveAnalyses(quint64 fromId, quint64 toId);
 
-	Column *			requestComputedColumnCreation(		const std::string & columnName, Analysis *source);
-	bool				requestColumnCreation(				const std::string & columnName, Analysis *source, columnType type);
-	bool				requestComputedColumnDestruction(	const std::string & columnName, Analysis *source);
+	// The excision, Cut 5: requestComputedColumnCreation/requestColumnCreation/
+	// requestComputedColumnDestruction signals died with Column.
 
 	void currentFormPrevHChanged(double currentFormPrevH);
 

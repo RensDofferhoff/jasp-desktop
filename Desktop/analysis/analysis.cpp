@@ -159,18 +159,8 @@ Analysis::~Analysis()
 	if(form())
 		destroyForm();
 
-	if(DataSetPackage::pkg() && DataSetPackage::pkg()->hasDataSet())
-	{
-		for(DataSet * data : DataSetPackage::pkg()->workspace()->dataSets())
-			for(Column * col : data->columns())
-				if(col->analysisId() == id())
-				{
-					if(col->codeType() == computedColumnType::analysisNotComputed)
-						col->setCodeType(computedColumnType::notComputed);
-					else
-						emit requestComputedColumnDestruction(col->name(), this);
-				}
-	}
+	// The excision, Cut 5: the dtor used to walk the legacy Columns to demote/destruct the
+	// analysis's computed columns — Column is gone (computed columns return as derivations).
 }
 
 bool Analysis::checkAnalysisEntry()
@@ -670,10 +660,7 @@ Json::Value Analysis::asJSON(bool withRSource) const
 	
 	
 	analysisAsJson["columns"]		= Json::arrayValue;
-	
-	for(Column * column : DataSetPackage::pkg()->dataSet()->columns())
-		if(column->analysisId() == _id)
-			analysisAsJson["columns"].append(column->name());
+	// The excision, Cut 5: the analysis-created Columns list died with Column.
 
 	Log::log() << "Analysis::asJSON():\n" << analysisAsJson.toStyledString() << std::endl;
 
@@ -753,17 +740,23 @@ void Analysis::boundValueChangedHandler()
 
 void Analysis::requestComputedColumnCreationHandler(const std::string& columnName)
 {
-	emit requestComputedColumnCreation(columnName, this);
+	// The excision, Cut 5: computed columns return as derivations (ChangeKind::derived).
+	// Until then these QML requests are inert.
+	Q_UNUSED(columnName);
+	Log::log() << "Analysis: computed-column creation requested but computed columns return as derivations — ignored" << std::endl;
 }
 
 void Analysis::requestColumnCreationHandler(const std::string & columnName, columnType colType)
 {
-	emit requestColumnCreation(columnName, this, colType);
+	// The excision, Cut 5: plain column creation by analyses rode the legacy Column path.
+	Q_UNUSED(columnName);
+	Q_UNUSED(colType);
+	Log::log() << "Analysis: column creation requested but the legacy path died with Column — ignored" << std::endl;
 }
 
 void Analysis::requestComputedColumnDestructionHandler(const std::string& columnName)
 {
-	emit requestComputedColumnDestruction(columnName, this);
+	Q_UNUSED(columnName);
 }
 
 stringset Analysis::usedVariables()
@@ -775,14 +768,9 @@ stringset Analysis::usedVariables()
 
 stringset Analysis::createdVariables()
 {
-	stringset names;
-	
-	if(dataSet())
-		for(Column * col : dataSet()->columns())
-			if(col->analysisId() == id())
-				names.insert(col->name());
-	
-	return names;
+	// The excision, Cut 5: analysis-created Columns are gone; variables the analysis
+	// *uses* still come from the form. (Computed columns return as derivations.)
+	return {};
 }
 
 void Analysis::runScriptRequestDone(const QString& result, const QString& controlName, bool hasError)
@@ -988,9 +976,9 @@ Json::Value Analysis::rSources() const
 
 bool Analysis::isOwnComputedColumn(const std::string & colName) const
 {
-	Column * col = DataSetPackage::pkg()->dataSet() ? DataSetPackage::pkg()->dataSet()->column(colName) : nullptr;
-
-	return col && col->analysisId() == id();	// NEO guard: lane datasets have no legacy columns
+	// The excision, Cut 5: no Columns, no analysis-owned computed columns.
+	Q_UNUSED(colName);
+	return false;
 }
 
 void Analysis::storeUserDataEtc()
@@ -1286,7 +1274,8 @@ void Analysis::setRSyntaxTextInResult(bool show)
 
 void Analysis::onUsedVariablesChanged()
 {
-	DataSetPackage::pkg()->workspace()->updateComputedColumnDependenciesForAnalysis(id(), usedVariables());
+	// The excision, Cut 5: this drove Workspace::updateComputedColumnDependenciesForAnalysis
+	// (computed-column dependency bookkeeping) — died with Column.
 }
 
 void Analysis::checkForRSources()
@@ -1402,13 +1391,11 @@ std::string Analysis::qmlFormPath(bool addFileProtocol, bool ignoreReadyForUse) 
 
 bool Analysis::isColumnFreeOrMine(const QString & columnName) const
 {
-	//An analysis without a filter/dataset is not "mine": treat every column as free.
-	if(!_filter || !_filter->data())
-		return true;
-
-	Column * col = _filter->data()->column(columnName);
-
-	return !col || col->analysisId() == id();
+	Q_UNUSED(columnName);
+	// The excision, Cut 5: "own computed column" bookkeeping died with Column — with no
+	// computed columns, every column name is free. Returns true (checked by the
+	// column-name-is-free text input in forms).
+	return true;
 }
 
 

@@ -47,7 +47,6 @@ DataSet::DataSet(Workspace * workspace)
 	//Was dbCreate(): mint the identity in memory (a default Filter registers itself in _filters).
 	_dataSetId		= g_nextDataSetId++;
 	_defaultFilter	= new Filter(this);
-	_columns.clear();
 	_rowCount		= 0;
 	setupEncoderPrefix();
 	Log::log() << "DataSet::DataSet(id=" << _dataSetId << ")" << std::endl;
@@ -89,11 +88,6 @@ DataSet::~DataSet()
 	delete _encoder;
 	_encoder = nullptr;
 
-	for(Column * col : _columns)
-		unregisterNode(col);
-
-	_columns.clear();
-	
 	delete _emptyValues;
 	
 	for(Filter * f : _filters)
@@ -257,32 +251,17 @@ void DataSet::dbDelete()
 		delete f;	// The excision, Cut 3: purely in-memory teardown now (Filter dtor unregisters)
 	
 	_filters.clear();
-	
-	
-	for(Column * c : _columns)
-		delete c;
-	
-	_columns.clear();
-	_shownColumn	= nullptr; //children are freed above; don't leave a dangling reference
 
 	_dataSetId = -1;
 }
 
 void DataSet::beginBatchedToDB()
 {
-	if(_writeBatchedToDBDepth == 0)
-		_changedDuringBatch = {};
-	
 	_writeBatchedToDBDepth++;
 }
 
-void DataSet::endBatchedToDB(std::function<void(float)> progressCallback, Columns columns)
+void DataSet::endBatchedToDB(std::function<void(float)> progressCallback)
 {
-	if(columns.size() == 0)
-		columns = _columns;
-
-	assert(columns.size() != _columns.size() || _writeBatchedToDBDepth);
-
 	if(_writeBatchedToDBDepth > 0)
 		_writeBatchedToDBDepth--;
 	
@@ -300,220 +279,22 @@ void DataSet::endBatchedToDB(std::function<void(float)> progressCallback, Column
 	}
 }
 
-int DataSet::getColumnIndex(const std::string & name) const 
+int DataSet::getColumnIndex(const std::string & name) const
 {
-	for(size_t i=0; i<_columns.size(); i++)
-		if(_columns[i]->name() == name)
-			return i;
-	return -1;
+	// The excision, Cut 5: served the legacy _columns order — the schema is the one home now.
+	return schemaColumnIndex(name);
 }
 
-int DataSet::columnIndex(const Column * col) const
-{
-	for(size_t i=0; i<_columns.size(); i++)
-		if(_columns[i] == col)
-			return i;
-	return -1;
-}
-
-void DataSet::columnsReorder(stringvec order)
-{
-	//Perhaps the new order is derived from a synched datafile, which lacks any computed columns.
-	stringset	compCols,
-				orderSet(order.begin(), order.end()),
-				colSet;
-	
-	for(size_t i=0; i<_columns.size(); i++)
-	{
-		Column * col = _columns[i];
-		
-		if(col->isComputed())
-		{
-			if(!orderSet.count(col->name()))
-			{
-				order.insert(order.begin() + i, col->name()); //Put the computed column right in the data where it used to be
-				orderSet.insert(col->name());
-			}
-			
-			compCols.insert(col->name());
-		}
-	}
-	
-	assert(order.size() == _columns.size());
-	assert(order.size() == orderSet.size());
-	
-	std::map<std::string, Column*> nameColMap;
-	
-	for(Column * col : _columns)
-	{
-		assert(col->name() != "");
-		nameColMap[col->name()] = col;
-		colSet.insert(col->name());
-	}
-	
-	assert(colSet == orderSet);
-	
-	for(size_t i=0; i<_columns.size(); i++)
-	{
-		_columns[i] =  nameColMap[order[i]];
-		_columns[i] -> setIndex(i);
-	}
-	
-	incRevision();
-	
-	refresh();
-}
-
-void DataSet::columnRefreshed(Column *column)
-{
-	int idx = columnIndex(column);
-	emit dataChanged(index(0, idx), index(qMax(rowCount() - 1, 0), idx), roleNames().keys());
-}
-
-Column *DataSet::column(const std::string &name)
-{
-	for(Column * column : _columns)
-		if(column->name() == name)
-			return column;
-
-	return nullptr;
-}
-
-Column *DataSet::column(const QString &name)
-{
-	return column(fq(name));
-}
-
-Column *DataSet::column(int index)
-{
-	if(index < 0 || index >= _columns.size())
-		return nullptr;
-
-	return _columns[index];
-}
-
-
-void DataSet::removeColumn(size_t index)
-{
-	beginRemoveColumns(QModelIndex(), index, index);
-	Column * removeMe = _columns[index];
-	_columns.erase(_columns.begin() + index);
-
-	delete removeMe;	// The excision, Cut 3: in-memory only
-	
-	endRemoveColumns();
-
-	incRevision();
-}
-
-void DataSet::removeColumn(const std::string & name)
-{
-	assert(_dataSetId > 0);
-	Column * col = column(name);
-	
-	if(col)
-		removeColumn(columnIndex(col));
-}
-
-void DataSet::insertColumns(size_t index, size_t count,	bool alterDataSetTable)
-{
-	beginInsertColumns(QModelIndex(), index, index + count);
-	
-	for(size_t c = 0; c<count; c++)	// The excision, Cut 3: ids are minted by the Column itself
-	{
-		Column * newColumn = new Column(this);
-
-		_columns.insert(_columns.begin()+index+c, newColumn);
-
-		newColumn->setRowCount(_rowCount);
-	}
-	
-	endInsertColumns();
-
-	incRevision();
-}
-
-void DataSet::insertColumn(size_t index, bool alterDataSetTable)
-{
-	insertColumns(index, 1, alterDataSetTable);
-}
-
-
-QString DataSet::insertColumnSpecial(int columnIndex, const QMap<QString, QVariant>& props)
-{
-	columnIndex = std::min(std::max(0, columnIndex), columnCount());
-
-	insertColumn(columnIndex);
-	
-	Column * col = column(columnIndex);
-
-	col->setName(				props.contains("name")			? fq(props["name"].toString())					: freeNewColumnName(columnIndex)	);
-	col->setDefaultValues(		props.contains("type")			? columnType(props["type"].toInt())				: columnType::scale					);
-	col->setCodeType(			props.contains("computed")		? computedColumnType(props["computed"].toInt())	: computedColumnType::notComputed	);
-	col->setComputeFilter(fq(	props.contains("computeFilter")	? props["computeFilter"].toString()				: ""								));
-
-	incRevision();
-	
-	emit datasetChanged(_dataSetId, tq(stringvec{col->name()}), {}, {}, false, true);
-
-	_encoder->setCurrentNames(	getColumnTypesMap());
-	
-	if(col->codeType() == computedColumnType::constructorCode || col->codeType() == computedColumnType::rCode)
-		setShownColumn(col);
-	
-	refresh();
-
-	return tq(col->name());
-}
-
-Column * DataSet::createColumn(const std::string & name, columnType columnType)
-{
-
-	if(getColumnIndex(name) >= 0)
-		return nullptr;
-
-	beginInsertColumns(QModelIndex(), columnCount(), columnCount());
-	
-	Column * col = new Column(this);	// The excision, Cut 3: id minted by the Column itself
-	col->setName(name);
-	col->setDefaultValues(columnType, false);
-	_columns.push_back(col);
-	endInsertColumns();
-
-	incRevision();
-	
-	refresh();
-	emit manualEditMade();
-
-	return col;
-}
-
-
-size_t DataSet::getMaximumColumnWidthInCharacters(size_t columnIndex) const
-{
-	if(columnIndex >= columnCount())
-		return 0;
-
-	return _columns[columnIndex]->getMaximumWidthInCharactersIncludingShadow();
-}
 
 stringvec DataSet::getColumnNames()
 {
 	stringvec names;
 
-	// NEO (R2 step 4): the schema is the column truth for lane datasets — the legacy
-	// mirror no longer exists. This is what the analysis-form provider chain serves as
-	// VariableNames (Filter::provideInfo): an empty list here = "no variables" in every
-	// opened analysis form.
-	if (!_laneDatasetId.empty())
-	{
-		for (const ColumnInfo & col : _schemaColumns)
-			names.push_back(col.name);
-		return names;
-	}
-
-	for(Column * col : _columns)
-		names.push_back(col->name());
+	// The schema is the column truth (the excision, Cut 5). This is what the analysis-form
+	// provider chain serves as VariableNames (Filter::provideInfo): an empty list here =
+	// "no variables" in every opened analysis form.
+	for (const ColumnInfo & col : _schemaColumns)
+		names.push_back(col.name);
 
 	return names;
 }
@@ -524,17 +305,10 @@ std::map<std::string,columnType> DataSet::getColumnTypesMap()
 	std::map<std::string,columnType> theMap;
 
 	//The excision, Cut 2: the encoder's name set must also come from the schema when
-	//lane-bound — the legacy Columns are gone, and `encode()` validates against this map
-	//(a lane open with a stale/empty map made every schema name "not a columnName").
-	if (!_laneDatasetId.empty())
-	{
-		for (const ColumnInfo & col : _schemaColumns)
-			theMap[col.name] = col.type;
-		return theMap;
-	}
-
-	for(const Column * col : columns())
-		theMap[col->name()] = col->type();
+	//lane-bound — `encode()` validates against this map (a lane open with a stale/empty
+	//map made every schema name "not a columnName").
+	for (const ColumnInfo & col : _schemaColumns)
+		theMap[col.name] = col.type;
 
 	return theMap;
 }
@@ -624,38 +398,8 @@ void DataSet::upgradeEmptyValsFrom018To019(const Json::Value & emptyVals)
 	
 	stringset workspaceEmpty = JsonUtilities::jsonStringArrayToSet(workspaceEmptyValues);
 	
-	for(Column * column : _columns)
-	{
-		if(column->type() == columnType::nominalText)
-			column->setType(columnType::nominal);
-		
-		const Json::Value	& missingData = !missingDataPerColumn.isMember(column->name()) ? Json::nullValue : missingDataPerColumn[column->name()],
-							& emptyValues = !emptyValuesPerColumn.isMember(column->name()) ? Json::nullValue : emptyValuesPerColumn[column->name()];
-		
-		stringset emptyValSet;
-		
-		if(emptyValues.isArray())
-			for(const Json::Value & val : emptyValues)
-				emptyValSet.insert(val.asString());
-		
-		if(missingData.isObject())
-		{
-			stringset localEmpties = column->mergeOldMissingDataMap(missingData);
-			emptyValSet.insert(localEmpties.begin(), localEmpties.end());
-		}
-		
-		//If the column and workspace sets are not the same size, and there are actually values here that are not a subset of the workspace values then that means we really do have emptyvalues for this column
-		if(emptyValSet != workspaceEmpty && emptyValSet.size() && !std::includes(workspaceEmpty.begin(), workspaceEmpty.end(), emptyValSet.begin(), emptyValSet.end()))
-		{
-			column->setHasCustomEmptyValues(true		);
-			column->setCustomEmptyValues(	emptyValSet	);
-			
-			Log::log() << "Based on this the new column emtpy values for " << column->name() << " are:\n" << column->emptyValues()->toJson().toStyledString() << std::endl;
-		}
-	}
-	
-	
-	
+	// The excision, Cut 5: the per-Column empty-values reconciliation walked the legacy
+	// Columns — gone. Only the workspace-level set survives.
 	_emptyValues->setEmptyValues(workspaceEmpty);
 	
 	
@@ -664,52 +408,34 @@ void DataSet::upgradeEmptyValsFrom018To019(const Json::Value & emptyVals)
 	incRevision();	// was dbUpdate() (the excision, Cut 3)
 }
 
-void DataSet::batchColumnHadChange(Column *col)
-{
-	_changedDuringBatch.insert(col);
-}
-
-void DataSet::setColumnCount(size_t colCount)
-{
-	int curCount = _columns.size();
-	
-	if(colCount > curCount)
-		insertColumns(curCount, colCount-curCount, false);
-
-	else if(colCount < curCount)
-		for(size_t i=curCount-1; i>=colCount; i--)
-			removeColumn(i);
-
-
-	incRevision();
-}
-
-void DataSet::setRowCount(size_t rowCount, bool alsoLoadData)
-{
-	_rowCount = rowCount;
-
-	// The excision, Cut 3: the sqlite row-count write (and the dbLoad refresh) is gone —
-	// just resize the in-memory column vectors as the batched branch always did.
-	for(Column * col : _columns)
-		col->setRowCount(_rowCount);
-
-	_defaultFilter->reset();
-	
-	refresh();
-}
-
 void DataSet::setRowCountMetadata(size_t rowCount)
 {
-	// The LANE mirror's row count (applySchema/applyRevision — the "metadata only" path
-	// landWireSchema always intended): set the count WITHOUT materializing legacy row
-	// storage. The legacy setRowCount resizes every mirror Column's value vectors
-	// (_dbls/_ints × rowCount — on a 30M-row lane dataset that is gigabytes of dead
-	// weight the grid never reads: NEO cells come from the view lane, and the mirror
-	// exists so the provider chain sees names/types/counts) and resets the default
-	// filter's per-row vector — both bombs for a lane dataset. No legacy consumer
-	// iterates a lane dataset's Column values (no analyses on lane data yet; the
-	// DataSetTableModel is never the source for one).
+	// The LANE row count (applySchema/applyRevision): metadata ONLY — never materialize
+	// per-row value storage (gigabytes of dead weight on a large lane dataset; the grid
+	// reads cells through the view lane).
 	_rowCount = rowCount;
+
+	// The default filter's per-row mask, though, is LOAD-BEARING metadata: FilteredData's
+	// filterAcceptsRow, getRowFilter and — via Filter::rowCount = filtered().size() — every
+	// QModelIndex the forms' provider chain (Filter::provideInfo → VarInfoModelProxy) mints.
+	// With the mask empty, Filter::index(colIndex, 0) is invalid and VariableType lookups
+	// degrade to unknown (the min/max-levels class of bugs). v1 has no filter compaction:
+	// the mask is all-true at the dataset's extent (resize default-constructs true).
+	bool	rowDelta	= _rowCount != int(rowCount);
+	_rowCount		= int(rowCount);
+
+	if (_defaultFilter)
+		_defaultFilter->setRowCount(size_t(rowCount));
+
+	// And because views/proxies may ALREADY be attached (the provider fixture attaches
+	// FilteredData before the schema lands), the new extent must be ANNOUNCED — a bare int
+	// write never reaches a QSortFilterProxyModel's mapping. A reset is honest: this runs on
+	// open and revision landings, both of which restart the consuming views anyway.
+	if (rowDelta)
+	{
+		beginResetModel();
+		endResetModel();
+	}
 }
 
 void DataSet::incRevision()
@@ -730,11 +456,6 @@ bool DataSet::checkForUpdates(std::function<void(float)> progressCallback)
 	// DataSet, so there is never anything to update.
 	(void) progressCallback;
 	return false;
-}
-
-void DataSet::runComputedColumn(QString columnName, QString code, columnType columnType)
-{
-	emit _workspace->runComputedColumn(id(), columnName, code, columnType);
 }
 
 void DataSet::runComputedDataset(QString code, int defaultInputFilterId)
@@ -912,42 +633,6 @@ void DataSet::checkForDependentDatasetsToBeSent(bool refreshMe)
 				ds->tryAndRunComputedDataset();
 }
 
-Columns DataSet::computedColumns() const
-{
-	Columns computedColumns;
-
-	for(Column * column : _columns)
-		if(column->isComputed())
-			computedColumns.push_back(column);
-
-	return computedColumns;
-}
-
-void DataSet::loadOldComputedColumnsJson(const Json::Value &json)
-{
-	if (!json.isArray()) return;
-
-	for(const Json::Value & colJson : json)
-	{
-		if (!colJson.isObject() || colJson["error"].asString().rfind("The engine crashed", 0) == 0) continue;
-
-		const std::string name = colJson["name"].asString();
-
-		Column * col = column(name);
-
-		if(!col && !name.empty())
-			col = createColumn(name);
-
-		if(!col)
-			continue;
-
-		col->loadComputedColumnJsonBackwardsCompatibly(colJson);
-	}
-
-	for(Column * col : computedColumns())
-		col->findDependencies();
-}
-
 void DataSet::setEmptyValuesJsonOldStuff(const Json::Value &emptyValues)
 {
 	// For backward compatibility we take the default ones if the workspaceEmptyValues are not specified
@@ -980,8 +665,6 @@ void DataSet::setEmptyValuesJson(const Json::Value &emptyValues, bool updateDB)
 void DataSet::setEmptyValuesFromStrings(const stringset &values)
 {
 	_emptyValues->setEmptyValues(values);
-	for(Column * column : _columns)
-		column->nonFilteredCountersReset();
 	incRevision();	// was dbUpdate() (the excision, Cut 3)
 }
 
@@ -996,14 +679,10 @@ void DataSet::setDescription(const std::string &desc)
 }
 
 void DataSet::refresh(bool doColumnsToo)	
-{ 
-	beginResetModel(); 
-	
-	
-	if(doColumnsToo)
-		for(Column * c : _columns)
-			c->refresh(false);
-	
+{
+	Q_UNUSED(doColumnsToo);	// the excision, Cut 5: there are no legacy Columns to refresh
+
+	beginResetModel();
 	endResetModel(); 
 
 	//Emit these after the reset completes: they connect into models that may re-query this DataSet,
@@ -1015,7 +694,6 @@ void DataSet::refresh(bool doColumnsToo)
 	emit dataTimestampChanged();
 	emit columnsLabelFilteredCountChanged();
 	emit shownFilterChanged(this);
-	emit shownColumnChanged();
 	emit titleChanged();
 }
 
@@ -1043,33 +721,6 @@ stringset DataSet::findUsedColumnNames(std::string searchThis)
 	return columnsFound;
 }
 
-Json::Value DataSet::jsonForCompare() const
-{
-	Json::Value json(Json::objectValue);
-
-	//json["description"]			= _description; //Contains datetime...
-	json["customEmptyValues"]	= _emptyValues->toJson();
-	json["columns"]				= Json::arrayValue;
-
-	for(Column * column : _columns)
-		json["columns"].append(column->jsonForCompare());
-
-	//std::cerr << json.toStyledString() << std::endl;
-
-	return json;
-}
-
-int DataSet::columnsLabelFilteredCount() const
-{
-	int colsFiltered = 0;
-
-	for(Column * col : columns())
-		if(col->hasLabelFilter())
-			colsFiltered++;
-
-	return colsFiltered;
-}
-
 int DataSet::rowCount(const QModelIndex &) const
 {
 	return _rowCount;
@@ -1077,13 +728,9 @@ int DataSet::rowCount(const QModelIndex &) const
 
 int DataSet::columnCount(const QModelIndex &) const
 {
-	// NEO (R2 step 4): the schema is the column truth for lane datasets — the legacy mirror
-	// no longer exists, and this previously served its grow-only count (stale after
-	// delete_cols edits).
-	if (!_laneDatasetId.empty())
-		return int(_schemaColumns.size());
-
-	return _columns.size();
+	// The schema is the column truth (the excision, Cut 5; the legacy mirror served a
+	// grow-only count that went stale after delete_cols edits).
+	return int(_schemaColumns.size());
 }
 
 QVariant DataSet::data(const QModelIndex &index, int role) const
@@ -1097,12 +744,10 @@ QVariant DataSet::data(const QModelIndex &index, int role) const
 	
 	JASPTIMER_SCOPE(DataSet::data);
 	
-	// NEO (R2 step 4): the SCHEMA serves the metadata roles for lane datasets — the legacy
-	// mirror no longer exists (indexing it was out-of-bounds UB), and the analysis-form
-	// provider chain reads through this model API (Filter → FilteredData →
-	// VarInfoModelProxy → provideInfo). Cell VALUES live in the view lane, never here:
-	// the value/display roles serve honest empties.
-	if (!_laneDatasetId.empty())
+	// The SCHEMA serves the metadata roles (the excision, Cut 5 — the legacy Column branch
+	// is gone), and the analysis-form provider chain reads through this model API
+	// (Filter → FilteredData → VarInfoModelProxy → provideInfo). Cell VALUES live in the
+	// view lane, never here: the value/display roles serve honest empties.
 	{
 		const ColumnInfo * info = schemaColumnAt(size_t(index.column()));
 		if (!info)
@@ -1130,140 +775,12 @@ QVariant DataSet::data(const QModelIndex &index, int role) const
 			return qulonglong(info->numericLevels);
 		case int(dataPkgRoles::computedColumnType):			return int(computedColumnType::notComputed);
 		case int(dataPkgRoles::columnPkgIndex):				return index.column();
-		case int(dataPkgRoles::filter):						return true;	// no filter compaction on lane (v1)
-		default:												return QVariant();	// display/value/label/lines: the view lane owns cells
+		case int(dataPkgRoles::filter):						return true;// no filter compaction on lane (v1)
+		default:											return QVariant();	// display/value/label/lines: the view lane owns cells
 		}
-	}
-
-	Column * column = columns()[index.column()];
-
-	switch(role)
-	{
-	case Qt::DisplayRole:									return tq(column->getDisplay(index.row(), true, true));
-	case int(dataPkgRoles::noSepaDisplay):					return tq(column->getDisplay(index.row(), false, false));
-	case int(dataPkgRoles::label):							return tq(column->getLabel(index.row(), false, true));
-	case int(dataPkgRoles::value):							return tq(column->getValue(index.row()));
-	case int(dataPkgRoles::name):							return tq(column->name());
-	case int(dataPkgRoles::title):							return tq(column->title());
-	case int(dataPkgRoles::filter):							return getRowFilter(index.row());
-	case int(dataPkgRoles::columnType):						return int(column->type());
-	case int(dataPkgRoles::description):					return tq(column->description());
-	case int(dataPkgRoles::inEasyFilter):					return getColumnInDragNDropShownFilter(column);
-	case int(dataPkgRoles::shadowDisplay):					return tq(column->getShadow(index.row()));
-	case int(dataPkgRoles::valuesDblList):					return column->getColumnValuesAsDoubleList();
-	case int(dataPkgRoles::nonFilteredNumericValuesCount):	return column->nonFilteredNumericsCount();
-	case int(dataPkgRoles::nonFilteredLevels):				return tq(column->nonFilteredLevels());
-	case int(dataPkgRoles::computedColumnType):				return int(column->codeType());
-	case int(dataPkgRoles::columnPkgIndex):					return index.column();
-	case int(dataPkgRoles::lines):
-	{
-		bool	iAmActive		= getRowFilter(index.row()),
-				belowMeIsActive = index.row() < column->rowCount() - 1	&& getRowFilter(index.row() + 1);
-
-		return getDataSetViewLines(
-			iAmActive,
-			iAmActive,
-			iAmActive && !belowMeIsActive,
-			iAmActive //&& index.column() == columnCount() - 1 //always draw left line and right line only if last col
-		);
-	}
 	}
 	
 	return QVariant();
-}
-
-bool DataSet::setData(const QModelIndex &index, const QVariant &value, int role)
-{
-	JASPTIMER_SCOPE(DataSet::setData);
-		
-	if(!index.isValid() || index.column() < 0 || index.column() >= columnCount()) 
-		return false;
-
-	Column	* column	= static_cast<Column*>(columns()[index.column()]);
-	
-	if(role == Qt::DisplayRole || role == Qt::EditRole || role == int(dataPkgRoles::value) || role == int(dataPkgRoles::valueLabelPair) || role == int(dataPkgRoles::valuesStrList))
-	{				
-		bool				isPair	= role == int(dataPkgRoles::valueLabelPair),
-							isVals	= role == int(dataPkgRoles::valuesStrList);
-		QVariantList		listVar	= isPair || isVals ? value.toList()	: QVariantList{ value };
-		bool				aChange = false;
-		
-		if(!isVals)
-		{
-			const std::string	val		= fq(listVar[0].toString()),
-								label	= fq(isPair ? listVar[1].toString() : "");
-								aChange	= !isPair	
-										? column->setStringValue(index.row(), val == EmptyValues::displayString() ? "" : val)
-										: column->setValue(index.row(), val, label);
-		}
-		else //Its a list of values, for instance "intial values"
-		{
-			int r=0;
-			for(const QVariant & val : listVar)
-				if(column->setStringValue(index.row() + r++, fq(val.toString() == tq(EmptyValues::displayString()) ? "" : val.toString())))
-					aChange = true;
-		}
-		
-		if(aChange)
-		{
-			JASPTIMER_SCOPE(Column::setData reset model);
-
-			emit manualEditMade();
-			
-			column->labelsRemoveOrphans();
-			column->nonFilteredCountersReset();
-			column->labelsHandleAutoSort();
-
-			refresh();
-			handleColumnChanged(column);
-			handleLabelsReordered(column);
-			
-			//Probably the labelfilter thing and the constructor thing should 
-			if(column->hasLabelFilter())
-			{
-				emit labelFilterChanged();
-				runFilters();
-			}
-		}
-		
-		return true;
-	}
-	else
-	{
-		bool aChange = false;
-
-		switch(role)
-		{
-		case int(dataPkgRoles::description):
-			column->setDescription(value.toString().toStdString());
-			aChange = true;
-			break;
-
-		case int(dataPkgRoles::title):
-			column->setTitle(value.toString().toStdString());
-			aChange = true;
-			break;
-
-		case int(dataPkgRoles::columnType):
-			if(value.toInt() >= int(columnType::unknown) && value.toInt() <= int(columnType::scale))
-			{
-				columnType converted = static_cast<columnType>(value.toInt());
-				if(converted != column->type())
-				{
-					if(column->changeType(converted) == columnTypeChangeResult::generatedFromAnalysis)
-						emit showWarning(tr("Changing column type failed"), tr("The column '%1' is generated by an analysis and its type is fixed.").arg(tq(column->name())));
-					else
-						aChange = true;
-				}
-			}
-			break;
-		}
-
-		if(aChange)
-			emit manualEditMade();
-
-		return true;
-	}	
 }
 
 QVariant DataSet::headerData(int section, Qt::Orientation orientation, int role) const
@@ -1290,102 +807,28 @@ QVariant DataSet::headerData(int section, Qt::Orientation orientation, int role)
 		}
 	else
 	{
-		// NEO (R2 step 4): schema-served metadata for lane datasets (see data()'s lane
-		// branch) — indexing the empty legacy vector was out-of-bounds UB.
-		if (!_laneDatasetId.empty())
-		{
-			const ColumnInfo * info = schemaColumnAt(size_t(section));
-			if (!info)
-				return QVariant();
-			switch(role)
-			{
-			case Qt::DisplayRole:
-			case int(dataPkgRoles::name):							return tq(info->name);
-			case int(dataPkgRoles::title):							return tq(info->displayName);
-			case int(dataPkgRoles::columnType):					return int(info->type);
-			case int(dataPkgRoles::description):					return tq(info->description);
-			case int(dataPkgRoles::computedColumnType):			return int(computedColumnType::notComputed);
-			case int(dataPkgRoles::columnIsComputed):				return false;
-			case int(dataPkgRoles::computedColumnError):			return QString();
-			case int(dataPkgRoles::computedColumnIsInvalidated):	return false;
-			case int(dataPkgRoles::filter):
-			case int(dataPkgRoles::labelsHasFilter):				return false;
-			case int(dataPkgRoles::maxColumnHeaderString):			return tq(info->name) + "XXX";
-			case int(dataPkgRoles::maxColString):					return tq(info->displayName) + "XXXXXXX";	// a width estimate — no cell scan on lane
-			case int(dataPkgRoles::maxRowHeaderString):			return QString::number(rowCount()) + "XXX";
-			case Qt::TextAlignmentRole:								return QVariant(Qt::AlignCenter);
-			default:													return QVariant();	// previews: honest none until data_view serves them
-			}
-		}
-
-		Column * col = columns()[section];
-				
+		// Schema-served metadata (the excision, Cut 5 — the legacy Column branch is gone).
+		const ColumnInfo * info = schemaColumnAt(size_t(section));
+		if (!info)
+			return QVariant();
 		switch(role)
 		{
-		case int(dataPkgRoles::maxColString):
-		{
-			//calculate some kind of maximum string to give views an expectation of the width needed for a column
-			bool		hasFilter	= col && (col->hasLabelFilter() || getColumnInDragNDropShownFilter(col));
-			QString		dummyText	= headerData(section, orientation, int(dataPkgRoles::maxColumnHeaderString)).toString() + (col->isComputed() ? "XXX" : "") + (hasFilter ? "XXX" : ""); //Bit of padding for hamburger, filtersymbol and columnIcon
-			qsizetype	colWidth	= getMaximumColumnWidthInCharacters(section);
-
-			while(colWidth > dummyText.length())
-				dummyText += "X";
-
-			return dummyText;
-		}
-		case int(dataPkgRoles::maxColumnHeaderString):			return headerData(section, orientation, Qt::DisplayRole).toString() + "XXX";
-		case int(dataPkgRoles::maxRowHeaderString):				return QString::number(rowCount())		+ "XXX";
-		case Qt::TextAlignmentRole:								return QVariant(Qt::AlignCenter);
-		case int(dataPkgRoles::filter):							return		!col ? false							: col->hasLabelFilter() || getColumnInDragNDropShownFilter(col);
-		case Qt::DisplayRole:									[[fallthrough]];
-		case int(dataPkgRoles::name):							return tq(	!col ? "?"								: col->name());
-		case int(dataPkgRoles::labelsHasFilter):				return		!col ? false							: col->hasLabelFilter();
-		case int(dataPkgRoles::columnIsComputed):				return		!col ? false							: col->isComputed() && col->codeType() != computedColumnType::analysisNotComputed;
-		case int(dataPkgRoles::computedColumnError):			return tq(	!col ? "?"								: col->error());
-		case int(dataPkgRoles::computedColumnIsInvalidated):	return		!col ? false							: col->invalidated();
-		case int(dataPkgRoles::columnType):						return int(	!col ? columnType::unknown				: col->type());
-		case int(dataPkgRoles::computedColumnType):				return int(	!col ? computedColumnType::notComputed	: col->codeType());
-		case int(dataPkgRoles::description):					return tq(	!col ? "?"								: col->description());
-		case int(dataPkgRoles::title):							return tq(	!col ? "?"								: col->title());
-		case int(dataPkgRoles::previewScale):
-		case int(dataPkgRoles::previewOrdinal):					
-		case int(dataPkgRoles::previewNominal):					
-		{
-			columnType colTypeWanted = 
-					role == int(dataPkgRoles::previewNominal) 
-					? columnType::nominal 
-					: role == int(dataPkgRoles::previewOrdinal)
-					? columnType::ordinal
-					: columnType::scale;
-			
-			stringvec preview = !col ? stringvec() : col->previewTransform(colTypeWanted);
-			
-			if(preview.size() != 4)
-				return QVariant();
-			
-			QString	levelsTotal		= tq(preview[0]),
-					levelsNums		= tq(preview[1]),
-					vals			= tq(preview[2]),
-					empties			= tq(preview[3]);
-			
-			if(colTypeWanted == columnType::scale)
-				return	tr("There are %1 total levels, of which %2 have a numeric value.\nAs a '%3' it looks like: %4\n%5")
-						.arg(levelsTotal)
-						.arg(levelsNums)
-						.arg(QColumnUtils::getTypeFriendly(colTypeWanted))
-						.arg(vals)
-						.arg(
-							empties == "" 
-							? "" 
-							: tr("Implicit missing values: %1").arg(empties)
-						);
-			else
-				return tr("There are %1 total levels.\nAs a '%2' it looks like: %3")
-					.arg(levelsTotal)
-					.arg(QColumnUtils::getTypeFriendly(colTypeWanted))
-					.arg(vals);
-		}
+		case Qt::DisplayRole:
+		case int(dataPkgRoles::name):							return tq(info->name);
+		case int(dataPkgRoles::title):							return tq(info->displayName);
+		case int(dataPkgRoles::columnType):						return int(info->type);
+		case int(dataPkgRoles::description):					return tq(info->description);
+		case int(dataPkgRoles::computedColumnType):				return int(computedColumnType::notComputed);
+		case int(dataPkgRoles::columnIsComputed):				return false;
+		case int(dataPkgRoles::computedColumnError):			return QString();
+		case int(dataPkgRoles::computedColumnIsInvalidated):	return false;
+		case int(dataPkgRoles::filter):
+		case int(dataPkgRoles::labelsHasFilter):				return false;
+		case int(dataPkgRoles::maxColumnHeaderString):			return tq(info->name) + "XXX";
+		case int(dataPkgRoles::maxColString):					return tq(info->displayName) + "XXXXXXX";	// a width estimate — no cell scan on lane
+		case int(dataPkgRoles::maxRowHeaderString):				return QString::number(rowCount()) + "XXX";
+		case Qt::TextAlignmentRole:							return QVariant(Qt::AlignCenter);
+		default:											return QVariant();	// previews: honest none until data_view serves them
 		}
 	}
 	
@@ -1394,84 +837,10 @@ QVariant DataSet::headerData(int section, Qt::Orientation orientation, int role)
 
 Qt::ItemFlags DataSet::flags(const QModelIndex &index) const
 {
-	// NEO (R2 step 4): no legacy Columns exist on lane datasets — indexing the empty
-	// vector was out-of-bounds UB. Editability is served by the NEO grid path (the
-	// proxy's gate), not by this legacy model.
-	if (!_laneDatasetId.empty())
-		return Qt::ItemIsSelectable | Qt::ItemIsEnabled | (_workspace && _workspace->dataMode() ? Qt::ItemIsEditable : Qt::NoItemFlags);
-
-	bool	isEditable	= _workspace && _workspace->dataMode() && index.column() >= 0 && index.column() < columnCount() && !columns()[index.column()]->isComputed();
-
-	return Qt::ItemIsSelectable | Qt::ItemIsEnabled | (isEditable ? Qt::ItemIsEditable : Qt::NoItemFlags);
-}
-
-bool DataSet::insertRows(int row, int count, const QModelIndex &)
-{
-	if(row > rowCount())
-			row = rowCount();
-	
-	emit manualEditMade();
-	
-	beginInsertRows(QModelIndex(), row, row + count - 1);
-
-	stringvec changed;
-
-	beginBatchedToDB();
-	for(int c=0; c<columnCount(); c++)
-	{
-		changed.push_back(column(c)->name());
-
-		for(int r=row; r<row+count; r++)
-			column(c)->rowInsertEmptyVal(r);
-	}
-
-	setRowCount(rowCount() + count);
-	incRevision();
-	endBatchedToDB();
-	
-	endInsertRows();
-
-	strstrmap		changeNameColumns;
-	stringvec		missingColumns;
-
-	emit datasetChanged(_dataSetId, tq(changed), tq(missingColumns), tq(changeNameColumns), true, false);
-
-	return true;
-}
-
-bool DataSet::removeRows(int row, int count, const QModelIndex &)
-{
-	if(row == -1)
-		return false;
-	
-	emit manualEditMade();
-	
-	beginRemoveRows(QModelIndex(), row, row + count - 1);
-
-	stringvec changed;
-
-	beginBatchedToDB();
-	
-	for(Column * column : columns())
-	{
-		changed.push_back(column->name());
-		
-		for(int r=row+count; r>row; r--)
-			column->rowDelete(r-1);
-	}
-
-	setRowCount(rowCount() - count);
-	incRevision();
-	endBatchedToDB();
-
-	strstrmap		changeNameColumns;
-	stringvec		missingColumns;
-
-	endRemoveRows();
-
-	emit datasetChanged(_dataSetId, tq(changed), tq(missingColumns), tq(changeNameColumns), true, false);
-
-	return true;
+	Q_UNUSED(index);
+	// The excision, Cut 5: editability is served by the NEO grid path (the proxy's gate);
+	// this model is metadata-only, read-only.
+	return Qt::ItemIsSelectable | Qt::ItemIsEnabled;
 }
 
 bool DataSet::isColumnNameFree(const std::string & name) const
@@ -1479,153 +848,61 @@ bool DataSet::isColumnNameFree(const std::string & name) const
 	return getColumnIndex(name) == -1;	
 }
 
-std::string DataSet::freeNewColumnName(size_t startAfterThis) const
-{
-	const QString nameBase = tr("Column %1");
+// ————— Inert model write API (the excision, Cut 5) —————
+// These QAbstractItemModel overrides were the legacy TableModel's write path (Column-value
+// surgery). Structural change on lane is REMOTE (a revision lands via applyRevision), and
+// cell edits go through DataEditCommand via the grid. Keep the vtable honest: nothing writes.
 
-	while(true)
-	{
-		const std::string & newColName = fq(nameBase.arg(++startAfterThis));
-		if(isColumnNameFree(newColName))
-			return newColName;
-	}
+bool DataSet::setData(const QModelIndex &index, const QVariant &value, int role)
+{
+	Q_UNUSED(index); Q_UNUSED(value); Q_UNUSED(role);
+	return false;
+}
+
+bool DataSet::insertRows(int row, int count, const QModelIndex &)
+{
+	Q_UNUSED(row); Q_UNUSED(count);
+	return false;
 }
 
 bool DataSet::insertColumns(int column, int count, const QModelIndex &)
 {
-	if(column > columnCount())
-			column = columnCount(); //the column will be created if necessary but only if it is in a logical place. So the end of the vector
-	
-	emit manualEditMade();
-	
-	beginInsertColumns(QModelIndex(), column, column + count - 1);
-	
-	stringvec changed;
+	Q_UNUSED(column); Q_UNUSED(count);
+	return false;
+}
 
-	for(int c = column; c<column+count; c++)
-	{
-		const std::string & name = freeNewColumnName(c);
-		
-		DataSet::insertColumn(c);
-		DataSet::column(c)->setName(name);
-		DataSet::column(c)->setDefaultValues(columnType::scale);
-
-		changed.push_back(name);
-	}
-
-	endInsertColumns();
-
-	strstrmap		changeNameColumns;
-	stringvec		missingColumns;
-
-	emit datasetChanged(_dataSetId, tq(changed), tq(missingColumns), tq(changeNameColumns), false, true);
-
-	_encoder->setCurrentNames(getColumnNames());
-
-	return true;
+bool DataSet::removeRows(int row, int count, const QModelIndex &)
+{
+	Q_UNUSED(row); Q_UNUSED(count);
+	return false;
 }
 
 bool DataSet::removeColumns(int column, int count, const QModelIndex &)
 {
-	if(column == -1)
-		return false;
-
-	emit manualEditMade();
-	
-	beginRemoveColumns(QModelIndex(), column, column + count - 1);
-
-	stringvec	changed;
-	strstrmap	changeNameColumns;
-	stringvec	missingColumns;
-
-	for(int c = column + count; c>column; c--)
-	{
-		missingColumns.push_back(columns()[c - 1]->name());
-		DataSet::removeColumn(c - 1);
-	}
-
-	endRemoveColumns();
-
-	emit datasetChanged(_dataSetId, tq(changed), tq(missingColumns), tq(changeNameColumns), false, false);
-
-	_encoder->setCurrentNames(getColumnNames());
-
-	return true;
+	Q_UNUSED(column); Q_UNUSED(count);
+	return false;
 }
 
-void DataSet::handleColumnChanged(const Column * column)
+int DataSet::columnsLabelFilteredCount() const
 {
-	emit datasetChanged(_dataSetId, tq(stringvec({column->name()})), {}, {}, false, false);
-	emit manualEditMade();
+	// Label filters lived on Columns (B2 rebuilds on the jasp:labels overlay) — always 0.
+	return 0;
 }
 
-void DataSet::handleLabelsReordered(const Column *column)
-{
-	emit labelsReordered(tq(column->name()));
-}
+// The excision, Cut 5: freeNewColumnName named legacy Columns as they were created.
 
-
-void DataSet::handleDataSetChanged( int						dataSetID,
-									QStringList				changedColumns,
-									QStringList				missingColumns,
+void DataSet::handleDataSetChanged( int							dataSetID,
+									QStringList			changedColumns,
+									QStringList			missingColumns,
 									QMap<QString, QString>	changeNameColumns,
-									bool					rowCountChanged,
-									bool					hasNewColumns)
+									bool				rowCountChanged,
+									bool				hasNewColumns)
 {
 	assert(_dataSetId == dataSetID);
 
-	std::string concatenatedMissings = fq(missingColumns.join(", "));
-
-	for(Column * col : computedColumns())
-	{
-		if(rowCountChanged)
-			col->invalidate();
-
-		for(const QString & changed : changedColumns)
-			if(col->dependsOn(fq(changed), false))
-				col->invalidate();
-
-		bool containsAChangedName = false;
-		for(const auto & changedNames : changeNameColumns.keys())
-			if(col->dependsOn(fq(changedNames), false))
-			{
-				containsAChangedName = true;
-				break;
-			}
-
-		if(containsAChangedName)
-		{
-			auto stdChangeNameCols = fq(changeNameColumns);
-			col->setRCode(ColumnEncoder::replaceColumnNamesInRScript(col->rCode(), stdChangeNameCols));
-			col->setConstructorJson(JsonUtilities::replaceColumnNamesInDragNDropFilterJSON(col->constructorJson(), stdChangeNameCols));
-			col->invalidate();
-		}
-
-		if(col->codeType() == computedColumnType::constructorCode)
-		{
-			if(col->setConstructorJson(JsonUtilities::removeColumnsFromDragNDropFilterJSON(col->constructorJson(), fq(missingColumns))))
-			{
-				//So some column was removed from the json
-
-				col->setRCode("stop('Certain columns where removed from the definition of this computed column.\nColumns that could`ve been here are: " + concatenatedMissings + "')");
-				col->invalidate();
-			}
-		}
-		else if(col->codeType() == computedColumnType::rCode &&	col->setRCode(ColumnEncoder::removeColumnNamesFromRScript(col->rCode(), fq(missingColumns))))
-				col->invalidate();
-
-	}
+	// The excision, Cut 5: the computed-Column invalidation/rewrite walk died with Column.
 
 	_encoder->setCurrentNames(	getColumnTypesMap());
-
-	for(Column * col : computedColumns())
-	{
-		col->findDependencies(); //columnNames might have changed right? so check it again
-	
-
-		if(col->iShouldBeSentAgain())
-			col->tryAndRunComputedColumn();
-	}
 
 	//Computed datasets that read from this dataset must be recomputed too.
 	if(
@@ -1660,19 +937,6 @@ QVariant DataSet::getDataSetViewLines(bool up, bool left, bool down, bool right)
 					(right ?	2 : 0) +
 					(up ?		4 : 0) +
 					(down ?		8 : 0);
-}
-
-bool DataSet::getColumnInDragNDropShownFilter(int columnIndex) const
-{
-	if(columnIndex < 0 || columnIndex >= columnCount()) 
-		return false;
-	
-	return getColumnInDragNDropShownFilter(columns()[columnIndex]);
-}
-
-bool DataSet::getColumnInDragNDropShownFilter(Column * column) const
-{
-	return shownFilter()->columnsUsedInConstructor().count(column->name());
 }
 
 QString DataSet::descriptionQ() const
@@ -1712,58 +976,19 @@ void DataSet::setTitle(const QString &title)
 	incRevision();	// was dbUpdate() (the excision, Cut 3)
 }
 
-bool DataSet::dataFileCanHaveLabels() const
-{
-	return !tq(dataFilePath()).endsWith(".csv");
-}
-
 void DataSet::resetAllFilters()
 {
-	for(Column * col : columns())
-		col->resetFilter();
-
-	resetFilterCounters();
-
+	// The excision, Cut 5: label filters lived on Columns — gone. Keep the signals so the
+	// filter UI (QML) stays consistent.
 	emit allFiltersReset();
 	emit columnsLabelFilteredCountChanged();
-	//this is only used in conjunction with a reset so dont do: emit headerDataChanged(Qt::Horizontal, 0, columnCount());
 }
 
 void DataSet::resetFilterCounters()
 {
-	for(Column * col : columns())
-		col->nonFilteredCountersReset();
+	// The excision, Cut 5: label-filter counters lived on Columns — gone.
 }
 
-
-bool DataSet::setColumnTypes(stringset columnIndexes, columnType newColumnType)
-{
-	bool somethingChanged = false;
-
-	for(const std::string & columnIndex : columnIndexes)
-	{
-		Column *col = column(columnIndex);
-
-		if (col->type() == newColumnType)
-			continue;
-
-
-		//the only possible "fail" is when an analysis made the column and thus decides the type
-		//the user might bet
-		if(col->changeType(newColumnType) == columnTypeChangeResult::generatedFromAnalysis)
-		{
-			emit showWarning(tr("Changing column type failed"), tr("The column '%1' is generated by an analysis and its type is fixed.").arg(tq(col->name())));
-			continue;
-		}
-
-		somethingChanged = true;
-	}
-
-	if(somethingChanged)
-		refresh();
-
-	return somethingChanged;
-}
 
 void DataSet::filterByNameDone(int dataSetID, const QString &name, const QString &error)
 {
@@ -1778,212 +1003,6 @@ void DataSet::filterByNameDone(int dataSetID, const QString &name, const QString
 	(void) name; (void) error;
 }
 
-
-void DataSet::resetVariableTypes(int thresholdScale)
-{
-	for (Column * col : columns())
-	{
-		columnType guessedType = col->resetValues(thresholdScale);
-
-		if(guessedType != col->type() && col->changeType(guessedType) == columnTypeChangeResult::changed)
-			refresh();
-	}
-}
-
-void DataSet::emitColumnChanged(const QString & colName)
-{
-	emit datasetChanged(_dataSetId, {colName}, {}, {}, false, false);
-	
-	int colIndex = columnIndex(column(fq(colName)));
-	if(colIndex >= 0)
-		emit headerDataChanged(Qt::Horizontal, colIndex, colIndex);
-}
-
-void DataSet::pasteSpreadsheet(size_t row, size_t col, const std::vector<std::vector<QString>> & values, const std::vector<std::vector<QString>> &  labels, const intvec & coltypes, const QStringList & colNames, const std::vector<boolvec> & selected)
-{
-	JASPTIMER_SCOPE(DataSet::pasteSpreadsheet);
-
-	int		rowMax			= ( values.size() > 0 ? values[0].size() : 0), 
-			colMax			= values.size();
-	bool	rowCountChanged = int(row + rowMax) > rowCount()	,
-			colCountChanged = int(col + colMax) > columnCount()	;
-	
-	auto isSelected = [&selected](int row, int col)
-	{
-		return selected.size() == 0 || 	selected[col][row];
-	};
-
-	beginBatchedToDB();
-
-	size_t oldColCount = columnCount();
-	
-	if(colCountChanged)
-		setColumnCount(std::max(size_t(columnCount()), colMax + col));
-	
-	if(rowCountChanged)
-		setRowCount(std::max(size_t(rowCount()), rowMax + row));
-	
-	stringvec changed;
-	strstrmap changeNameColumns;
-
-	for(int c=0; c<colMax; c++)
-	{
-		Column	*	dataColumn	= column(c + col);
-		columnType	desiredType	= coltypes.size() > c								? columnType(coltypes[c])	: dataColumn->type();
-					desiredType = desiredType == columnType::unknown				? columnType::scale			: desiredType;
-		std::string colName		= (colNames.size() > c && !colNames[c].isEmpty())	? fq(colNames[c])			: dataColumn->name();
-		
-		// A column that only came into existence to hold the pasted data must get a default name.
-		if (colName.empty() && size_t(c + col) >= oldColCount)
-			colName = freeNewColumnName(c + col);
-		
-		dataColumn->setType(desiredType);
-
-		bool aChange = false;
-		for(int r=0; r<rowMax; r++)
-			if(isSelected(r, c))
-				aChange = dataColumn->setStringValue(r+row, fq(values[c][r]), labels.size() <= c || labels[c].size() <= r ? "" : fq(labels[c][r])) || aChange;
-			
-		aChange = aChange || colName != dataColumn->name() || desiredType != dataColumn->type();
-		
-		if(colName != dataColumn->name())
-			changeNameColumns[dataColumn->name()] = colName;
-		
-		dataColumn->setName(colName);
-
-		if(aChange)
-		{
-			changed.push_back(colName);
-			dataColumn->nonFilteredCountersReset();
-		}
-	}
-
-	endBatchedToDB();
-	
-	stringvec		missingColumns;
-
-	emit datasetChanged(_dataSetId, tq(changed), tq(missingColumns), tq(changeNameColumns), rowCountChanged, colCountChanged);
-}
-
-
-void DataSet::columnsApply(intset columnIndexes, std::function<bool(Column * column, int col)> applyThis)
-{
-	QStringList changedCols;
-
-	for(int columnIndex : columnIndexes)
-	{
-		Column* dataColumn = column(columnIndex);
-	
-		if(dataColumn && applyThis(dataColumn, columnIndex))
-				changedCols << dataColumn->nameQ();
-	}
-	
-	if(changedCols.size() > 0)
-	{
-		refresh();
-		emit datasetChanged(_dataSetId, changedCols, {}, {}, false, false);
-	}
-}
-
-void DataSet::columnsApply(intset columnIndexes, std::function<bool(Column * column)> applyThis)
-{
-	columnsApply(columnIndexes, [&](Column * column, int){ return applyThis(column); });
-}
-
-void DataSet::columnsApply(stringset columnNames, std::function<bool(Column * column)> applyThis)
-{
-	intset columnIndexes;
-	
-	for(auto & n : columnNames)
-		columnIndexes.insert(getColumnIndex(n));
-	
-	columnsApply(columnIndexes, [&](Column * column, int){ return applyThis(column); });
-}
-
-void DataSet::columnsApply(stringset columnNames, std::function<bool(Column * column, int colIndex)> applyThis)
-{
-	intset columnIndexes;
-	
-	for(auto & n : columnNames)
-		columnIndexes.insert(getColumnIndex(n));
-	
-	columnsApply(columnIndexes, applyThis);
-}
-
-void DataSet::columnsReverseValues(stringset columnIndexes)
-{
-	columnsApply(columnIndexes, [&](Column * column) 
-	{ 
-		column->valuesReverse();
-		return true;
-	});
-}
-
-void DataSet::columnsSetAutoSortForColumns(std::map<std::string,bool> sortPerColumn)
-{
-	stringset cols;
-	for(auto & colSort : sortPerColumn)
-		cols.insert(colSort.first);
-	
-	columnsApply(cols, [&](Column * column, int colIdx) 
-	{ 
-		column->setAutoSortByValue(sortPerColumn[column->name()]);
-		
-		if(cols.size() == 1)
-			workspace()->setShownColumn(column);
-		
-		return true;
-	});
-}
-
-Column * DataSet::createComputedColumn(const std::string & name, columnType type, computedColumnType desiredType, int analysisId)
-{
-	Column	* newComputedColumn = createColumn(name, type);
-
-	newComputedColumn->setAnalysisId(analysisId);
-	newComputedColumn->setCodeType(desiredType);
-
-	refresh();
-
-	return newComputedColumn;
-}
-
-
-void DataSet::invalidateAllComputedColumns()
-{
-	for(Column * col : computedColumns())
-		if(	col->codeType() != computedColumnType::analysis	&& col->codeType() != computedColumnType::analysisNotComputed)
-			col->invalidate();
-	
-	for(Column * col : computedColumns())
-		if(	col->codeType() != computedColumnType::analysis				&&
-			col->codeType() != computedColumnType::analysisNotComputed	&&
-			col->iShouldBeSentAgain()
-		)
-			col->tryAndRunComputedColumn();
-}
-
-
-Column *DataSet::shownColumn() const
-{
-	return _shownColumn;
-}
-
-void DataSet::setShownColumn(Column *newShownColumn)
-{
-	if (_shownColumn == newShownColumn)
-		return;
-	
-	_workspace->setShownDataSet(this);
-	
-	_shownColumn = newShownColumn;
-	emit shownColumnChanged();
-}
-
-// DataSet::writeToOStream is gone with the exporters (the excision, Cut 2): data export
-// returns as a lane conversion in a later NEO era.
-
-// ————— NEO lane identity + wire schema (multi-dataset fold; data-model-design.md §3.2) —————
 
 void DataSet::applySchema(const std::string & datasetId, uint64_t rows, const Json::Value & schema, const std::string & sourcePath)
 {

@@ -5,7 +5,7 @@ import QtQuick.Controls as QTC
 
 FocusScope
 {
-	property bool autoSorted:	columnModel.column ? autoSorted : false
+	property bool autoSorted:	autoSorted	// The excision, Cut 5: columnModel.column (a legacy Column) is gone
 
 	Rectangle
 	{
@@ -674,7 +674,7 @@ FocusScope
 				iconSource:		jaspTheme.iconPath +  "addition-sign-small.svg"
 				onClicked:		
 				{ 
-					if(!columnModel.column.hasLabels)
+					if(false) // The excision, Cut 5: columnModel.column is gone
 						return;
 					
 					if(newLevelValueInput.text == "" && newLevelLabelInput.text == "")
@@ -765,7 +765,7 @@ FocusScope
 					height:			buttonColumnVariablesWindow.buttonHeight
 					implicitHeight: buttonColumnVariablesWindow.buttonHeight
 					width:			height
-					visible:		columnModel.hasSeveralNumericValues //if there are at least 2 numerics we have something to reverse
+					visible:		false	// The excision, Cut 5: hasSeveralNumericValues lived on Columns (B2)
 				}
 				
 				RoundedButton
@@ -778,7 +778,7 @@ FocusScope
 					height:			buttonColumnVariablesWindow.buttonHeight
 					implicitHeight: buttonColumnVariablesWindow.buttonHeight
 					width:			height
-					enabled:		!autoSorted && columnModel.column && columnModel.column.rowCount > 1
+					enabled:		false	// The excision, Cut 5: columnModel.column is gone
 				}
 	
 				RoundedButton

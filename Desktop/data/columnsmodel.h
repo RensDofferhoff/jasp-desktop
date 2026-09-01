@@ -2,7 +2,6 @@
 #define COLUMNSMODEL_H
 
 #include <QAbstractTableModel>
-#include "datasettablemodel.h"
 #include "variableinfo.h"
 #include "columninfo.h"
 #include "models/terms.h"
@@ -24,13 +23,13 @@ public:
 		IconSourceRole,
 		ToolTipRole
 	 };
-											ColumnsModel(DataSetTableModel * tableModel);
+											ColumnsModel();
 											~ColumnsModel()		override;
 
 				QVariant					data(			const QModelIndex & index, int role = Qt::DisplayRole)				const	override;
 				int							rowCount(		const QModelIndex &parent = QModelIndex())							const	override;
 				QHash<int, QByteArray>		roleNames()																			const	override;
-				int						getColumnIndex(const std::string & col)																			const	{ return _laneDataSet && _laneDataSet->isOpen() ? _laneDataSet->schemaColumnIndex(col) : _tableModel->getColumnIndex(col);	}
+				int							getColumnIndex(const std::string & col)											const	{ return _laneDataSet && _laneDataSet->isOpen() ? _laneDataSet->schemaColumnIndex(col) : -1;	}
 				void						bindLane(DataSet * dataSet);	///< multi-dataset fold: serve the SHOWN dataset; when orchestrator-backed the wire schema is the source of truth (data-model-design.md §3.4)
 				int						columnCount(	const QModelIndex &parent = QModelIndex())								const	override;
 				QStringList					getColumnNames()																							const;
@@ -65,7 +64,6 @@ signals:
 	void dataSetChanged();
 
 private:
-	DataSetTableModel		* _tableModel	= nullptr;
 	DataSet					*	_laneDataSet	= nullptr;	///< the SHOWN dataset (multi-dataset fold); when orchestrator-backed (datasetId set) the wire schema is the source of truth
 	static ColumnsModel		* _singleton;
 

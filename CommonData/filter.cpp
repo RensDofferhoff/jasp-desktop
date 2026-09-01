@@ -12,9 +12,11 @@ static std::atomic<int> g_nextFilterId{1};
 #include "dataenums.h"
 #include "filtereddata.h"
 #include "columnencoder.h"
+#include "columninfo.h"
 #include "jsonutilities.h"
 #include "varinfomodelproxy.h"
-#include "labelfiltergenerator.h"
+// The excision, Cut 5: labelfiltergenerator.h died with Label/Column — the generated-filter
+// machinery returns with the labels editor (B2) on the jasp:labels overlay.
 
 Filter::Filter(DataSet * data)
 : DataSetBaseNode(dataSetBaseNodeType::filter, data),
@@ -29,8 +31,11 @@ Filter::Filter(DataSet * data)
 	// The excision, Cut 3: the sqlite filter row is gone — mint the id locally.
 	_id					= g_nextFilterId++;
 	_rFilter			= fq(defaultRFilter());
-	_labelGen			= new LabelFilterGenerator(this);
-	
+	// The excision, Cut 5: _labelGen (LabelFilterGenerator) died with Label/Column — named
+	// filters carry their own rFilter/constructorR instead; the generated filter stays the
+	// passthrough DEFAULT_FILTER_GEN until the labels editor returns (B2).
+	//_labelGen			= new LabelFilterGenerator(this);
+
 	connectionCreation();
 }
 
@@ -79,13 +84,13 @@ void Filter::connectionCreation()
 	connect(_data,	&DataSet::labelsReordered,				infoSignaller(),	&VarInfoSignaller::labelsReordered			);
 	connect(this,	&Filter::modelReset,					infoSignaller(),	&VarInfoSignaller::refresh					);
 	
-	connect(data(),			&DataSet::columnTypeChanged,				infoSignaller(),	[&](QString name){ Column * col = data() ? data()->column(name) : nullptr; infoSignaller()->variableTypeChanged(name, col ? col->type() : columnType::unknown); });
-	connect(data(),			&DataSet::labelChanged,						infoSignaller(),	&VarInfoSignaller::labelChanged			);
-	connect(data(),			&DataSet::labelsReordered,					infoSignaller(),	&VarInfoSignaller::labelsReordered		);
-	connect(data(),			&DataSet::datasetChanged,					infoSignaller(),	&VarInfoSignaller::dataSetChanged		);
-	connect(data(),			&DataSet::emptyValuesChanged,				infoSignaller(),	&VarInfoSignaller::dataSetChanged		);
-	connect(data(),			&DataSet::modelReset,						infoSignaller(),	&VarInfoSignaller::refresh				);
-	connect(data(),			&DataSet::dataChanged,						infoSignaller(),	&VarInfoSignaller::refresh				);
+	// The excision, Cut 5: the columnTypeChanged lambda dereffed a Column* (gone) — serve the
+	// schema type instead; labelChanged(const Column*) died with Column.
+	connect(data(),			&DataSet::columnTypeChanged,				infoSignaller(),	[this](QString name){ const ColumnInfo * col = data() ? data()->schemaColumn(fq(name)) : nullptr; infoSignaller()->variableTypeChanged(name, col ? col->type : columnType::unknown); });
+	connect(data(),			&DataSet::datasetChanged,					infoSignaller(),	&VarInfoSignaller::dataSetChanged			);
+	connect(data(),			&DataSet::emptyValuesChanged,				infoSignaller(),	&VarInfoSignaller::dataSetChanged			);
+	connect(data(),			&DataSet::modelReset,						infoSignaller(),	&VarInfoSignaller::refresh					);
+	connect(data(),			&DataSet::dataChanged,						infoSignaller(),	&VarInfoSignaller::refresh					);
 	
 
 	connect(this,			&Filter::columnsInserted,					varInfo(),			&VariableInfo::rowCountChanged		);
@@ -140,7 +145,14 @@ void Filter::setFilterValueNoDB(size_t row, bool val)
 
 void Filter::setRowCount(size_t rows)
 {
+	// The excision, Cut 5: the mask is load-bearing metadata now (FilteredData's
+	// filterAcceptsRow + the forms' provider chain key off it). New rows arrive UNFILTERED
+	// (v1 has no filter compaction) — std::vector<bool> value-initializes false, so the
+	// fill must be explicit.
+	size_t oldSize = _filtered.size();
 	_filtered.resize(rows);
+	if (rows > oldSize)
+		std::fill(_filtered.begin() + oldSize, _filtered.end(), true);
 	calculateFilteredRowCount();
 }
 
@@ -247,8 +259,8 @@ void Filter::setConstructorR(const std::string &constructorR)
 	bool	wasChange		=_constructorR != constructorR;
 			_constructorR	= constructorR;
 
-	if(!_labelGen)
-		_generatedFilter = _constructorR == "" ? DEFAULT_FILTER_GEN : "generatedFilter <- " + _constructorR;
+	// The excision, Cut 5: _labelGen is gone — the constructorR passthrough applies always.
+	_generatedFilter = _constructorR == "" ? DEFAULT_FILTER_GEN : "generatedFilter <- " + _constructorR;
 			
 	incRevision();	// was dbUpdate() (the excision, Cut 3)
 	
@@ -366,6 +378,33 @@ QVariant Filter::provideInfo(varInfoType info, const QString& colName, int row) 
 {
 	try
 	{
+		// The excision, Cut 5: lane-bound datasets have no legacy Columns for the
+		// FilteredData/VarInfoModelProxy machinery to read — the wire schema is the truth.
+		// Same lane convention as ColumnsModel::provideInfo (data-model-design.md §3.4):
+		// scale levels ≡ distinctCount, categorical levels ≡ the dictionary, numeric values
+		// per numeric_levels. (A preview of Cut 6's provider cutover, done minimally.)
+		if (data()->isOpen() && !colName.isEmpty())
+		{
+			const ColumnInfo * col = data()->schemaColumn(fq(colName));
+
+			switch(info)
+			{
+			case varInfoType::VariableType:			return	int(!col ? columnType::unknown : col->type);
+			case varInfoType::TotalLevels:			return	!col ? 0 : (col->type == columnType::scale ? int(col->distinctCount) : int(col->levels.size()));
+			case varInfoType::TotalNumericValues:	return	!col ? 0 : (col->type == columnType::scale ? int(col->distinctCount) : col->numericLevels);
+			case varInfoType::Labels:
+			{
+				if (!col)	return	QStringList();
+				QStringList levels;
+				for (const std::string & level : col->levels)
+					levels.append(tq(level));
+				return levels;
+			}
+			case varInfoType::ColumnDescription:	return	tq(col ? col->description : "");
+			default:								break;
+			}
+		}
+
 		switch(info)
 		{
 		case varInfoType::VariableNames:			return	tq(data()->getColumnNames());

@@ -130,13 +130,9 @@ void DataSetView::_copy(QPoint where, bool clear)
 		for(int c=minIdx.x(); c<=maxIdx.x(); c++)
 			if(_selectionModel->columnIntersectsSelection(c))
 			{
-				// NEO: serializedColumn reads legacy Column storage — nullValue on lane
-				// datasets (no lossless JASP↔JASP column format for lane data yet; the plain
-				// clipboard path works). Push only real serializations so internal column-paste
-				// never sees ghost entries.
-				Json::Value serialized = _expandedModel->serializedColumn(c);
-				if(!serialized.isNull())
-					_copiedColumns.push_back(serialized);
+				// The excision, Cut 5: internal JASP↔JASP column-copy serialized legacy Column
+				// storage — gone. Column copy/paste returns with a NEO wire format; the plain
+				// clipboard path below still works.
 				headerRow.push_back(_expandedModel->headerData(c, Qt::Horizontal).toString());
 			}
 
@@ -236,9 +232,9 @@ void DataSetView::paste(QPoint where)
 		_lastJaspCopySelect	.clear();
 	}
 
-	if (isColumnHeader(where) && _copiedColumns.size() && where.x() >= 0) //internal column copy:
-		_expandedModel->copyColumns(where.x(), _copiedColumns);
-	else if(_lastJaspCopyValues.size()) //internal data copy:
+	// The excision, Cut 5: internal JASP column-copy died with Column::serialize (returns
+	// with a NEO wire format); the plain clipboard paste below still works.
+	if(_lastJaspCopyValues.size()) //internal data copy:
 	{
 		if(!isColumnHeader(where))
 			_expandedModel->pasteSpreadsheet(where.y(), where.x(), _lastJaspCopyValues, _lastJaspCopyLabels, {}, _lastJaspCopySelect);

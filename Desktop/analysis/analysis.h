@@ -186,9 +186,9 @@ signals:
 	void					imageChanged();
 	void					rSourceChanged(QString optionName);
 
-	Column				*	requestComputedColumnCreation(		const std::string & columnName, Analysis * analysis);
-	bool					requestColumnCreation(				const std::string & columnName, Analysis * source, columnType type);
-	bool					requestComputedColumnDestruction(	const std::string & columnName, Analysis * analysis);
+	// The excision, Cut 5: requestComputedColumnCreation/requestColumnCreation/
+	// requestComputedColumnDestruction signals died with Column (their only purpose was
+	// legacy computed-column bookkeeping). The QML-side handlers remain as inert stubs.
 
 	void					refreshTableViewModels();
 	void					expandAnalysis();

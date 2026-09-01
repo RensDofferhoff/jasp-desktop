@@ -1,5 +1,4 @@
 #include "expanddataproxymodel.h"
-#include "datasettablemodel.h"
 #include "dataenums.h"
 #include "qutils.h"
 #include "workspace.h"
@@ -119,11 +118,9 @@ Qt::ItemFlags ExpandDataProxyModel::flags(const QModelIndex &index) const
 	if (!sourceModel())
 		return Qt::NoItemFlags;
 
-	// The editing gate (data-edit-design §7): a LEGACY source (DataSetTableModel) or a LIVE
-	// NEO dataset (the GridModel holding an open one) — both are editable surfaces; the
-	// virtual area past the source is editable in expand mode exactly as legacy allowed
-	// (an edit anchored beyond the extent GROWS the dataset: insert_block's design).
-	const bool editableSource = dataSetSourceModel() != nullptr || gridSourceDataSet() != nullptr;
+	// The editing gate (data-edit-design §7): the LIVE NEO dataset (the GridModel holding an
+	// open one). The excision, Cut 5: the legacy source arm is gone.
+	const bool editableSource = gridSourceDataSet() != nullptr;
 
 	if (index.column() < sourceModel()->columnCount() && index.row() < sourceModel()->rowCount())
 	{
@@ -166,113 +163,21 @@ bool ExpandDataProxyModel::isColumnVirtual(int col) const
 
 int ExpandDataProxyModel::shownToRaw(int shownIndex, bool isRow) const
 {
-	QAbstractItemModel * src = sourceModel();
-	if (!src)
-		return shownIndex;
-
-	DataSetTableModel * table = qobject_cast<DataSetTableModel *>(src);
-	if (!table)
-		return shownIndex;
-
-	const int shownCount = isRow ? src->rowCount() : src->columnCount();
-
-	if (shownIndex <= 0)
-		shownIndex = 0;
-
-	// Past the shown region (virtual/expand area): map to the raw slot the virtual cell will occupy
-	// once the table is grown to include it (shown index "shownCount + k" sits at raw tail + k).
-	if (shownIndex >= shownCount)
-		return (isRow ? dataSetSourceModel()->rowCount() : dataSetSourceModel()->columnCount())
-			+ (shownIndex - shownCount);
-
-	QModelIndex shownIdx	= isRow ? table->index(shownIndex, 0) : table->index(0, shownIndex);
-	QModelIndex raw			= table->mapToSource(shownIdx);
-
-	if (raw.isValid())
-		return isRow ? raw.row() : raw.column();
-
-	return isRow ? dataSetSourceModel()->rowCount() : dataSetSourceModel()->columnCount();
+	Q_UNUSED(isRow);
+	// The excision, Cut 5: the legacy filter-compaction mapping (DataSetTableModel) is gone
+	// — the NEO view has no filter compaction, so shown == raw, identity.
+	return shownIndex;
 }
 
-std::vector<std::pair<int,int>> ExpandDataProxyModel::rawRunsFromShown(bool isRow, int shownStart, int shownCount) const
-{
-	std::vector<std::pair<int,int>> runs;
-
-	if (!sourceModel())
-		return runs;
-
-	const int maxShown = isRow ? sourceModel()->rowCount() : sourceModel()->columnCount();
-
-	int runStart = -1,
-		lastRaw  = -1;
-
-	for (int s = shownStart; s < shownStart + shownCount && s < maxShown; s++)
-	{
-		int r = shownToRaw(s, isRow);
-		if (r < 0)
-			continue;
-
-		if (runStart < 0)
-		{
-			runStart = r;
-			lastRaw  = r;
-		}
-		else if (r == lastRaw + 1)
-			lastRaw = r;
-		else
-		{
-			runs.push_back({runStart, lastRaw - runStart + 1});
-			runStart = r;
-			lastRaw  = r;
-		}
-	}
-
-	if (runStart >= 0)
-		runs.push_back({runStart, lastRaw - runStart + 1});
-
-	return runs;
-}
+// The excision, Cut 5: rawRunsFromShown mapped shown runs through the legacy filter
+// compaction — the NEO view is identity (shownToRaw). Died with removeRuns' command body.
 
 void ExpandDataProxyModel::removeRuns(bool isRows, const std::vector<std::pair<int,int>>& shownGroups)
 {
-	DataSet * ds = dataSetSourceModel();
-	if (!ds)
-		return;
-
-	std::vector<std::pair<int,int>> rawRuns;
-	for (const auto & startCount : shownGroups)
-	{
-		auto runs = rawRunsFromShown(isRows, startCount.first, startCount.second);
-		rawRuns.insert(rawRuns.end(), runs.begin(), runs.end());
-	}
-
-	if (rawRuns.empty())
-		return;
-
-	// Sort ascending and merge adjacent raw runs (was only ever true if two shown groups touched).
-	std::sort(rawRuns.begin(), rawRuns.end(), [](const auto & a, const auto & b){ return a.first < b.first; });
-
-	std::vector<std::pair<int,int>> merged;
-	for (const auto & run : rawRuns)
-	{
-		if (!merged.empty() && merged.back().first + merged.back().second == run.first)
-			merged.back().second += run.second;
-		else
-			merged.push_back(run);
-	}
-
-	int total = 0;
-	for (const auto & run : merged)
-		total += run.second;
-
-	UndoStack * stack = undoStack();
-	stack->startMacro(isRows ? tr("Remove %1 rows").arg(total) : tr("Remove %1 columns").arg(total));
-
-	// The excision, Cut 4: row/column removal was legacy-only (the lane rail has no
-	// delete op yet — growth is remote, extent edits come with the derived-columns era).
-	// The macro is ended empty, so this is an honest no-op.
-	Q_UNUSED(merged);
-	stack->endMacro();
+	// The excision, Cut 5: structural removal was legacy-only and its commands died in
+	// Cut 4; the lane rail has no delete op yet. Honest no-op.
+	Q_UNUSED(isRows);
+	Q_UNUSED(shownGroups);
 }
 
 void ExpandDataProxyModel::removeRows(int start, int count)
@@ -354,7 +259,7 @@ bool ExpandDataProxyModel::setData(const QModelIndex &index, const QVariant &val
 	// the §1.2 tail, the anchor is the shown index (identity: the NEO view has no filter
 	// compaction; an anchor past the extent GROWS the dataset remotely — data_changed
 	// restarts the view, no local resize). Labels/roles stay the label editor's business.
-	if (!dataSetSourceModel())
+	// The excision, Cut 5: the legacy source arm is gone — this is the only surface.
 	{
 		DataSet * ds = gridSourceDataSet();
 		if (!ds)
@@ -385,8 +290,7 @@ void ExpandDataProxyModel::pasteSpreadsheet(int row, int col, const std::vector<
 	if (!sourceModel() || row < 0 || col < 0 || values.size() == 0 || values[0].size() == 0 )
 		return;
 
-	DataSet * ds = dataSetSourceModel();
-	if (!ds)
+	// The excision, Cut 5: the NEO paste is the only route (the legacy source arm is gone).
 	{
 		// NEO paste: ONE insert_block over the whole rectangle (the commit-boundary rule —
 		// one wire trip, one revision bump, one undo entry). Identity mapping (no filter
@@ -430,7 +334,7 @@ int ExpandDataProxyModel::setColumnType(intset columnIndexes, int columnType)
 	// re-encodes the data, coerce-or-error). The shown indexes ARE the schema indexes
 	// (no filter compaction in the NEO view); names come from the schema, not the legacy
 	// mirror (renames keep the mirror stale — the grid reads the schema).
-	if (!dataSetSourceModel())
+	// The excision, Cut 5: the legacy source arm is gone — this is the only route.
 	{
 		DataSet * ds = gridSourceDataSet();
 		if (!ds)
@@ -482,25 +386,6 @@ void ExpandDataProxyModel::copyColumns(int startCol, const std::vector<Json::Val
 	Log::log() << "ExpandDataProxyModel::copyColumns: legacy column-copy is gone — ignored" << std::endl;
 }
 
-Json::Value ExpandDataProxyModel::serializedColumn(int col)
-{
-	DataSet * ds = dataSetSourceModel();
-	if (!ds)
-		return Json::nullValue;
-
-	int rawCol = shownToRaw(col, false);
-	if (rawCol >= 0 && rawCol < ds->columnCount())
-		return ds->column(rawCol)->serialize();
-
-	return Json::nullValue;
-}
-
-DataSet	* ExpandDataProxyModel::dataSetSourceModel() const 
-{ 
-	DataSetTableModel * table = qobject_cast<DataSetTableModel*>(sourceModel()); 
-	
-	if(table)
-		return table->dataSetSourceModel();
-	
-	return nullptr;
-}
+// The excision, Cut 5: serializedColumn read legacy Column storage (Column::serialize)
+// through the DataSetTableModel arm — both gone. dataSetSourceModel() (the legacy-arm
+// detector) died with them.

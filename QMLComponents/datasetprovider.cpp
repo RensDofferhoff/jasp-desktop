@@ -13,14 +13,17 @@
 //
 // You should have received a copy of the GNU Affero General Public
 // License along with this program.  If not, see
-// <http://www.gnu.org/licenses/>.
+// <https://www.gnu.org/licenses/>.
 //
 
 #include "datasetprovider.h"
 #include "columnencoder.h"
+#include "columnutils.h"
 #include "qutils.h"
 
+#include <algorithm>
 #include <memory>
+#include <set>
 
 DataSetProvider		*	DataSetProvider::_singleton		= nullptr;
 
@@ -72,68 +75,82 @@ int	DataSetProvider::rowCount(const QModelIndex &) const
 
 int	DataSetProvider::columnCount(const QModelIndex &) const
 {
-	return dataSet()->rowCount();
+	return 1;
 }
 
 QVariant DataSetProvider::data(const QModelIndex & index, int role) const
 {
-	Column * column = index.row() >= rowCount() ? nullptr : dataSet()->column(index.row());
+	const ColumnInfo * info = index.row() >= rowCount() ? nullptr : dataSet()->schemaColumnAt(size_t(index.row()));
 
-	if (!column)						return QVariant();
-	else if (role == Qt::DisplayRole)	return tq(column->name());
-	else								return QVariant(); //QAbstractTableModel::data(index, role);
+	if (!info)							return QVariant();
+	else if (role == Qt::DisplayRole)	return tq(info->name);
+	else								return QVariant();
 }
+
+// The excision, Cut 5: loadDataSet built legacy Columns via initFromLookups — Column is
+// gone. The provider now plays a LANE dataset instead (applySchema), exactly what the
+// orchestrator would deliver on an open: the string data become schema metadata (types,
+// level sets, distinct counts), which is all the forms/QML layer may ask for. There are no
+// row values to serve — the schema is the truth, the grid reads the view lane.
 
 void DataSetProvider::loadDataSet(const std::map<std::string, stringvec > & dataSetStrings, int threshold, bool orderLabelsByValue)
 {
+	Q_UNUSED(threshold);
+	Q_UNUSED(orderLabelsByValue);
+
 	if (!dataSet())
 		_workspace->createDataSet();
 
-	dataSet()->beginBatchedToDB();
+	DataSet * dataSet = this->dataSet();
 
-	int rowCount = 0;
-	for (const auto it : dataSetStrings)
-		rowCount = rowCount >= it.second.size() ? rowCount : it.second.size();
+	size_t		rows	= 0;
+	Json::Value	schema(Json::arrayValue);
 
-
-	dataSet()->setColumnCount(dataSetStrings.size());
-	dataSet()->setRowCount(rowCount);
-
-	int colNr = 0;
-
-	for (const auto it : dataSetStrings)
+	for (const auto & [name, values] : dataSetStrings)
 	{
-		auto lookup = [&](size_t r)
+		rows = std::max(rows, values.size());
+
+		// Infer the wire type the way the lane would: every value numeric → scale, else a
+		// categorical whose distinct values are its levels.
+		bool		allNumeric = !values.empty();
+		stringvec	levels;
+
+		for (const std::string & val : values)
 		{
-			return dataSetStrings.at(it.first)[r];
-		};
+			double dummy;
+			if (!ColumnUtils::getDoubleValue(val, dummy))
+			{
+				allNumeric = false;
+				if (std::find(levels.begin(), levels.end(), val) == levels.end())
+					levels.push_back(val);
+			}
+		}
 
-		dataSet()->column(colNr)->initFromLookups(it.first, rowCount, lookup, lookup, it.first, columnType::unknown, {}, threshold, orderLabelsByValue);
+		Json::Value col(Json::objectValue);
+		col["name"]			= name;
+		col["display_name"]	= name;
+		col["value_count"]	= Json::UInt64(values.size());
 
-		colNr++;
+		if (allNumeric)
+		{
+			col["type"]			= "scale";
+			col["distinct_count"]	= Json::UInt64(std::set<std::string>(values.begin(), values.end()).size());
+		}
+		else
+		{
+			col["type"]	= "nominal";
+			Json::Value jsonLevels(Json::arrayValue);
+			for (const std::string & level : levels)
+				jsonLevels.append(level);
+			col["levels"]			= jsonLevels;
+			col["distinct_count"]	= Json::UInt64(levels.size());
+		}
+
+		schema.append(col);
 	}
 
-	dataSet()->endBatchedToDB([](float f) {});
+	dataSet->applySchema("datasetprovider-fixture", rows, schema, "");
 
-	//The desktop must not rely on the process-global ColumnEncoder (that is only meaningful inside the
-	//engine's request context); consumers get the dataset's own encoder via provider->columnEncoder().
-	dataSet()->encoder().setCurrentNames(dataSet()->getColumnTypesMap());
-
-}
-
-// The excision, Cut 3: DataSetProvider::closeDatabase/loadDatabase (the sqlite/.jasp restore
-// path) died with DatabaseInterface. Their only caller was syntaxbridge.cpp, which is not part
-// of the NEO build — nothing needs them until .jasp persistence returns (a later era).
-
-QVariantList DataSetProvider::_getDoubleList(Column * column) const
-{
-	return !column ? QVariantList() : column->getColumnValuesAsDoubleList();
-}
-
-QVariantList DataSetProvider::_getStringList(Column * column) const
-{
-
-	return !column ? QVariantList() : tvl(tq(column->displaysAsStrings()));
 }
 
 QStringList DataSetProvider::_getColumnNames() const
@@ -144,21 +161,23 @@ QStringList DataSetProvider::_getColumnNames() const
 
 QVariant DataSetProvider::provideInfo(varInfoType info, const QString& colName, int row) const
 {
+	Q_UNUSED(row);
+
 	try
 	{
-		Column * column = dataSet()->column(fq(colName));
+		const ColumnInfo * column = dataSet()->schemaColumn(fq(colName));
 
 		switch(info)
 		{
-		case varInfoType::VariableType:				return	int(!column ? columnType::unknown : column->type());
-		case varInfoType::DoubleValues:				return	_getDoubleList(column);
-		case varInfoType::TotalNumericValues:			return	!column ? 0 : column->nonFilteredNumericsCount();
-		case varInfoType::TotalLevels:					return	!column ? 0 : (int)column->nonFilteredLevels().size();
-		case varInfoType::Labels:						return	!column ? QStringList() : tq(column->nonFilteredLevels());
+		case varInfoType::VariableType:				return	int(!column ? columnType::unknown : column->type);
+		case varInfoType::DoubleValues:				return	QVariantList();			// no row values on the schema path
+		case varInfoType::TotalNumericValues:		return	!column ? 0 : (column->type == columnType::scale ? int(column->distinctCount) : column->numericLevels);
+		case varInfoType::TotalLevels:					return	!column ? 0 : (column->type == columnType::scale ? int(column->distinctCount) : int(column->levels.size()));
+		case varInfoType::Labels:						return	!column ? QStringList() : tq(column->levels);
 		case varInfoType::NameRole:					return	Qt::DisplayRole;
-		case varInfoType::DataSetRowCount:				return  dataSet()->rowCount();
-		case varInfoType::DataSetValue:				return	!column ? "" : tq(column->getValue(row));
-		case varInfoType::DataSetValues:				return	_getStringList(column);
+		case varInfoType::DataSetRowCount:				return  int(dataSet()->rowCount());
+		case varInfoType::DataSetValue:				return	"";						// no row values on the schema path
+		case varInfoType::DataSetValues:				return	QStringList();
 		case varInfoType::MaxWidth:					return	100;
 		case varInfoType::SignalsBlocked:				return	false;
 		case varInfoType::VariableNames:				return	_getColumnNames();
@@ -181,34 +200,11 @@ QVariant DataSetProvider::provideInfo(varInfoType info, const QString& colName, 
 
 bool DataSetProvider::absorbInfo(varInfoType info, const QString &colName, int row, QVariant value)
 {
-	try
-	{
-		Column * column = dataSet()->column(fq(colName));
-		if (!column)
-			return false;
-
-		switch(info)
-		{
-		default:								return false;
-		case varInfoType::DataSetValue:		return column->setStringValue(row, fq(value.toString()));
-		case varInfoType::DataSetValues:
-		{
-			int r=0;
-			if(dataSet()->rowCount() < value.toList().size())
-				dataSet()->setRowCount(value.toList().size(), false);
-
-			for(const QVariant & val : value.toList())
-				if (row + r < dataSet()->rowCount())
-					column->setStringValue(row + r++, fq(val.toString()), "", false);
-			return true;
-		}
-		}
-	}
-	catch(std::exception & e)
-	{
-		throw e;
-	}
-
+	// The excision, Cut 5: writes went into legacy Column storage — with Column gone this
+	// provider is read-only schema service (the grid edits through DataEditCommand).
+	Q_UNUSED(colName);
+	Q_UNUSED(row);
+	Q_UNUSED(value);
+	Q_UNUSED(info);
 	return false;
 }
-

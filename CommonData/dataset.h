@@ -21,7 +21,6 @@
 #include "databaseconnectioninfo.h"
 #include "datasetbasenode.h"
 #include "emptyvalues.h"
-#include "column.h"
 #include "filter.h"
 #include "version.h"
 #include "columnencoder.h"
@@ -44,10 +43,9 @@ class DataSet : public DataSetBaseNode
 	//Q_PROPERTY(QJsonValue			databaseJson				READ databaseJsonQ				WRITE setDatabaseJsonQ			NOTIFY databaseJsonChanged				)
 	Q_PROPERTY(bool					dataFileSynch				READ dataFileSynch				WRITE setDataFileSynch			NOTIFY dataFileSynchChanged				)
 	Q_PROPERTY(long					dataFileTimestamp			READ dataFileTimestamp			WRITE setDataTimestamp			NOTIFY dataTimestampChanged				)
-	Q_PROPERTY(int					columnsLabelFilteredCount	READ columnsLabelFilteredCount									NOTIFY columnsLabelFilteredCountChanged	)
-	Q_PROPERTY(Filter	*			shownFilter					READ shownFilter												NOTIFY shownFilterChanged				)
-	Q_PROPERTY(Column	*			shownColumn					READ shownColumn				WRITE setShownColumn			NOTIFY shownColumnChanged				)
-	Q_PROPERTY(QString				name						READ name														CONSTANT								)
+	Q_PROPERTY(int					columnsLabelFilteredCount	READ columnsLabelFilteredCount											NOTIFY columnsLabelFilteredCountChanged	)
+	Q_PROPERTY(Filter	*			shownFilter					READ shownFilter													NOTIFY shownFilterChanged				)
+	Q_PROPERTY(QString				name							READ name															CONSTANT										)
 	Q_PROPERTY(QString				title						READ title						WRITE setTitle					NOTIFY titleChanged						)
 	Q_PROPERTY(QString				rCode						READ rCodeQ						WRITE setRCodeQ					NOTIFY rCodeChanged						)
 	Q_PROPERTY(computedColumnType	codeType					READ codeType					WRITE setCodeType				NOTIFY codeTypeChanged					)
@@ -56,8 +54,8 @@ class DataSet : public DataSetBaseNode
 	Q_PROPERTY(int					defaultInputFilterId		READ defaultInputFilterId		WRITE setDefaultInputFilterId	NOTIFY defaultInputFilterChanged		)
 	// Emit signals also in refresh
 	
-	friend Column;
-	
+	friend class Filter;
+
 public:
 	typedef 	std::map<std::string,columnType>	colTypeMap;
 	// The excision, Cut 3: DatabaseInterface is gone — the DBIF/DBCIF aliases died with it.
@@ -74,20 +72,13 @@ public:
 			void			showFilter(Filter * filter);
 			Filter *		showFilter(const std::string & filterName);
 			Filter *		showFilter(const QString & filterName);
-			Columns		&	columns()			const		{ return	const_cast<Columns&>(_columns);	}
-    const	EmptyValues *	emptyValues()       const		{ return	_emptyValues; }
-			EmptyValues *	emptyValues()					{ return	_emptyValues; }
+			// The excision, Cut 5: the Columns container and every Column* accessor died with
+			// Column — the wire schema (`schema()` / `schemaColumn*`) is THE column truth.
+	const	EmptyValues *	emptyValues()       const		{ return	_emptyValues; }
+			EmptyValues *	emptyValues()						{ return	_emptyValues; }
 			QString			name()				const;
 			QString			title()				const;
 
-			Column		*	column(		const std::string & name);
-			Column		*	column(		const char * name) { return column(std::string(name));}
-			Column		*	column(		const QString & name);
-			Column		*	column(		int					columnIndex);
-
-			Column		*	operator[](	size_t				columnIndex)	{ return column(columnIndex); }
-			Column		*	operator[](	const std::string &	columnName)		{ return column(columnName); }
-	
 			int				id()					const { return _dataSetId;				}
 
 	// ————— NEO lane identity + wire schema (multi-dataset fold; data-model-design.md §3.2) —————
@@ -123,14 +114,13 @@ public:
 			bool			dataFileSynch()			const { return _dataFileSynch;			}
 			
 	const	std::string &	dataFilePath()			const { return _dataFilePath;			}
-			bool			dataFileCanHaveLabels() const;
+			// The excision, Cut 5: dataFileCanHaveLabels died with the label editor guts (B2).
 			qint64			dataFileTimestamp()		const { return _dataFileTimestamp;		}
 	const	Json::Value &	databaseJson()			const { return _database;				}
 			bool			writeBatchedToDB()		const { return _writeBatchedToDBDepth;		}
 			bool			filterExists(const std::string & name) { return filter(name); }
 			Filter *		filter(const std::string & name);
 			Filter *		filter(int id);
-			void			batchColumnHadChange(Column *col);
 			
 			int				rowCount(		const QModelIndex &parent = QModelIndex())										const	override;
 			int				columnCount(	const QModelIndex &parent = QModelIndex())										const	override;
@@ -139,10 +129,12 @@ public:
 			QVariant		headerData(		int section, Qt::Orientation orientation, int role = Qt::DisplayRole )			const	override;
 			Qt::ItemFlags	flags(			const QModelIndex &index)														const	override;
 			
-			bool			insertRows(		int row,		int count, const QModelIndex & aparent = QModelIndex())					override;
-			bool			insertColumns(	int column,		int count, const QModelIndex & aparent = QModelIndex())					override;
-			bool			removeRows(		int row,		int count, const QModelIndex & aparent = QModelIndex())					override;
-			bool		removeColumns(	int column,		int count, const QModelIndex & aparent = QModelIndex())				override;
+			bool			insertRows(		int row,		int count, const QModelIndex & aparent = QModelIndex())						override;
+			bool			insertColumns(	int column,		int count, const QModelIndex & aparent = QModelIndex())						override;
+			bool			removeRows(		int row,		int count, const QModelIndex & aparent = QModelIndex())						override;
+			bool			removeColumns(	int column,		int count, const QModelIndex & aparent = QModelIndex())						override;
+			// The excision, Cut 5: these were the legacy TableModel write ops (Column-value
+			// surgery); they become inert — structural change on lane is remote (revisions).
 
 			// The excision, Cut 3: dbCreate/dbUpdate/dbLoad died with DatabaseInterface; dbDelete
 			// survives as the PURELY IN-MEMORY teardown (no sqlite rows exist). Ids are minted from
@@ -151,39 +143,22 @@ public:
 			int				columnsLabelFilteredCount()	const;
 			void			dbDelete();
 			void			beginBatchedToDB();
-			void			endBatchedToDB(std::function<void(float)> progressCallback = [](float){}, Columns columns={});
-			void			endBatchedToDB(Columns columns) { endBatchedToDB([](float){}, columns); }
+			void			endBatchedToDB(std::function<void(float)> progressCallback = [](float){});
 			
-			void			removeColumn(	const	std::string &	name	);
-			void			removeColumn(			size_t			index	);
-			void			removeColumnById(		size_t			id		);
-			void			insertColumns(			size_t			index,	size_t count, bool alterDataSetTable = true);
-			void			insertColumn(			size_t			index,	bool alterDataSetTable = true);
-			Column		*	createColumn(			const std::string &	name, columnType columnType = columnType::unknown);
-			Column		*	createComputedColumn(	const std::string & name, columnType type		= columnType::unknown, computedColumnType desiredType = computedColumnType::analysis, int analysisId = -1);
+			// The excision, Cut 5: the legacy column-write API (removeColumn/insertColumn(s)/
+			// createColumn/createComputedColumn/columnsReorder/columnRefreshed/columnsSet·Reverse·
+			// Apply·LabelFilter etc.) died with Column — write gestures are DataEditCommands on
+			// the rail.
 			ColumnEncoder	&	encoder()			{ return *_encoder; }
-	const	ColumnEncoder	&	encoder()	const	{ return *_encoder; }
-			int				getColumnIndex(	const	std::string &	name	) const;
-			int				columnIndex(	const	Column		*	col		) const;
-			void			columnsReorder(			stringvec		order	); ///< Expects a sane order vector, with or without computed columns
-			void			columnRefreshed(Column * column);
-			void			columnsSetAutoSortForColumns(std::map<std::string,bool> sortPerColumn);
-			void			columnsReverseValues(stringset columnIndexes);
-			void			invalidateAllComputedColumns();
-
-			bool			allColumnsPassFilter()					const;
+	const	ColumnEncoder	&	encoder()		const { return *_encoder; }
+			int				getColumnIndex(	const	std::string &	name) const;
 			
-			std::string		freeNewColumnName(size_t startHere)																const;
-			bool			isColumnNameFree(const std::string & name)														const;
+			bool			isColumnNameFree(const std::string & name)		const;
 			
 			QString			dataFileQ()			const;
 			QString			descriptionQ()		const;
 			long			dataTimestamp()		const;
 			bool			isDatabase()						const	{ return _database != Json::nullValue;				}
-			
-			Column		*	shownColumn() const;
-			void			setShownColumn(Column *newShownColumn);
-			
 			
 			void			setTitle(				const QString & title);
 			void			setDataFileQ(			const QString &	newDataFile);
@@ -193,10 +168,9 @@ public:
 			
 			void			resetAllFilters();
 			void			resetFilterCounters();
-			void			resetVariableTypes(int thresholdScale);
+			// The excision, Cut 5: resetVariableTypes re-guessed types from legacy Column values —
+			// the lane owns typing (schema_change ops); returns with backend sync (P14 territory).
 			
-
-			size_t			getMaximumColumnWidthInCharacters(size_t columnIndex) const;
 			stringvec		getColumnNames();
 			colTypeMap		getColumnTypesMap();
 			void			setupEncoderPrefix();
@@ -206,28 +180,21 @@ public:
 			void			setDataTimestamp(	long timestamp);
 			void			setDatabaseJson(	const Json::Value & databaseJson);
 			void		setDataFileSynch(	bool	synchronizing);
-			bool		synchingData()		const { return _synchingDataNow; }
+			bool			synchingData()		const { return _synchingDataNow; }
 			
-			void			emitColumnChanged(		const QString		& name);
 
 			void			setDataFile( const std::string & dataFilePath, long timestamp)	{ _dataFilePath	= dataFilePath;	_dataFileTimestamp = timestamp; incRevision(); }	// was dbUpdate()
 			void			setDatabaseJson(	const std::string & databaseJson)	{ Json::Reader().parse(databaseJson, _database); incRevision(); }	// was dbUpdate()
 			char			csvDelimiter()		const									{ return _csvDelimiter; }
 			void			setCsvDelimiter(	char delimiter)						{ _csvDelimiter		= delimiter;			incRevision(); }	// was dbUpdate()
 
-			void			setColumnCount(	size_t colCount);
-			void			setRowCount(	size_t rowCount, bool alsoLoadData = true);
-			/// The LANE row count (applySchema/applyRevision): metadata ONLY — never materializes
-			/// the legacy Columns' per-row value vectors nor the default filter's vector (gigabytes
-			/// of dead weight on a large lane dataset; the grid reads cells through the view lane).
 			void			setRowCountMetadata(size_t rowCount);
 
 			void			incRevision() override;
 			bool			checkForUpdates(std::function<void(float)> progressCallback = [](float){});
-			void			runComputedColumn(QString columnName, QString code, enum columnType columnType);
 			void			runComputedDataset(QString code, int defaultInputFilterId);
-
-			Columns				computedColumns() const;
+			// The excision, Cut 5: runComputedColumn + computedColumns() died with Column;
+			// computed COLUMNS return as derivations, computed DATASETS stay (below).
 
 			//Computed-dataset state (a whole DataSet generated from R code), mirroring the per-column state.
 			bool					isComputed()				const	{ return _codeType != computedColumnType::notComputed;									}
@@ -256,7 +223,7 @@ public:
 			void					checkForDependentDatasetsToBeSent(bool refreshMe = false);
 			void					dbUpdateComputedDatasetStuff();
 			
-			void			loadOldComputedColumnsJson(const Json::Value & json); ///< Should act the same as the old ComputedColumns::fromJson() to allow loading "older jaspfiles"
+			void			loadOldComputedColumnsJson(const Json::Value & json);	///< The excision, Cut 5: inert — legacy computed-Column restore is gone.
 			stringset		findUsedColumnNames(std::string searchThis);
 
 	// The excision, Cut 3: DBIF & db() died with DatabaseInterface.
@@ -265,9 +232,10 @@ public:
 			
 	const	std::string	&	description()																	const	{ return _description; }
 	const	stringset	&	emptyValuesAsStrings()															const	{ return _emptyValues->emptyStrings();		}
-			void			setEmptyValuesFromStrings(	const stringset& values);
+			void			setEmptyValuesFromStrings(const stringset& values);
 			void			setDescription(				const std::string& desc);
-			Json::Value		jsonForCompare() const;
+			// The excision, Cut 5: jsonForCompare hashed legacy Column values — the wire schema
+			// + revision is the comparison currency now.
 			// writeToOStream died with the exporters (the excision, Cut 2); export returns as a
 			// lane conversion in a later NEO era.
 
@@ -281,7 +249,8 @@ signals:
 															bool					rowCountChanged,
 															bool					hasNewColumns); 
 			void			labelsReordered(			QString columnName);
-			void			labelFilterChanged();
+			// The excision, Cut 5: labelFilterChanged + labelChanged(Column*) died with the label
+			// editor guts (B2 rebuilds on the jasp:labels overlay).
 			
 			void			allFiltersReset();
 			void			showWarning(						QString title, QString msg);
@@ -295,16 +264,14 @@ signals:
 			void			refreshAllAnalyses(Filter * f);
 			void			refreshAllCompCols(Filter * f);
 			void			synchingIntervalPassed();
-			void			columnTypeChanged(QString name);
+			void			columnTypeChanged(QString name);	///< still emitted on schema type changes (lane)
 			void			sendFilter(int dataSetID, const QString & generatedFilter, const QString & filter);
 			void			sendFilterByName(int dataSetID, const QString & name, const QString & module = "*");
 			void			filtersCountChanged();
 			void			shownFilterChanged(DataSet * data);
 			void			filterRemoved(Filter * f);
-			void		labelChanged(		const Column * column, QString originalLabel, QString newLabel);
-			QString			askPassword(	QString title, QString message);
+			void			askPassword(	QString title, QString message);
 			bool			showYesNo(		QString title, QString message);
-			void			shownColumnChanged();
 			void			emptyValuesChanged();
 			void			rCodeChanged();
 			void			codeTypeChanged();
@@ -315,10 +282,7 @@ signals:
 public slots:
 			void			refresh(bool doColumnsToo = true);
 			void			runFilters();
-			void			handleColumnChanged(		const Column * column);
-			void			handleLabelsReordered(		const Column * column);
-			bool			setColumnTypes(stringset columnIndexes, columnType newColumnType);
-			void		filterByNameDone(int dataSetID, const QString & name, const QString & error);
+			void			filterByNameDone(int dataSetID, const QString & name, const QString & error);
 			
 
 public:
@@ -329,10 +293,8 @@ public:
 private:
 			void			upgradeEmptyValsFrom018To019(const Json::Value & emptyVals);
 			void			setEmptyValuesJsonOldStuff(	const Json::Value & emptyValues);
-			void			columnsApply(intset		columnIndxs, std::function<bool (Column *)>			applyThis);
-			void			columnsApply(stringset	columnNames, std::function<bool (Column *)>			applyThis);
-			void			columnsApply(intset		columnIndxs, std::function<bool (Column *, int)>	applyThis);
-			void			columnsApply(stringset	columnNames, std::function<bool (Column *, int)>	applyThis);
+			// The excision, Cut 5: the columnsApply family + loadOldComputedColumnsJson died with
+			// Column.
 
 			
 private slots:
@@ -344,32 +306,28 @@ private slots:
 													bool					hasNewColumns);
 
 public:
-	static QVariant			getDataSetViewLines(bool up, bool left, bool down, bool right)									;
-			
+	static QVariant			getDataSetViewLines(bool up, bool left, bool down, bool right)								    ;
 	
-	UndoStack			*	undoStack()				const	{ return _undoStack; }
-	QString					insertColumnSpecial(int columnIndex, const QMap<QString, QVariant> &props);
-	void					pasteSpreadsheet(size_t row, size_t col, const std::vector<std::vector<QString>> & values, const std::vector<std::vector<QString>> &  labels, const intvec & coltypes = std::vector<int>(), const QStringList & colNames = {}, const std::vector<boolvec> & selected = {});
+	
+	UndoStack		*	undoStack()				const	{ return _undoStack; }
+	// The excision, Cut 5: insertColumnSpecial + pasteSpreadsheet (the legacy column-write
+	// surface) died with Column.
 	
 protected:
-	bool					getRowFilter(int row)																			const;
-	bool					getColumnInDragNDropShownFilter(int columnIndex)												const;
-	bool					getColumnInDragNDropShownFilter(Column * column)												const;
+	bool					getRowFilter(int row)						const;
+		
 		
 private:
 	Workspace			*	_workspace				= nullptr;
-	Columns					_columns;
-	Column				*	_shownColumn			= nullptr;
 	ColumnEncoder		*	_encoder				= nullptr;
-	Filter				*	_defaultFilter			= nullptr,
-						*	_shownFilter			= nullptr;
+	Filter			*	_defaultFilter			= nullptr,
+					*	_shownFilter			= nullptr;
 	Filters					_filters;
 	EmptyValues			*	_emptyValues			= nullptr;
 	int						_dataSetId				= -1,
 							_rowCount				= -1,
 							_writeBatchedToDBDepth	= 0;
-	ColumnSet				_changedDuringBatch		= {};
-	long					_dataFileTimestamp		= 0;
+	long					_dataFileTimestamp		= 0;			// The excision, Cut 5: _columns/_shownColumn/_changedDuringBatch (ColumnSet) died with Column.
 	std::string				_dataFilePath,
 							_title;
 	bool					_dataFileSynch			= false,

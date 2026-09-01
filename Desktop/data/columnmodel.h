@@ -10,7 +10,6 @@
 
 struct ColumnInfo;	///< dataset.h — the lane schema's column record (NEO adapter reads)
 
-class Column;
 class DataSet;
 
 /// 
@@ -30,7 +29,7 @@ class ColumnModel : public QIdentityProxyModel
 	Q_PROPERTY(bool			hasLabels					READ hasLabels													NOTIFY hasLabelsChanged		)
 
     Q_PROPERTY(int			filteredOut					READ filteredOut                                                NOTIFY filteredOutChanged				)
-	Q_PROPERTY(Column *		column						READ column														NOTIFY chosenColumnChanged				)
+	// The excision, Cut 5: the `column` Q_PROPERTY (a Column*) died with Column.
 	Q_PROPERTY(int			chosenColumn				READ chosenColumn				WRITE setChosenColumn			NOTIFY chosenColumnChanged				)
     Q_PROPERTY(bool			visible						READ visible                    WRITE setVisible                NOTIFY visibleChanged					)
 	Q_PROPERTY(double		rowWidth					READ rowWidth					WRITE setRowWidth				NOTIFY rowWidthChanged					)
@@ -43,12 +42,9 @@ class ColumnModel : public QIdentityProxyModel
 	Q_PROPERTY(QVariantList	computedTypeValues			READ computedTypeValues											NOTIFY computedTypeValuesChanged		)
 	Q_PROPERTY(QString		currentColumnType			READ currentColumnType			WRITE setColumnType				NOTIFY columnTypeChanged				)
 	Q_PROPERTY(QVariantList	columnTypeValues			READ columnTypeValues											NOTIFY columnTypeValuesChanged			)
-	Q_PROPERTY(bool			useCustomEmptyValues		READ useCustomEmptyValues		WRITE setUseCustomEmptyValues	NOTIFY useCustomEmptyValuesChanged		)
-    Q_PROPERTY(QStringList	emptyValues					READ emptyValues                WRITE setCustomEmptyValues		NOTIFY emptyValuesChanged				)
 	Q_PROPERTY(QVariantList	tabs						READ tabs														NOTIFY tabsChanged						)
     Q_PROPERTY(bool         isVirtual					READ isVirtual													NOTIFY isVirtualChanged					)
     Q_PROPERTY(bool			compactMode					READ compactMode                WRITE setCompactMode            NOTIFY compactModeChanged				)
-    Q_PROPERTY(bool			hasSeveralNumericValues		READ hasSeveralNumericValues                                    NOTIFY hasSeveralNumericValuesChanged	) //Only works when autosort is on
 	Q_PROPERTY(int			rowsTotal					READ rowsTotal													NOTIFY rowsTotalChanged					)
     Q_PROPERTY(QString		dropLevels					READ dropLevels					WRITE setDropLevels				NOTIFY dropLevelsChanged                )
 	
@@ -63,7 +59,6 @@ public:
 	ColumnModel &operator=(ColumnModel &&) = delete;
 	static QVariant columnTypeFriendlyMapping(computedColumnType compColT);
 	
-	bool			labelNeedsFilter(size_t col);
 	QString			columnNameQ();
 	QString			columnTitle()					const;
 	QString			columnDescription()				const;
@@ -73,9 +68,6 @@ public:
 	QVariantList	computedTypeValues()			const;
 	QString			currentColumnType()				const;
 	QVariantList	columnTypeValues()				const;
-	bool			useCustomEmptyValues()			const;
-	QStringList		emptyValues()					const;
-	bool			hasSeveralNumericValues()		const;
 	int				rowsTotal()						const;
 	QString			dropLevels()					const;
 	bool			autoSort()						const;
@@ -91,29 +83,19 @@ public:
 	bool			visible()			const {	return _visible; }
 	int				filteredOut()		const;
 	int				chosenColumn()		const;
-	Column *		column()			const;
 	bool			nameEditable()		const;
 	
-	Q_INVOKABLE void reverse();
-	Q_INVOKABLE void reverseValues();
-	Q_INVOKABLE void toggleAutoSortByValues();
-	Q_INVOKABLE void moveSelectionUp();
-	Q_INVOKABLE void moveSelectionDown();
+	// The excision, Cut 5: reverse/reverseValues/toggleAutoSortByValues/moveSelection·Up·Down/
+	// setChecked/setValue/setLabel/deleteLabel/addLabel/add·removeEmptyValue/setUseCustom·
+	// EmptyValues/hasSeveralNumericValues + column() died with Column (the label editor
+	// returns in B2). resetEmptyValues/resetFilterAllows stay as inert invokables.
 	Q_INVOKABLE void resetFilterAllows();
 	Q_INVOKABLE void unselectAll();
-	Q_INVOKABLE bool setChecked(int rowIndex, bool checked);
-	Q_INVOKABLE void setValue(int rowIndex, const QString & value);
-	Q_INVOKABLE void setLabel(int rowIndex, QString label);
-	Q_INVOKABLE void deleteLabel(int rowIndex);
-	Q_INVOKABLE void addLabel(QString value, QString label); ///< Via UndoStack
-	Q_INVOKABLE void addEmptyValue(		const QString & value);
-	Q_INVOKABLE void removeEmptyValue(	const QString & value);
 	Q_INVOKABLE void resetEmptyValues();
 	Q_INVOKABLE void undo()				{ if (undoStack()) undoStack()->undo(); }
 	Q_INVOKABLE void redo()				{ if (undoStack()) undoStack()->redo(); }
 	
 	Q_INVOKABLE bool isColumnNameFree(		const QString & name);
-	Q_INVOKABLE void createComputedColumn(	const QString & name, int columnType, bool useJsonConstructor);
 	
 	UndoStack *	undoStack();
 
@@ -193,13 +175,11 @@ signals:
 	void 		beforeChangingColumn(QString chosenName);
 	void 		nameEditableChanged();
 	void 		tabsChanged();
-	void 		useCustomEmptyValuesChanged();
 	void 		emptyValuesChanged();
 	void 		rowsTotalChanged();
 	void 		isVirtualChanged();
 	void 		compactModeChanged();
 	void 		autoSortChanged();
-	void 		hasSeveralNumericValuesChanged();
 	void 		computeFilterChanged();
 	QString 	columnNameForIndex(int index);
 

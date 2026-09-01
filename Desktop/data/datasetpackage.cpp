@@ -143,10 +143,8 @@ void DataSetPackage::connectWorkspace()
 	Workspace		::connect(workspace(),	&Workspace::dataSetRemoved,						this,			&DataSetPackage::dataSetRemoved					);	
 	//A manual edit by the user (in the data grid / paste) means external-file syncing should be disabled.
 	Workspace		::connect(workspace(),	&Workspace::manualEditMade,						this,			[this]{ setManualEdits(true); }					);
-	Workspace		::connect(workspace(),	&Workspace::runComputedColumn,					this,			&DataSetPackage::runComputedColumn					);	
-	Workspace		::connect(workspace(),	&Workspace::runComputedDataSet,					this,			&DataSetPackage::runComputedDataSet					);	
-	Workspace		::connect(workspace(),	&Workspace::checkForDependentAnalyses,			this,			&DataSetPackage::checkForDependentAnalyses			);	
-	Workspace		::connect(workspace(),	&Workspace::emptyValuesChanged,					this,			&DataSetPackage::workspaceEmptyValuesChanged		);	
+	Workspace		::connect(workspace(),	&Workspace::runComputedDataSet, this, &DataSetPackage::runComputedDataSet						);
+	Workspace		::connect(workspace(),	&Workspace::emptyValuesChanged,			this,			&DataSetPackage::workspaceEmptyValuesChanged		);
 
 	DataSetPackage	::connect(this,			&DataSetPackage::filterByNameDone,				workspace(),	&Workspace::filterByNameDone						);
 	
@@ -195,10 +193,17 @@ void DataSetPackage::generateEmptyData()
 	
 	DataSet * newSet = dataSet() ? dataSet() : createDataSet();
 	
-	newSet->setColumnCount(1);
-	newSet->setRowCount(1, false);
-	
-	newSet->column(0)->initFromLookups(newSet->freeNewColumnName(0), 1, [](size_t){return "";}, [](size_t){return "";}, "", columnType::scale, {}, thresholdScale(), orderByValueByDefault());
+	// The excision, Cut 5: the empty dataset used to materialize one legacy Column via
+	// initFromLookups — play a minimal LANE schema instead ("New Data" = a 1×1 scale sheet).
+	Json::Value schema(Json::arrayValue);
+	Json::Value col(Json::objectValue);
+	col["name"]				= "New Column";
+	col["display_name"]	= "New Column";
+	col["type"]				= "scale";
+	col["value_count"]		= Json::UInt64(1);
+	col["distinct_count"]	= Json::UInt64(0);
+	schema.append(col);
+	newSet->applySchema("new-data", 1, schema, "");
 	
 	setModified(false);
 	
@@ -306,18 +311,17 @@ void DataSetPackage::handleAutoSavePrefChange()
 
 void DataSetPackage::refreshColumn(QString columnName)
 {
-	if(dataSet() && dataSet()->column(columnName))
-	{
-		dataSet()->column(columnName)->refresh();
-		refresh(); //Hopefully trigger sortfilterproxymodel model reconstruction
-	}
+	// The excision, Cut 5: this refreshed a legacy Column's in-memory state — the schema
+	// changed signal chain covers it now.
+	Q_UNUSED(columnName);
+	refresh(); //Hopefully trigger sortfilterproxymodel model reconstruction
 }
 
 
 void DataSetPackage::columnWasOverwritten(const std::string & columnName, const std::string &)
 {
-	if(dataSet())
-		dataSet()->emitColumnChanged(tq(columnName));
+	// The excision, Cut 5: this re-aired a legacy Column's change — schemaChanged covers it.
+	Q_UNUSED(columnName);
 }
 
 
@@ -374,9 +378,8 @@ int DataSetPackage::orderByValueByDefault()
 
 void DataSetPackage::resetVariableTypes()
 {
-	if(workspace())
-		for(DataSet * dataSet : workspace()->dataSets())
-			dataSet->resetVariableTypes(thresholdScale());
+	// The excision, Cut 5: type re-guessing scanned legacy Column values — the lane owns
+	// typing; returns with backend sync (P14 territory).
 }
 
 bool DataSetPackage::workspaceShowRSyntax() const

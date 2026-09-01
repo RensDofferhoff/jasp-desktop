@@ -28,7 +28,7 @@
 class VariableInfoProvider;
 class ColumnEncoder;
 class DataSet;
-class Column;
+// The excision, Cut 5: `class Column;` fwd-decl died with the class.
 
 // The Provider/Consumer mechanism makes an interface so that the consumers (the QML models) get their data without having to know how the Provider furnishes this data
 // Typically, for a JASP application, the Provider will be the ColumnsModel, but if the QML forms are used somewhere else, another Provider should be instantiated.
@@ -84,7 +84,8 @@ public:
 	VarInfoSignaller(QObject * parent = nullptr) : QObject(parent) {}
 	
 public slots:
-	void	labelChanged(const Column * column, QString orgLabel, QString newLabel);
+	// The excision, Cut 5: labelChanged(const Column*) died with Column — the labelsChanged
+	// (name-keyed) signal below is the wire-shaped contract that returns with B2.
 	
 signals:
 	void	refresh();

@@ -113,17 +113,8 @@ Analysis* Analyses::createFromJaspFileEntry(Json::Value analysisData, RibbonMode
 	if(!TempFiles::stateFileExists(id))
 		analysis->_storedWithoutState = true; //This will trigger the "you need a refresh" on resize
 
-	for(const Json::Value & columnName : analysisData.get("columns", Json::arrayValue))
-	{
-		Column * col = DataSetPackage::pkg()->dataSet()->column(columnName.asString());
-
-		if(		col
-			&&
-			(	col->codeType() == computedColumnType::analysisNotComputed
-			||	col->codeType() == computedColumnType::notComputed			)
-			&&	col->analysisId() == -1)
-			col->setAnalysisId(analysis->id());
-	}
+	// The excision, Cut 5: the restored-json "columns" list pinned analysisIds onto legacy
+	// computed Columns — Column is gone; computed columns return as derivations.
 
 	return analysis;
 }
@@ -185,10 +176,7 @@ void Analyses::bindAnalysisHandler(Analysis* analysis)
 	connect(analysis,	&AnalysisBase::dataSpecChanged,					this, &Analyses::setChangedAnalysisDataSpec			);
 	connect(analysis,	&Analysis::imageSavedSignal,					this, &Analyses::analysisImageSaved					);
 	connect(analysis,	&Analysis::imageEditedSignal,					this, &Analyses::analysisImageEdited				);
-	connect(analysis,	&Analysis::requestColumnCreation,				this, &Analyses::requestColumnCreation				);
 	connect(analysis,	&Analysis::resultsChangedSignal,				this, &Analyses::analysisResultsChanged				);
-	connect(analysis,	&Analysis::requestComputedColumnCreation,		this, &Analyses::requestComputedColumnCreation,		Qt::DirectConnection);
-	connect(analysis,	&Analysis::requestComputedColumnDestruction,	this, &Analyses::requestComputedColumnDestruction,	Qt::DirectConnection);
 	connect(analysis,	&Analysis::titleChanged,						this, &Analyses::somethingModified					);
 	connect(analysis,	&Analysis::imageChanged,						this, &Analyses::somethingModified					);
 	connect(analysis,	&Analysis::userDataChangedSignal,				this, &Analyses::analysisOverwriteUserdata			);
@@ -1847,25 +1835,5 @@ void Analyses::registerRpcHandlers()
 	});
 }
 
-void Analyses::checkForDependentAnalyses(Column * column)
-{
-	applyToAll([&](Analysis * analysis)
-	{
-		stringset	usedCols	= analysis->usedVariables(),
-					createdCols = analysis->createdVariables();
-
-		//Dont create an infinite loop please, but do this only for non-computed columns created by an analysis (aka distributions, because otherwise it breaks things like planning from audit)
-		if(usedCols.count(column->name()) && (!createdCols.count(column->name()) || column->codeType() != computedColumnType::analysisNotComputed))
-		{
-			bool allColsValidated = true;
-
-			for(DataSet * dataSet : column->data()->workspace()->dataSets())
-				for(Column * col : dataSet->computedColumns())
-					if(usedCols.count(col->name()) > 0 && col->invalidated())
-						allColsValidated = false;
-
-			if(allColsValidated)
-				analysis->refresh();
-		}
-	});
-}
+// The excision, Cut 5: checkForDependentAnalyses(Column*) died with Column — its chain
+// was Column emits → Workspace → DataSetPackage → here.

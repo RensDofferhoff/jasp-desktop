@@ -18,7 +18,6 @@
 #include <set>
 #include <map>
 #include <string>
-#include "column.h"
 
 class DataSet;
 class Workspace;

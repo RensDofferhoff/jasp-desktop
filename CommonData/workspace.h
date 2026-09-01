@@ -12,9 +12,8 @@ class Workspace : public DataSetBaseNode
 	
 	Q_PROPERTY(bool				dataMode			READ dataMode			WRITE setDataMode			NOTIFY dataModeChanged		)
 	Q_PROPERTY(bool				showRSyntax			READ showRSyntax		WRITE setShowRSyntax		NOTIFY showRSyntaxChanged	)
-	Q_PROPERTY(DataSet		*	shownDataSet		READ shownDataSet									NOTIFY shownDataSetChanged	)
-	Q_PROPERTY(Column		*	shownColumn			READ shownColumn		WRITE setShownColumn		NOTIFY shownColumnChanged	)
-	Q_PROPERTY(Filter		*	shownFilter			READ shownFilter		WRITE setShownFilter		NOTIFY shownFilterChanged	)
+	Q_PROPERTY(DataSet		*	shownDataSet		READ shownDataSet		NOTIFY shownDataSetChanged	)
+	Q_PROPERTY(Filter		*	shownFilter			READ shownFilter	WRITE setShownFilter		NOTIFY shownFilterChanged	)
 	Q_PROPERTY(VariableInfo *	varInfo				READ varInfo										CONSTANT					)
 	Q_PROPERTY(QVariantList	inputFilterDropDownList READ inputFilterDropDownList						NOTIFY inputFilterDropDownListChanged	)
 	
@@ -57,11 +56,8 @@ public:
 			///Returns title if no other dataset already has that title, otherwise appends " (n)" with an incrementing n until it is unique. exclude lets a dataset check against the others without matching against its own current title.
 			QString					makeDataSetTitleUnique(const QString & title, DataSet * exclude = nullptr) const;
 			
-			Column				*	shownColumn() const;
-			Filter				*	shownFilter() const;
-			void					setShownColumn(Column *newShownColumn);
+			Filter			*	shownFilter() const;
 			void					setShownFilter(Filter * newShownFilter);
-			void					initializeComputedColumns();
 	///True if making 'me' depend on 'target' (as defaultInputFilterId) would create a cycle among
 	///the computed datasets. Used by DataSet::setDefaultInputFilterId to refuse loops.
 	bool							wouldCreateComputedDataSetLoop(DataSet * me, DataSet * target) const;
@@ -74,8 +70,7 @@ public:
 public slots:
 			void					refresh();
 			DataSet				*	createDataSet();
-			Column				*	createComputedColumn(const std::string & name, int dataSetId, int analysisId = -1, columnType type = columnType::unknown, computedColumnType desiredType = computedColumnType::analysis);
-			DataSet				*	createComputedDataSet(const std::string & name, int defaultInputFilterId, computedColumnType desiredType = computedColumnType::rCode);
+			DataSet			*	createComputedDataSet(const std::string & name, int defaultInputFilterId, computedColumnType desiredType = computedColumnType::rCode);
 			Q_INVOKABLE int						shownDataSetId() const	{ return shownDataSet() ? shownDataSet()->id() : -1; }
 			Q_INVOKABLE int						dataSetIdByName(const QString & name) const		{ DataSet * ds = dataSetByName(fq(name)); return ds ? ds->id() : -1; }
 			Q_INVOKABLE QString					dataSetNameById(int id) const				{ DataSet * ds = dataSetById(id); return ds ? ds->name() : QString(); }
@@ -89,8 +84,6 @@ public slots:
 			void					showFilter(int id);
 			void					onShownFilterChanged(DataSet * data);
 			void					refreshAllCompCols(Filter * f);
-			void					updateComputedColumnDependenciesForAnalysis(int analysisId, const stringset & usedVariables);
-			void					computedColumnSucceeded(int dataSetId, QString columnName, QString warning, bool dataChanged);
 			void					computedDataSetSucceeded(int dataSetId, QString warning, bool dataChanged);
 			void					initializeComputedDatasets();
 			
@@ -128,10 +121,8 @@ signals:
 			void					sendFilter(			int dataSetID, const QString & generatedFilter, const QString & filter);
 			void					sendFilterByName(	int dataSetID, const QString & name, const QString & module = "*");
 			void					filtersCountChanged();
-void					enableModified();
-			void					shownColumnChanged();
-			void					checkForDependentAnalyses(Column * column);
-			void					showAnalysis(			int			analysisId);
+			void					enableModified();
+			void					showAnalysis(			int analysisId);
 			void					emptyValuesChanged();
 			void					inputFilterDropDownListChanged();
 			

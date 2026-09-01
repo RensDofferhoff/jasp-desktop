@@ -1,7 +1,6 @@
 #include "variableinfo.h"
 #include "QQmlContext"
 #include "dataset.h"
-#include "column.h"
 #include "QTimer"
 
 VariableInfo::VariableInfo(VariableInfoProvider* providerInfo, QObject * parent) :
@@ -66,11 +65,8 @@ DataSet *VariableInfo::dataSet()
 
 VariableInfoProvider::VariableInfoProvider(QObject *parent)
 	: _infoSignaller(new VarInfoSignaller(parent))
-{
+	{
 	
-}
+	}
 
-void VarInfoSignaller::labelChanged(const Column * column, QString orgLabel, QString newLabel)
-{
-	emit labelsChanged(column->nameQ(), QMap{std::make_pair(orgLabel, newLabel)});
-}
+	// The excision, Cut 5: VarInfoSignaller::labelChanged(const Column*) died with Column.

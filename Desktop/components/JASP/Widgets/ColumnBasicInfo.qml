@@ -133,7 +133,7 @@ Item
 		{
 			implicitWidth:			parent.width
 			implicitHeight:			showAnalysisButton.height
-			visible:				columnModel.computedType === "analysisNotComputed" || columnModel.computedType === "analysis"
+			visible:				false	// The excision, Cut 5: "show parent analysis" rode the legacy Column (computed-column era returns as derivations)
 
 			RoundedButton
 			{
@@ -141,7 +141,7 @@ Item
 				text:				qsTr("Show parent analysis")
 				width:				parent.width - x
 				x:					leftColumn.labelWidth
-				onClicked:			columnModel.column.showAnalysisForm()
+				onClicked:			{} // The excision, Cut 5: rode the legacy Column (parent-analysis computed columns return as derivations)
 			}
 		}
 	}
@@ -207,7 +207,7 @@ Item
 					height:				33 * jaspTheme.uiScale
 					width:				common.showIcons ? height : 0
 					iconSource:			jaspTheme.iconPath + "collapse.png"
-					onClicked:			{ computedColumnWindow.askIfChangedOrClose(); columnModel.visible = false }
+					onClicked:			{ columnModel.visible = false }
 					toolTip:			qsTr("Close variable window")
 					radius:				height
 					visible:			common.showIcons

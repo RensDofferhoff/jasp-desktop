@@ -13,7 +13,7 @@
 //
 // You should have received a copy of the GNU Affero General Public
 // License along with this program.  If not, see
-// <http://www.gnu.org/licenses/>.
+// <https://www.gnu.org/licenses/>.
 //
 
 #ifndef DATASETPROVIDER_H
@@ -46,8 +46,8 @@ public:
 
 	QVariant					provideInfo(varInfoType info, const QString& colName = "", int row = 0)		const	override;
 	bool						absorbInfo(	varInfoType info, const QString& name, int row, QVariant value)			override;
-	QAbstractItemModel		*	providerModel()																					override	{ return this;	}
-	ColumnEncoder			*	columnEncoder()																					override	{ DataSet * ds = dataSet(); return ds ? &ds->encoder() : nullptr;	}
+	QAbstractItemModel		*	providerModel()						override	{ return this;	}
+	ColumnEncoder			*	columnEncoder()						override	{ DataSet * ds = dataSet(); return ds ? &ds->encoder() : nullptr;	}
 
 
 
@@ -56,15 +56,11 @@ private:
 
 	static DataSetProvider	*	_singleton;
 
-	QVariantList				_getDoubleList(Column * column) const;
-	QVariantList				_getStringList(Column * column)	const;
-	QStringList					_getColumnNames()				const;
+	QStringList					_getColumnNames() const;
 
-	// The excision, Cut 3: _db (a DatabaseInterface) died with the class.
-	Workspace				*	_workspace				= nullptr;
-	bool					_inMemory				= true;
 
+	Workspace				*	_workspace	= nullptr;
+	bool						_inMemory;
 };
 
-
-#endif //DATASETPROVIDER_H
+#endif // DATASETPROVIDER_H

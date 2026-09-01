@@ -112,7 +112,6 @@ void Workspace::setShownDataSet(DataSet *dataSet)
 	
 	assert(dataSet->workspace() == this);
 	
-	disconnect(_shownDataSet, &DataSet::shownColumnChanged, this, &Workspace::shownColumnChanged);
 	disconnect(_shownDataSet, &DataSet::shownFilterChanged, this, &Workspace::shownFilterChanged);
 	
 	_shownDataSet = dataSet;
@@ -125,7 +124,6 @@ void Workspace::setShownDataSet(DataSet *dataSet)
 	//process-global current encoder (that global is only meaningful inside the engine's request context).
 	_shownDataSet->encoder().setCurrentNames(_shownDataSet->getColumnTypesMap());
 	
-	connect(_shownDataSet, &DataSet::shownColumnChanged, this, &Workspace::shownColumnChanged, Qt::UniqueConnection);
 	connect(_shownDataSet, &DataSet::shownFilterChanged, this, &Workspace::shownFilterChanged, Qt::UniqueConnection);
 	
 	_varInfo->setProvider(_shownDataSet->shownFilter());
@@ -210,8 +208,8 @@ void Workspace::onShownFilterChanged(DataSet *dataSet)
 void Workspace::refreshAllCompCols(Filter *f)
 {
 	assert(f);
-	
-	f->data()->invalidateAllComputedColumns();
+	// The excision, Cut 5: computed-Column invalidation died with Column (they return as
+	// derivations). Kept as the signal's relay target (Computed datasets have their own path).
 }
 
 void Workspace::setShownDataSet(QString name)
@@ -305,19 +303,9 @@ Filter *Workspace::filterById(int id) const
 	return nullptr;
 }
 
-Column *Workspace::shownColumn() const
-{
-	return shownDataSet() ? shownDataSet()->shownColumn() : nullptr;
-}
-
 Filter *Workspace::shownFilter() const
 {
 	return shownDataSet() ? shownDataSet()->shownFilter()	: nullptr;
-}
-
-void Workspace::setShownColumn(Column *newShownColumn)
-{
-	newShownColumn->data()->setShownColumn(newShownColumn); // Will also set shownDataSet en passant
 }
 
 void Workspace::setShownFilter(Filter *newShownFilter)
@@ -350,13 +338,8 @@ DataSet * Workspace::createDataSet()
 	return newSet;
 }
 
-Column *Workspace::createComputedColumn(const std::string &name, int dataSetId, int analysisId, columnType type, computedColumnType desiredType)
-{
-	if(_dataSets.count(dataSetId))
-		return _dataSets.at(dataSetId)->createComputedColumn(name, type, desiredType, analysisId);
-	
-	return nullptr;
-}
+	// The excision, Cut 5: createComputedColumn died with Column — computed columns return
+	// as derivations (ChangeKind::derived) in a later era.
 
 DataSet *Workspace::createComputedDataSet(const std::string &name, int defaultInputFilterId, computedColumnType desiredType)
 {
@@ -548,17 +531,12 @@ void Workspace::refresh()
 	//Emit the "shown" signals only after the reset is complete: these connect into QML/other models
 	//that may re-query the Workspace model, which is not allowed while a reset is still active.
 	emit shownDataSetChanged(shownDataSet());
-	emit shownColumnChanged();
 	emit shownFilterChanged();
 }
 
 
-void Workspace::initializeComputedColumns()
-{
-	for(auto & idDataSet : _dataSets)
-		for(Column * col : idDataSet.second->columns())
-			col->checkForDependentColumnsToBeSent();
-}
+// The excision, Cut 5: initializeComputedColumns walked the legacy Columns for computed
+// dependencies — gone with Column.
 
 void Workspace::initializeComputedDatasets()
 {
@@ -597,44 +575,6 @@ void Workspace::computedDataSetSucceeded(int dataSetId, QString warning, bool da
 	dataSet->checkForDependentDatasetsToBeSent();
 }
 
-void Workspace::updateComputedColumnDependenciesForAnalysis(int analysisId, const stringset & usedVariables)
-{
-	for(DataSet * dataSet : dataSets())
-		for(Column * col : dataSet->columns())
-			if(col->isComputedByAnalysis(analysisId))
-				col->setDependsOn(usedVariables);
-}
-
-void Workspace::computedColumnSucceeded(int dataSetId, QString columnNameQ, QString warning, bool dataChanged)
-{
-	DataSet * dataSet = dataSetById(dataSetId);
-
-	if(!dataSet)
-		return;
-
-	std::string	columnName	= fq(columnNameQ);
-	//The engine may report the encoded name; translate it defensively so the lookup works either way.
-	try { columnName = dataSet->encoder().decode(columnName); } catch(...) {}
-	Column	*	column		= dataSet->column(columnName);
-
-	if(!column)
-		return;
-
-	//The engine wrote the freshly computed values to the shared database, so pick those up.
-	column->checkForUpdates();
-	column->setError(warning.isEmpty() ? std::string() : fq(warning));
-
-	//A failed computation leaves the column invalidated so it stays marked as needing a (re)run;
-	//only a successful computation validates the column and lets the columns depending on it proceed.
-	if(!warning.isEmpty())
-		return;
-
-	column->validate();
-	column->checkForDependentColumnsToBeSent();
-
-	//Any filter that uses this computed column needs to be recomputed as well, otherwise it will
-	//silently keep the (now outdated) result for the whole dataset it belongs to.
-	for(Filter * f : dataSet->filters())
-		if(f->columnUsed(columnNameQ))
-			f->setInvalidated(true);
-}
+// The excision, Cut 5: the legacy computed-column bookkeeping (dependency tracking + the
+// engine's computedColumnSucceeded callback) died with Column — computed columns return as
+// derivations (ChangeKind::derived) with their own producer on the rail.

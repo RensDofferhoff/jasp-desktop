@@ -29,7 +29,6 @@
 #include "data/asyncloader.h"
 #include "data/asyncloaderthread.h"
 #include "data/columnsmodel.h"
-#include "datasettablemodel.h"
 #include "data/fileevent.h"
 #include "data/filtermodel.h"
 #include "data/columnmodel.h"
@@ -328,12 +327,11 @@ private:
 	static MainWindow			*	_singleton;
 
 	QQmlApplicationEngine		*	_qml					= nullptr;
-	Analyses					*	_analyses				= nullptr;
+	Analyses				*	_analyses				= nullptr;
 	JaspClient				*	_jaspClient				= nullptr;
 	ResultsJsInterface			*	_resultsJsInterface		= nullptr;
 	MessageForwarder			*	_msgForwarder			= nullptr;
 	DataSetPackage				*	_package				= nullptr;
-	DataSetTableModel			*	_datasetTableModel		= nullptr;
 	GridModel					*	_gridModel				= nullptr;	///< NEO: the grid's model, registered as `dataSetModel` (data-view-design §7.3)
 	ColumnsModel				*	_columnsModel			= nullptr;
 	FilterModel					*	_filterModel			= nullptr;
