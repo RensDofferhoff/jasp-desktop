@@ -20,8 +20,8 @@ private slots:
 	// Desktop/data/exporters — those formats return as lane conversions in later
 	// NEO eras (refactor_design/HANDOVER-excision.md).
 
-	// DatabaseInterface regressions
-	void	testFilterRevisionInvalidatedRoundTrip();
+	// The excision, Cut 3: testFilterRevisionInvalidatedRoundTrip died with DatabaseInterface
+	// (it pinned a sqlite filterLoad round-trip; filters are in-memory now).
 
 	// Filter cache-length regression: the engine result must be authoritative for the whole dataset.
 	void	testFilterSetFilterVectorResizesToResult();

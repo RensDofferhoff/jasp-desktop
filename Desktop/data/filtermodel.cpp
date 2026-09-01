@@ -233,7 +233,7 @@ void FilterModel::renameCurrentFilter(const QString &newName)
 
 	//Guard against empty names, renaming the (single, unnamed) default filter, and name collisions:
 	//duplicate filter names would make filter(name)/filterGetId lookups ambiguous.
-	if(name.empty() || name == DEFAULT_FILTER_NAME || (name != f->name() && !Filter::filterNameIsFree(ds, name)))
+	if(name.empty() || name == DEFAULT_FILTER_NAME || (name != f->name() && !Filter::filterNameIsFree(name, ds)))
 		return;
 
 	f->setName(name);

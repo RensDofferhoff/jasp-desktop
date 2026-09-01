@@ -24,7 +24,7 @@ ListModelFilteredDataEntry::ListModelFilteredDataEntry(TableViewBase * parent)
 	{
 		_filterName = "ListModelFilteredDataEntry_" + std::to_string(counter++);
 	}
-	while(!Filter::filterNameIsFree(dataSet, _filterName));
+	while(!Filter::filterNameIsFree(_filterName, dataSet));
 	
 	assert(parent->form());
 

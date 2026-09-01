@@ -70,8 +70,29 @@ new producers on the existing rail.
       Cut-5 death row anyway); testUndoColumnDropLevels died early (same reason). Known
       pre-existing (NOT Cut 2): JASPTestDbMigration crashes in `DatabaseInterface::load()` —
       an in-memory `:memory:` load can never pass `filesystem::exists` (Cut-3 territory).
-- [ ] **Cut 3 — DatabaseInterface**: delete; strip DataSet/Column/Filter/Workspace/
-      DataSetPackage db* methods; fixture fallout in tests.
+- [x] **Cut 3 — DatabaseInterface** (2026-09-01): `databaseinterface.{h,cpp}` + the sql
+      fixture files deleted; DataSet/Column/Filter/Workspace/DataSetPackage/DataSetProvider
+      db* methods stripped. **ID minting** is now process-global `std::atomic<int>` counters
+      (`g_nextDataSetId/g_nextColumnId/g_nextFilterId` in their own TUs) replacing db row ids;
+      `dbUpdate()` sites became `incRevision()`; `checkForUpdates()` is `return false`;
+      `dbDelete()` methods survive as purely in-memory teardowns; `DataSet::name()` generates
+      `"Dataset " + id`. **LibArchive has a live user beyond CommonData**:
+      `QMLComponents/utilities/extractarchive.cpp` (module .zip install via DynamicModules,
+      autosave metadata) — link moved CommonData→QMLComponents, `find_package(LibArchive)`
+      stays. SQLite::SQLite3 fully dropped (CommonData linked it twice). Filter::
+      `filterNameIsFree` arg-order mismatch (header vs cpp) found by compiler and unified to
+      `(filterName, dataSet)`. SyntaxInterface is excluded from the build, so
+      syntaxbridge.cpp's DatabaseInterface/ArchiveReader references don't block (GUT_TODO
+      territory). Test fallout: `testFilterRevisionInvalidatedRoundTrip` (pinned a sqlite
+      round-trip) and **JASPTestDbMigration deleted whole** — its `:memory:` load could
+      never pass `filesystem::exists` (the pre-existing crash died with it). 14 JASPTest /
+      5 ColumnEncoder / 8 CsvPrev / 63 QuickTest all green; from-scratch configure verified.
+      **Bug fixed at the wire**: `DataSet::removeFilter` double-deleted — the Cut-3 edit had
+      replaced the old `f->dbDelete()` (db-row removal only, object survives) with `delete f`
+      while keeping the trailing `delete f`; SIGSEGV in `testFilterRemoveFilter`
+      (instruction at `dataset.cpp`'s second delete, deref of garbage 0xc41b). Filter has no
+      dtor and nothing but the newList loop removes from `_filters`, so the early delete was
+      simply dropped.
 - [ ] **Cut 4 — legacy undo commands**: delete the Column-command family; UndoStack keeps
       macros + byte cap + DataEditCommand.
 - [ ] **Cut 5 — Column + mirror paths + DataSetTableModel**: delete Column; DataSet's

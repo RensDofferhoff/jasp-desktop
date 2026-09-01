@@ -24,24 +24,33 @@
 #include "dataenums.h"
 #include "columnencoder.h"
 #include "jsonutilities.h"
-#include "databaseinterface.h"
 #include "undostack.h"
+
+#include <atomic>
+
+// The excision, Cut 3: DatabaseInterface is gone. Dataset ids are minted from this
+// process-global counter (they only key the workspace map, the encoder prefix and the
+// undo/computed-column wiring — no sqlite rows exist anymore).
+static std::atomic<int> g_nextDataSetId{1};
 
 stringset DataSet::_defaultEmptyvalues;
 
-DataSet::DataSet(Workspace * workspace, int id)
+DataSet::DataSet(Workspace * workspace)
 	: DataSetBaseNode(dataSetBaseNodeType::dataSet, workspace),
 	  _workspace(workspace)
 {
-	Log::log() << "DataSet::DataSet(id=" << id << ")" << std::endl;
-
 	_encoder = new ColumnEncoder();
 	_emptyValues	= new EmptyValues(nullptr);
 	connect(_emptyValues,	&EmptyValues::emptyValuesChanged,	this,		&DataSet::emptyValuesChanged			);
 	connect(this,			&DataSet::emptyValuesChanged,		_workspace, &Workspace::emptyValuesChanged			);
 	
-	if(id == -1)			dbCreate();
-	else if(id > 0)			dbLoad(id);
+	//Was dbCreate(): mint the identity in memory (a default Filter registers itself in _filters).
+	_dataSetId		= g_nextDataSetId++;
+	_defaultFilter	= new Filter(this);
+	_columns.clear();
+	_rowCount		= 0;
+	setupEncoderPrefix();
+	Log::log() << "DataSet::DataSet(id=" << _dataSetId << ")" << std::endl;
 	
 	_undoStack = new UndoStack(this);
 	
@@ -158,7 +167,9 @@ Filter * DataSet::showFilter(const QString &filterName)
 
 QString DataSet::name() const
 {
-	return tq(db().dataSetName(id()));
+	// The excision, Cut 3: the name used to live in sqlite (db().dataSetName(id)) — it is
+	// generated from the id now; the user-visible label is title() anyway.
+	return "Dataset " + QString::number(id());
 }
 
 QString DataSet::title() const
@@ -197,8 +208,6 @@ void DataSet::removeFilter(Filter *f)
 		return;
 
 	const int removedId = f->id();
-
-	f->dbDelete();
 
 	//Computed datasets that used this filter as their input would otherwise keep a dangling
 	//defaultInputFilterId. Clear it and surface an error so the user knows why the computed dataset
@@ -245,25 +254,17 @@ void DataSet::dbDelete()
 	assert(_dataSetId != -1);
 	
 	for(Filter * f : _filters)
-	{
-		f->dbDelete();
-		delete f;
-	}
+		delete f;	// The excision, Cut 3: purely in-memory teardown now (Filter dtor unregisters)
 	
 	_filters.clear();
 	
 	
 	for(Column * c : _columns)
-	{
-		c->dbDelete();
 		delete c;
-	}
 	
 	_columns.clear();
 	_shownColumn	= nullptr; //children are freed above; don't leave a dangling reference
 
-	db().dataSetDelete(_dataSetId);
-	
 	_dataSetId = -1;
 }
 
@@ -287,10 +288,9 @@ void DataSet::endBatchedToDB(std::function<void(float)> progressCallback, Column
 	
 	if(_writeBatchedToDBDepth == 0)
 	{
-		if(columns.size())
-			db().dataSetBatchedValuesUpdate(this, columns, [&progressCallback](float f){ progressCallback(0.75 + (f * 0.25));});
-		else
-			progressCallback(1);
+		// The excision, Cut 3: the batched sqlite write is gone; keep the useful side effects
+		// (encoder resync + revision bump so consumers refresh).
+		progressCallback(1);
 
 		//Column names/types have (just) been (re)loaded into this DataSet, so keep our own encoder in
 		//sync; when this dataset is the shown/current one it is what the encoder indirection points at.
@@ -395,14 +395,11 @@ Column *DataSet::column(int index)
 
 void DataSet::removeColumn(size_t index)
 {
-	assert(_dataSetId > 0);
-
 	beginRemoveColumns(QModelIndex(), index, index);
 	Column * removeMe = _columns[index];
 	_columns.erase(_columns.begin() + index);
 
-	removeMe->dbDelete();
-	delete removeMe;
+	delete removeMe;	// The excision, Cut 3: in-memory only
 	
 	endRemoveColumns();
 
@@ -420,16 +417,11 @@ void DataSet::removeColumn(const std::string & name)
 
 void DataSet::insertColumns(size_t index, size_t count,	bool alterDataSetTable)
 {
-
-	assert(_dataSetId > 0);
-
 	beginInsertColumns(QModelIndex(), index, index + count);
 	
-	intvec colIds = db().columnsInsert(_dataSetId, count, index, "", columnType::unknown, alterDataSetTable);
-	
-	for(int c = 0; c<colIds.size(); c++)
+	for(size_t c = 0; c<count; c++)	// The excision, Cut 3: ids are minted by the Column itself
 	{
-		Column * newColumn = new Column(this, colIds[c]);
+		Column * newColumn = new Column(this);
 
 		_columns.insert(_columns.begin()+index+c, newColumn);
 
@@ -482,7 +474,7 @@ Column * DataSet::createColumn(const std::string & name, columnType columnType)
 
 	beginInsertColumns(QModelIndex(), columnCount(), columnCount());
 	
-	Column * col = new Column(this, db().columnInsert(_dataSetId, -1, name));
+	Column * col = new Column(this);	// The excision, Cut 3: id minted by the Column itself
 	col->setName(name);
 	col->setDefaultValues(columnType, false);
 	_columns.push_back(col);
@@ -561,7 +553,7 @@ void DataSet::setDataFileAndTimeStamp(const std::string &dataFilePath, long time
 	bool isChange		= _dataFilePath	!= dataFilePath || _dataFileTimestamp	!= timestamp;
 	_dataFileTimestamp	= timestamp;		
 	_dataFilePath		= dataFilePath;
-	if(isChange) dbUpdate(); 
+	if(isChange) incRevision(); 
 	
 	if(isChange)
 	{
@@ -574,7 +566,7 @@ void DataSet::setDataFile(const std::string &dataFilePath)
 { 
 	bool isChange	= _dataFilePath	!= dataFilePath;
 	_dataFilePath	= dataFilePath;
-	if(isChange) dbUpdate(); 
+	if(isChange) incRevision(); 
 	
 	if(isChange)
 		emit dataFileChanged();
@@ -584,7 +576,7 @@ void DataSet::setDataTimestamp(long timestamp)
 { 
 	bool isChange		= _dataFileTimestamp	!= timestamp;
 	_dataFileTimestamp	= timestamp;		
-	if(isChange) dbUpdate(); 
+	if(isChange) incRevision(); 
 	
 	if(isChange)
 		emit dataTimestampChanged();
@@ -595,7 +587,7 @@ void DataSet::setDatabaseJson(const Json::Value & databaseJson)
 
 	bool isChange	= _database	!= databaseJson;
 	_database	= databaseJson;
-	if(isChange) dbUpdate(); 
+	if(isChange) incRevision(); 
 	
 	if(isChange)
 		emit databaseJsonChanged(); 
@@ -605,146 +597,15 @@ void DataSet::setDataFileSynch(bool synchronizing)
 { 
 	bool isChange	= _dataFileSynch	!= synchronizing;
 	_dataFileSynch	= synchronizing;	
-	if(isChange) dbUpdate(); 
+	if(isChange) incRevision(); 
 	
 	if(isChange)
 		emit dataFileSynchChanged();
 }
 
-void DataSet::dbCreate()
-{
-	JASPTIMER_SCOPE(DataSet::dbCreate);
-	
-	assert(!_defaultFilter && _dataSetId == -1);
-	
-	db().transactionWriteBegin();
-
-	//The variables are probably empty though:
-_dataSetId		= db().dataSetInsert(_dataFilePath, _dataFileTimestamp, _description, _database.toStyledString(), _emptyValues->toJson().toStyledString(), _dataFileSynch, _csvDelimiter);
-	_defaultFilter	= new Filter(this);
-	
-	_defaultFilter->dbCreate();
-	_columns.clear();
-
-	db().transactionWriteEnd();
-
-	_rowCount		= 0;
-
-	setupEncoderPrefix();
-}
-
-void DataSet::dbUpdate()
-{
-assert(_dataSetId > 0);
-	db().dataSetUpdate(_dataSetId, _title, _dataFilePath, _dataFileTimestamp, _description, _database.toStyledString(), _emptyValues->toJson().toStyledString(), _dataFileSynch, _csvDelimiter);
-	incRevision();
-}
-
-void DataSet::dbLoad(int id, std::function<void(float)> progressCallback, Version doUpgradeFrom)
-{
-	JASPTIMER_SCOPE(DataSet::dbLoad);
-
-	assert(_dataSetId == -1 || _dataSetId == id || (_dataSetId != -1 && id == -1));
-
-	if(id != -1 && !db().dataSetExists(id))
-	{
-		Log::log() << "No DataSet with id " << id << "!" << std::endl;
-		return;
-	}
-		
-	if(id != -1)
-		_dataSetId	= id;
-
-	assert(_dataSetId > 0);
-
-	std::string emptyVals, databaseJson;
-
-	db().dataSetLoad(_dataSetId, _title, _dataFilePath, _dataFileTimestamp, _description, databaseJson, emptyVals, _revision, _dataFileSynch, _csvDelimiter);
-
-	db().dataSetGetComputedInfo(_dataSetId, _invalidated, _codeType, _rCode, _error, _defaultInputFilterId);
-
-	Json::Reader().parse(databaseJson,	_database);
-
-	progressCallback(0.1);
-
-	if(!_defaultFilter)
-		_defaultFilter = new Filter(this);
-	_defaultFilter->dbLoad();
-	
-	progressCallback(0.2);
-
-	int colCount	= db().dataSetColCount(_dataSetId);
-	_rowCount		= db().dataSetRowCount(_dataSetId);
-	//Log::log() << "colCount: " << colCount << ", " << "rowCount: " << rowCount() << std::endl;
-
-	float colProgressMult = 1.0 / colCount;
-	
-	bool	do019Fix	= doUpgradeFrom != Version() && doUpgradeFrom < "0.19",
-			do0961Fix	= doUpgradeFrom != Version() && doUpgradeFrom < "0.96.1";
-
-	//Ideally we have the emptyvalues before loading the columns, so we get the right labels in the labeleditor, butr for older than 0.19 stuff is complicated so we do that later.
-	Json::Value emptyValsJson;
-	Json::Reader().parse(emptyVals,		emptyValsJson);
-
-	if(!do019Fix && !do0961Fix)
-	{
-		_emptyValues->fromJson(emptyValsJson);
-
-		for(size_t i=0; i<colCount; i++)
-		{
-			if(_columns.size() == i)
-				_columns.push_back(new Column(this));
-	
-			_columns[i]->dbLoadIndex(i, false);
-			
-			progressCallback(0.2 + (i * colProgressMult * 0.3)); //should end at 0.5
-		}
-	
-		for(size_t i=colCount; i<_columns.size(); i++)
-			delete _columns[i];
-	
-		_columns.resize(colCount);
-			
-		db().dataSetBatchedValuesLoad(this, [&](float p){ progressCallback(0.50 + (p * 0.25)); });
-		db().dataSetBatchedLabelsLoad(this, [&](float p){ progressCallback(0.75 + (p * 0.25)); });
-	}
-	else
-	{
-		if(do019Fix)	upgradeEmptyValsFrom018To019(emptyValsJson);
-		else			_emptyValues->fromJson(emptyValsJson);
-			
-		for(size_t i=0; i<colCount; i++)
-		{
-			if(_columns.size() == i)
-				_columns.push_back(new Column(this));
-	
-			_columns[i]->dbLoadOldIndex(i);
-			
-			progressCallback(0.2 + (i * colProgressMult * 0.6));
-		}
-		
-		//Now we will recreate the dataset, but because Audit can make special Filters we need to handle that here now, otherwise they dissappear		
-		intset allFilters = db().dataSetGetFilters(_dataSetId);
-		Filters	loadedFilters;
-		
-		for(int id : allFilters)
-		{
-			const std::string & fName = db().filterGetName(id);
-			
-			if(fName != DEFAULT_FILTER_NAME)
-				loadedFilters.push_back(new Filter(this, fName, false)); //registers itself into _filters
-		}
-		
-		db().dataSetCreateTable(this);
-		db().dataSetBatchedValuesUpdate(this, _columns, [&](float p){ progressCallback(0.8 + (p * 0.2)); });
-		
-		//Persist the (recreated) filter data; the Filter objects stay owned by this DataSet.
-		for(Filter * f : loadedFilters)
-			f->dbUpdate(true);
-	}
-
-	setupEncoderPrefix();
-}
+// The excision, Cut 3: dbCreate moved into the ctor (id from the process-global counter);
+// dbUpdate became inline `incRevision()` at its callers; dbLoad (the .jasp/sqlite restore
+// path) is deleted wholesale — .jasp persistence returns in a later NEO era.
 
 
 void DataSet::upgradeEmptyValsFrom018To019(const Json::Value & emptyVals)
@@ -800,7 +661,7 @@ void DataSet::upgradeEmptyValsFrom018To019(const Json::Value & emptyVals)
 	
 	Log::log() << "Based on this the new workspace emtpy values are:\n" << _emptyValues->toJson().toStyledString() << std::endl;
 	
-	dbUpdate();
+	incRevision();	// was dbUpdate() (the excision, Cut 3)
 }
 
 void DataSet::batchColumnHadChange(Column *col)
@@ -810,44 +671,27 @@ void DataSet::batchColumnHadChange(Column *col)
 
 void DataSet::setColumnCount(size_t colCount)
 {
-	db().transactionWriteBegin();
-
 	int curCount = _columns.size();
 	
-	bool alterTableAfterwards = curCount == 0 && colCount > 0;
-
 	if(colCount > curCount)
-		insertColumns(curCount, colCount-curCount, !alterTableAfterwards);
+		insertColumns(curCount, colCount-curCount, false);
 
 	else if(colCount < curCount)
 		for(size_t i=curCount-1; i>=colCount; i--)
 			removeColumn(i);
-	
+
 
 	incRevision();
-
-	db().transactionWriteEnd();
-	
-	if(alterTableAfterwards)
-		db().dataSetCreateTable(this);
 }
 
 void DataSet::setRowCount(size_t rowCount, bool alsoLoadData)
 {
-	_rowCount = rowCount; //Make sure we do set the rowCount variable here so the batch can easily see how big it ought to be in DatabaseInterface::dataSetBatchedValuesUpdate
+	_rowCount = rowCount;
 
-	if(!writeBatchedToDB() && alsoLoadData)
-	{
-		db().dataSetSetRowCount(_dataSetId, rowCount);
-		dbLoad(); //Make sure columns have the right data in them
-	}
-	else
-	{
-		//We are doing things batched, so its possible that a function like DatabaseInterface::dataSetBatchedValuesUpdate tries to fill up the columns.
-		//It also might use the size of the vectors to know what to delete. So lets just resize those vectors a bit
-		for(Column * col : _columns)
-			col->setRowCount(_rowCount);
-	}
+	// The excision, Cut 3: the sqlite row-count write (and the dbLoad refresh) is gone —
+	// just resize the in-memory column vectors as the batched branch always did.
+	for(Column * col : _columns)
+		col->setRowCount(_rowCount);
 
 	_defaultFilter->reset();
 	
@@ -874,136 +718,18 @@ void DataSet::incRevision()
 
 	if(!writeBatchedToDB())
 	{
-		_revision = db().dataSetIncRevision(_dataSetId);
+		_revision++;	// was db().dataSetIncRevision (the excision, Cut 3)
 		checkForChanges();
 	}
 }
 
 bool DataSet::checkForUpdates(std::function<void(float)> progressCallback)
 {
-	JASPTIMER_SCOPE(DataSet::checkForUpdates);
-
-	if(_dataSetId == -1)
-		return false;
-	
-	stringset prevCols;
-	for(Column * col : _columns)
-		prevCols.insert(col->name());
-	
-	size_t		rowCountPrev = rowCount();
-	stringvec	colsChanged, 
-				colsRemoved;
-	bool		newColumns,
-				rowCountChanged;
-	
-		
-	if(_revision < db().dataSetGetRevision(_dataSetId))
-	{
-		dbLoad(-1, progressCallback);
-		
-		newColumns		= prevCols.size() < _columns.size();
-		rowCountChanged = rowCountPrev != rowCount();
-		
-		
-		colsChanged.clear();
-		for(Column * col : _columns)
-		{
-			colsChanged.push_back(col->name());
-			prevCols.erase(col->name());
-		}
-		
-		colsRemoved = stringvec(prevCols.begin(), prevCols.end());
-		
-		emit datasetChanged(_dataSetId, tq(colsChanged), tq(colsRemoved), {}, rowCountChanged, newColumns);
-		
-		refresh();
-		
-		return true;
-	}
-	else
-	{
-		bool somethingChanged = _defaultFilter->checkForUpdates();
-		
-		stringset	dbFilterNames = db().dataSetFilterNames(_dataSetId);
-		FilterSet	destroyUs;
-		Filters		keepUs;
-		
-		for(Filter * f : _filters)
-			if(!dbFilterNames.count(f->name()))
-				destroyUs.insert(f);
-			else
-			{
-				keepUs.push_back(f);
-				
-				if(f != _defaultFilter && f->checkForUpdates())
-					somethingChanged = true;
-			}
-		
-		for(const std::string & fName : dbFilterNames)
-			if(!filter(fName))
-			{
-				Filter * missingFilter = new Filter(this, fName, false);
-				
-				keepUs.push_back(missingFilter);
-				somethingChanged = true;
-			}
-
-		for(Column * col : _columns)
-			if(col->checkForUpdates())
-			{
-				somethingChanged = true;
-				colsChanged.push_back(col->name());
-			}
-		
-		colsRemoved		. clear();
-		newColumns		= false;
-		rowCountChanged = rowCountPrev != rowCount();
-		
-		if(destroyUs.size() > 0)
-		{
-			somethingChanged = true;
-
-			Filter * newShownFilter = nullptr;
-
-			//If the shown filter is among the pruned (its DB row vanished), pick a surviving replacement
-			//BEFORE deleting, mirroring deleteShownFilter(), so we never leave a dangling _shownFilter.
-			if(_shownFilter && _shownFilter != _defaultFilter && destroyUs.count(_shownFilter))
-			{
-				size_t indexWas = 0;
-				for(size_t i=0; i<_filters.size(); i++)
-					if(_filters[i] == _shownFilter)
-					{
-						indexWas = i;
-						break;
-					}
-
-				newShownFilter = keepUs.empty() ? _defaultFilter : keepUs[std::min(indexWas, keepUs.size() - 1)];
-			}
-
-			_filters = keepUs;
-
-			if(newShownFilter)
-			{
-				_shownFilter = newShownFilter;
-				emit shownFilterChanged(this);
-			}
-
-			for(Filter * f : destroyUs)
-			{
-				emit filterRemoved(f);
-				delete f;
-			}
-		}
-		
-		if(somethingChanged || colsChanged.size() || colsRemoved.size() || rowCountChanged || newColumns)
-		{
-			emit datasetChanged(_dataSetId, tq(colsChanged), tq(colsRemoved), {}, rowCountChanged, newColumns);
-		
-			refresh();
-		}
-
-		return somethingChanged || rowCountChanged;
-	}
+	// The excision, Cut 3: this was the sqlite diff-poll (revision compare, dbLoad refresh,
+	// filter-row reconciliation). With DatabaseInterface gone nothing external can mutate this
+	// DataSet, so there is never anything to update.
+	(void) progressCallback;
+	return false;
 }
 
 void DataSet::runComputedColumn(QString columnName, QString code, columnType columnType)
@@ -1049,7 +775,7 @@ void DataSet::dbUpdateComputedDatasetStuff()
 {
 	std::string oldError = _error;
 
-	db().dataSetSetComputedInfo(_dataSetId, _invalidated, _codeType, _rCode, _error, _defaultInputFilterId);
+	// The excision, Cut 3: the sqlite computed-info write died with DatabaseInterface.
 	incRevision();
 
 	if(oldError != _error)
@@ -1087,7 +813,7 @@ void DataSet::setInvalidated(bool invalidated)
 		return;
 
 	_invalidated = invalidated;
-	db().dataSetSetComputedInfo(_dataSetId, _invalidated, _codeType, _rCode, _error, _defaultInputFilterId);
+	// The excision, Cut 3: the sqlite computed-info write died with DatabaseInterface.
 	incRevision();
 	emit invalidatedChanged();
 }
@@ -1248,7 +974,7 @@ void DataSet::setEmptyValuesJson(const Json::Value &emptyValues, bool updateDB)
 	}
 
 	if (updateDB)
-		dbUpdate();
+		incRevision();	// was dbUpdate() (the excision, Cut 3)
 }
 
 void DataSet::setEmptyValuesFromStrings(const stringset &values)
@@ -1256,14 +982,14 @@ void DataSet::setEmptyValuesFromStrings(const stringset &values)
 	_emptyValues->setEmptyValues(values);
 	for(Column * column : _columns)
 		column->nonFilteredCountersReset();
-	dbUpdate();
+	incRevision();	// was dbUpdate() (the excision, Cut 3)
 }
 
 void DataSet::setDescription(const std::string &desc)
 {
 	bool isChange	= _description != desc;
 	_description	= desc;
-	dbUpdate();
+	incRevision();	// was dbUpdate() (the excision, Cut 3)
 	
 	if(isChange)
 		emit descriptionChanged();
@@ -1301,15 +1027,7 @@ void DataSet::runFilters()
 		f->setInvalidated(true);
 }
 
-DatabaseInterface &DataSet::db()	
-{ 
-	return *DatabaseInterface::singleton(); 
-}
-
-const DatabaseInterface &DataSet::db() const
-{ 
-	return *DatabaseInterface::singleton(); 
-}
+// The excision, Cut 3: DataSet::db() died with DatabaseInterface.
 
 stringset DataSet::findUsedColumnNames(std::string searchThis)
 {
@@ -1991,7 +1709,7 @@ void DataSet::setTitle(const QString &title)
 	if(_workspace)
 		emit _workspace->dataSetTitleChanged(id());
 
-	dbUpdate();
+	incRevision();	// was dbUpdate() (the excision, Cut 3)
 }
 
 bool DataSet::dataFileCanHaveLabels() const
@@ -2054,15 +1772,10 @@ void DataSet::filterByNameDone(int dataSetID, const QString &name, const QString
 	if(dataSetID != id())
 		return;
 
-	Filter * f = filter(fq(name));
-	
-	if(f && f->dbLoadResultAndError())
-	{
-		emit f->refreshAllAnalyses(f);
-		
-		if(shownFilter() == f)
-			refresh();
-	}
+	// The excision, Cut 3: the "reload the filter result from the database" step
+	// (f->dbLoadResultAndError) is gone — there is no sqlite to poll, so there is nothing
+	// to refresh here (filter state changes propagate through their own signals).
+	(void) name; (void) error;
 }
 
 

@@ -22,7 +22,7 @@
 #include <QAbstractTableModel>
 #include "variableinfo.h"
 #include "workspace.h"
-#include "databaseinterface.h"
+// The excision, Cut 3: databaseinterface.h include died with the class.
 
 
 class ColumnEncoder;
@@ -41,8 +41,8 @@ public:
 	QVariant					data(		const QModelIndex & index, int role = Qt::DisplayRole)						const	override;
 
 	void						loadDataSet(const std::map<std::string, stringvec > & dataSet, int threshold = 10, bool orderLabelsByValue = true);
-	void						closeDatabase();
-	void						loadDatabase(const Version & jaspVersion);
+	// The excision, Cut 3: closeDatabase/loadDatabase died with DatabaseInterface (their only
+	// caller, syntaxbridge.cpp, is not part of the NEO build).
 
 	QVariant					provideInfo(varInfoType info, const QString& colName = "", int row = 0)		const	override;
 	bool						absorbInfo(	varInfoType info, const QString& name, int row, QVariant value)			override;
@@ -60,9 +60,9 @@ private:
 	QVariantList				_getStringList(Column * column)	const;
 	QStringList					_getColumnNames()				const;
 
-	DatabaseInterface		*	_db					= nullptr;
-	Workspace				*	_workspace			= nullptr;
-	bool						_inMemory			= true;
+	// The excision, Cut 3: _db (a DatabaseInterface) died with the class.
+	Workspace				*	_workspace				= nullptr;
+	bool					_inMemory				= true;
 
 };
 

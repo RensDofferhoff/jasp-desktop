@@ -5,7 +5,6 @@
 #include "qutils.h"
 #include "dataenums.h"
 #include "columnutils.h"
-#include "databaseinterface.h"
 
 const int Label::NO_LABEL			= -1; 
 
@@ -13,70 +12,12 @@ Label::Label(Column * column, const std::string &label, int value, bool filterAl
 : DataSetBaseNode(dataSetBaseNodeType::label, column), _column(column)
 {
 	setInformation(column, id, order, label, value, filterAllows, description, originalValue);
-
-	if(id == -1)	dbCreate();
-	else			_dbId = id;
+	// The excision, Cut 3: the sqlite label row (dbCreate/dbId) is gone; _dbId stays -1.
 	
 	connect(this, &Label::labelFilterChanged,	column, &Column::labelFilterChanged);
 	connect(this, &Label::manualEditMade,		column, &Column::manualEditMade);
 }
 
-void Label::dbDelete()
-{
-	if(_column->batchedLabelDepth())
-		return;
-	
-	assert(_dbId != -1);
-	db().labelDelete(_dbId);
-	_dbId = -1;
-}
-
-void Label::dbCreate()
-{
-	JASPTIMER_SCOPE(Label::dbCreate);
-
-	if(_column->batchedLabelDepth())
-		return;
-	
-	assert(_dbId == -1);
-	_dbId = db().labelAdd(_column->id(), _intsId, _label, _filterAllows, _description, _originalValue.toStyledString());
-}
-
-void Label::dbLoad(int labelId)
-{
-	if(_column->batchedLabelDepth())
-		return;
-	
-	assert(_dbId != -1 || labelId != -1);
-
-	if(labelId != -1)
-		_dbId = labelId;
-
-	int columnId;
-
-	std::string origValJsonStr;
-	db().labelLoad(labelId, columnId, _intsId, _label, _filterAllows, _description, origValJsonStr, _order, _userAdded);
-
-	Json::Value originalValue = Json::nullValue;
-	Json::Reader().parse(origValJsonStr, originalValue);
-	_setOriginalValue(originalValue);
-}
-
-void Label::dbUpdate()
-{
-	JASPTIMER_SCOPE(Label::dbUpdate);
-
-	if(_column->batchedLabelDepth())
-		return;
-	
-	if(_dbId == -1)
-		dbCreate();
-	else
-	{
-		db().labelSet(_dbId, _column->id(), _intsId, _label, _filterAllows, _description, _originalValue.toStyledString(), _userAdded);
-		_column->incRevision();
-	}
-}
 
 void Label::setInformation(Column * column, int id, int order, const std::string &label, int value, bool filterAllows, const std::string & description, const Json::Value & originalValue)
 {
@@ -130,7 +71,6 @@ void Label::setIntsId(int value)
 {
 	_intsId = value;
 
-	dbUpdate();
 }
 
 void Label::setOrder(int order)
@@ -149,7 +89,6 @@ bool Label::setLabel(const std::string & label)
 		
 		_column->labelDisplayChanged(this, oldLabel);
 
-		dbUpdate();
 		
 		emit _column->labelChanged(_column, tq(oldLabel), tq(_label));
 		return true;
@@ -177,7 +116,6 @@ bool Label::setOriginalValue(const Json::Value & originalValue)
 		
 		_setOriginalValue(originalValue);
 		
-		dbUpdate();
 		
 		_column->labelValueChanged(this, previous);
 		
@@ -203,7 +141,6 @@ bool Label::setOrigValLabel(const Json::Value &originalValue)
 	
 	if(aChange)
 	{
-		dbUpdate();
 	
 		_column->labelValDisplayChanged(this, oldLabel, previous);
 		return true;
@@ -216,7 +153,6 @@ bool Label::setDescription(const std::string &description)
 	if(_description != description)
 	{
 		_description = description;
-		dbUpdate();
 		return true;
 	}
 	return false;
@@ -229,7 +165,6 @@ bool Label::setFilterAllows(bool allowFilter)
 	if(_filterAllows != allowFilter)
 	{
 		_filterAllows = allowFilter;
-		dbUpdate();
 
 		emit labelFilterChanged();
 
@@ -243,19 +178,10 @@ void Label::setUserAdded(bool userAddedIt)
 	if(_userAdded != userAddedIt)
 	{
 		_userAdded = userAddedIt;
-		dbUpdate();
 	}
 }
 
-DatabaseInterface & Label::db()
-{
-	return _column->db();
-}
-
-const DatabaseInterface & Label::db() const
-{
-	return _column->db();
-}
+// The excision, Cut 3: Label::db() died with DatabaseInterface.
 
 Label &Label::operator=(const Label &label)
 {
@@ -368,7 +294,6 @@ QVariant Label::data(const QModelIndex &index, int role) const
 	
 	return QVariant();
 }
-
 
 
 std::string Label::getValue(bool fancyEmptyValue, bool ignoreEmptyValue, bool sepas, columnType asType) const

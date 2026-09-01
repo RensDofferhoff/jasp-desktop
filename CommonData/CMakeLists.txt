@@ -8,8 +8,8 @@
 #
 list(APPEND CMAKE_MESSAGE_CONTEXT CommonData)
 
-make_includable(internalDbDefinition.sql  internalDbDefinition.h)
-make_includable(createIndexes.sql		  createIndexes.h)
+# The excision, Cut 3: internalDbDefinition.sql / createIndexes.sql (and their
+# make_includable headers) died with DatabaseInterface.
 
 make_includable(../Engine/jaspBase/R/distributionSamplers.R				jaspBase_distributionSamplers.h)
 make_includable(../Engine/jaspBase/R/friendlyConstructorFunctions.R		jaspBase_friendlyConstructorFunctions.h)
@@ -22,7 +22,6 @@ make_includable(../Engine/jaspBase/R/transformPower.R					jaspBase_transformPowe
 
 file(GLOB_RECURSE HEADER_FILES	"${CMAKE_CURRENT_LIST_DIR}/*.h")
 file(GLOB_RECURSE SOURCE_FILES	"${CMAKE_CURRENT_LIST_DIR}/*.cpp")
-file(GLOB_RECURSE SQL_FILES		"${CMAKE_CURRENT_LIST_DIR}/*.sql")
 
 file(GLOB JASPRESULTS_HEADER_FILES "${CMAKE_CURRENT_LIST_DIR}/jaspBase/src/*.h")
 file(GLOB JASPRESULTS_SOURCE_FILES "${CMAKE_CURRENT_LIST_DIR}/jaspBase/src/*.cpp")
@@ -31,7 +30,7 @@ file(GLOB JASPRESULTS_SOURCE_FILES "${CMAKE_CURRENT_LIST_DIR}/jaspBase/src/*.cpp
 add_custom_target(jaspResults ALL SOURCES ${JASPRESULTS_SOURCE_FILES} ${JASPRESULTS_HEADER_FILES})
 
 
-add_library(CommonData STATIC ${SOURCE_FILES} ${HEADER_FILES} ${SQL_FILES})
+add_library(CommonData STATIC ${SOURCE_FILES} ${HEADER_FILES})
 
 #add_dependencies(CommonData R-Interface)
 
@@ -46,8 +45,6 @@ target_include_directories(
 	${R_HOME_PATH}/include
 	${RCPP_PATH}/include
 	${Boost_INCLUDE_DIRS}
-	PRIVATE
-	SQLite::SQLite3
 	)
 
 target_link_libraries(
@@ -58,8 +55,8 @@ target_link_libraries(
     Qt::Qml
     Qt::Sql
     Qt::Quick
-    LibArchive::LibArchive
-    SQLite::SQLite3
+    # The excision, Cut 3: LibArchive (ArchiveReader — .jasp zip reading) and SQLite
+    # (DatabaseInterface) died together; .jasp persistence returns in a later NEO era.
 )
 if(MSVC)
   target_compile_options(CommonData PRIVATE /EHsc)

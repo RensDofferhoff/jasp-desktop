@@ -1,6 +1,11 @@
 #include "log.h"
 #include <cassert>
 #include "filter.h"
+#include <atomic>
+
+// The excision, Cut 3: DatabaseInterface is gone; Filter ids are minted from this
+// process-global counter (computed datasets key their input by defaultInputFilterId).
+static std::atomic<int> g_nextFilterId{1};
 #include "timers.h"
 #include "qutils.h"
 #include "dataset.h"
@@ -9,7 +14,6 @@
 #include "columnencoder.h"
 #include "jsonutilities.h"
 #include "varinfomodelproxy.h"
-#include "databaseinterface.h"
 #include "labelfiltergenerator.h"
 
 Filter::Filter(DataSet * data)
@@ -22,6 +26,8 @@ Filter::Filter(DataSet * data)
 { 
 	assert(_data);
 	
+	// The excision, Cut 3: the sqlite filter row is gone — mint the id locally.
+	_id					= g_nextFilterId++;
 	_rFilter			= fq(defaultRFilter());
 	_labelGen			= new LabelFilterGenerator(this);
 	
@@ -39,9 +45,11 @@ Filter::Filter(DataSet * data, const std::string & name, bool createIfMissing)
 	_rFilter			= fq(defaultRFilter()); //Might get overwritten, that is fine
 	_generatedFilter	= DEFAULT_FILTER_GEN;
 	
-	if(db().filterGetId(_data->id(), _name) > -1)	dbLoad();
-	else if(createIfMissing)						dbCreate();
-	else											throw std::runtime_error("Filter by name '" + _name + "' but it doesnt exist and createIfMissing=false!\nAre you sure this filter should exist?");
+	// The excision, Cut 3: was a sqlite lookup (exists ? dbLoad : createIfMissing ? dbCreate : throw).
+	// Filters live in memory owned by their DataSet; a fresh one always mints a fresh id.
+	if(!createIfMissing)
+		throw std::runtime_error("Filter by name '" + _name + "' but it doesnt exist and createIfMissing=false!\nAre you sure this filter should exist?");
+	_id = g_nextFilterId++;
 	
 	//Named filters intentionally do NOT create a LabelFilterGenerator: it is only needed for the
 	//(single, unnamed) default filter, which owns the label-level filtering generated from the
@@ -85,76 +93,6 @@ void Filter::connectionCreation()
 	
 }
 
-void Filter::dbCreate()
-{
-	assert(_id == -1);
-	_id = db().filterInsert(_data->id(), _rFilter, _generatedFilter, _constructorJson, _constructorR, _name);
-}
-
-void Filter::dbUpdate(bool writeFiltered)
-{
-	JASPTIMER_SCOPE(Filter::dbUpdate);
-
-	assert(_id != -1);
-
-	if(!_data->writeBatchedToDB())
-	{
-		db().transactionWriteBegin();
-		db().filterUpdate(_id, _rFilter, _generatedFilter, _constructorJson, _constructorR, _name);
-		
-		if(writeFiltered)
-			db().filterWrite(_id, _filtered);
-
-		incRevision();
-		db().transactionWriteEnd();
-	}
-}
-
-void Filter::dbUpdateErrorMsg()
-{
-	assert(_id != -1);
-	
-	if(!_data->writeBatchedToDB())
-	{
-		auto oldError = _errorMsg;
-		db().transactionWriteBegin();
-		db().filterUpdateErrorMsg(_id, _errorMsg);
-		if(oldError != _errorMsg)
-			emit filterErrorMsgChanged();
-		
-		incRevision();
-		db().transactionWriteEnd();
-	}
-}
-
-void Filter::dbLoad()
-{
-	if(_id == -1)
-		_id = _name == "" ? db().filterGetId(_data->id()) : db().filterGetId(_data->id(),_name);
-
-	if(_id == -1)
-		return;
-
-	db().transactionReadBegin();
-	
-	auto	oldRFilter			= _rFilter,
-			oldGeneratedFilter	= _generatedFilter,
-			oldConstructorJson	= _constructorJson,
-			oldConstructorR		= _constructorR;
-
-	db().filterLoad(_id, _rFilter, _generatedFilter, _constructorJson, _constructorR, _revision, _name, _invalidated);
-
-	rescanForColumns();
-
-	if(oldRFilter			!= _rFilter)			emit rFilterChanged();
-	if(oldGeneratedFilter	!= _generatedFilter)	emit generatedFilterChanged();
-	if(oldConstructorJson	!= _constructorJson)	emit constructorJsonChanged();
-	if(oldConstructorR		!= _constructorR)		emit constructorRChanged();
-	
-	dbLoadResultAndError();
-
-	db().transactionReadEnd();
-}
 
 bool Filter::setFilterVector(const boolvec & filterResult)
 {
@@ -185,8 +123,7 @@ bool Filter::setFilterVector(const boolvec & filterResult)
 			}
 	}
 
-	if(!_data->writeBatchedToDB())
-		db().filterWrite(_id, _filtered);
+	// The excision, Cut 3: the sqlite filter-vector write is gone.
 
 	calculateFilteredRowCount();
 
@@ -207,34 +144,6 @@ void Filter::setRowCount(size_t rows)
 	calculateFilteredRowCount();
 }
 
-bool Filter::dbLoadResultAndError()
-{
-	assert(_id != -1);
-	
-	std::string newError		= db().filterLoadErrorMsg(_id);
-	bool		errorChanged	= newError != _errorMsg;
-				_errorMsg		= newError;
-	bool		changed			= db().filterSelect(_id, _filtered) || errorChanged;
-	
-	
-	if(errorChanged)
-	   emit filterErrorMsgChanged();
-	
-	if(changed)
-		emit filteredChanged();
-	 
-	 calculateFilteredRowCount();
-	 
-	 return changed;
-}
-
-void Filter::dbDelete()
-{
-	assert(_id != -1);
-
-	db().filterDelete(_id);
-	_id = -1;
-}
 
 void Filter::incRevision()
 {
@@ -242,32 +151,16 @@ void Filter::incRevision()
 	
 	if(!_data->writeBatchedToDB())
 	{
-		_revision = db().filterIncRevision(_id);
+		_revision++;	// was db().filterIncRevision (the excision, Cut 3)
 		checkForChanges();
 	}
 }
 
 bool Filter::checkForUpdates()
 {
-	if(_id == -1)
-	{
-		_id = db().dataSetGetDefaultFilter(_data->id());
-
-		assert(_name == DEFAULT_FILTER_NAME);
-		
-		if(_id == -1)
-			return false;
-	}
-	else if(_revision >= db().filterGetRevision(_id))
-		return false;
-
-	if(_data->id() != -1 && _id != -1)
-	{
-		dbLoad();
-		return true;
-	}
-	else
-		return false;
+	// The excision, Cut 3: was the sqlite revision diff-poll. Nothing external can mutate
+	// this Filter anymore — there is never anything to update.
+	return false;
 }
 
 void Filter::setName(const std::string &name)
@@ -280,7 +173,7 @@ void Filter::setName(const std::string &name)
 	bool	wasChange	=_name != name;
 			_name		= name;
 
-	dbUpdate();
+	incRevision();	// was dbUpdate() (the excision, Cut 3)
 
 	if(wasChange)
 		emit nameChanged();
@@ -293,7 +186,7 @@ void Filter::setRFilter(const std::string &rFilter)
 
 	rescanForColumns();
 
-	dbUpdate();
+	incRevision();	// was dbUpdate() (the excision, Cut 3)
 
 	if(wasChange)
 	{
@@ -321,7 +214,7 @@ void Filter::setGeneratedFilter(const std::string &generatedFilter)
 	bool	wasChange			=_generatedFilter != generatedFilter;
 			_generatedFilter	= generatedFilter;
 
-	dbUpdate();
+	incRevision();	// was dbUpdate() (the excision, Cut 3)
 
 	if(wasChange)
 	{
@@ -338,7 +231,7 @@ void Filter::setConstructorJson(const std::string &constructorJson)
 
 	rescanForColumns();
 
-	dbUpdate(); 
+	incRevision();	// was dbUpdate() (the excision, Cut 3) 
 	
 	
 
@@ -357,7 +250,7 @@ void Filter::setConstructorR(const std::string &constructorR)
 	if(!_labelGen)
 		_generatedFilter = _constructorR == "" ? DEFAULT_FILTER_GEN : "generatedFilter <- " + _constructorR;
 			
-	dbUpdate();
+	incRevision();	// was dbUpdate() (the excision, Cut 3)
 	
 	if(wasChange)
 	{
@@ -372,7 +265,7 @@ void Filter::setInvalidated(bool invalidated)
 	bool	wasChange		=_invalidated != invalidated;
 			_invalidated	= invalidated;
 
-	dbUpdate();
+	incRevision();	// was dbUpdate() (the excision, Cut 3)
 
 	if(wasChange)
 		emit invalidatedChanged();
@@ -386,7 +279,8 @@ void Filter::setErrorMsg(const std::string &errorMsg)
 	bool	wasChange	= _errorMsg != errorMsg;
 			_errorMsg	= errorMsg;
 
-	dbUpdateErrorMsg();
+	// was dbUpdateErrorMsg() — the sqlite write died with DatabaseInterface (the excision, Cut 3)
+	incRevision();
 
 	if(wasChange)
 		emit filterErrorMsgChanged();
@@ -402,26 +296,23 @@ stringset Filter::columnsUsedInRFilter() const
 	return _columnsUsedInRFilter;
 }
 
-bool Filter::filterNameIsFree(DataSet * dataSet, const std::string &filterName)
+bool Filter::filterNameIsFree(const std::string &filterName, DataSet * dataSet)
 {
 	if(!dataSet)
 		return true;
 
-	return -1 == DatabaseInterface::singleton()->filterGetId(dataSet->id(), filterName);
+	// The excision, Cut 3: was a sqlite lookup; the name is free iff no in-memory Filter has it.
+	return dataSet->filter(filterName) == nullptr;
 }
 
 void Filter::reset()
 {
-	if(!_data->writeBatchedToDB())
-		db().filterClear(_id);
-
+	// The excision, Cut 3: was `if(!writeBatchedToDB()) { db writes }` — the sqlite branch is gone.
 	incRevision();
 	_filtered = boolvec(_data->rowCount(), true);
 	calculateFilteredRowCount();
 }
 
-DatabaseInterface		& Filter::db()			{ return *DatabaseInterface::singleton(); }
-const DatabaseInterface & Filter::db() const	{ return *DatabaseInterface::singleton(); }
 
 FilteredData *Filter::rowFilteredData()
 {
@@ -469,7 +360,6 @@ QAbstractItemModel *Filter::providerModel()
 {
 	return rowFilteredVarInfo();
 }
-
 
 
 QVariant Filter::provideInfo(varInfoType info, const QString& colName, int row) const
@@ -766,14 +656,6 @@ void Filter::setStatusBarText(const QString &newStatusBarText)
 
 void Filter::checkFilterResults()
 {
-	//Load new filter values from database
-	if(dbLoadResultAndError())
-	{
-		emit filterErrorMsgChanged();
-		emit refreshAllAnalyses(this);
-		emit refreshAllCompCols(this);
-		data()->resetFilterCounters(); //Should really be part of filter
-		updateStatusBar();
-		emit dataSetShouldRefresh();
-	}
+	// The excision, Cut 3: the "load new filter values from the database" step
+	// (dbLoadResultAndError) is gone — the in-memory _filtered IS the truth now.
 }

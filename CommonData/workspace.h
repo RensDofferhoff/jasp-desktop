@@ -4,7 +4,7 @@
 #include <set>
 #include "dataset.h"
 #include "datasetbasenode.h"
-#include "databaseinterface.h"
+// The excision, Cut 3: the databaseinterface.h include died with the class.
 
 class Workspace : public DataSetBaseNode
 {
@@ -24,10 +24,10 @@ public:
 	explicit Workspace(QObject *parent = nullptr);
 	~Workspace();
 	
-			DatabaseInterface	 &	db();
-	const	DatabaseInterface	 &	db() const;
+	// The excision, Cut 3: Workspace::db()/dbLoad()/dbUpdate() died with DatabaseInterface;
+	// dbDelete() survives as the purely in-memory teardown of every DataSet.
 	
-			bool					dataMode()				const	{ return _dataMode;		}
+			bool					dataMode()				const	{ return _dataMode;	}
 			bool					showRSyntax()			const	{ return _showRSyntax;	}
 			
 			int						rowCount(		const QModelIndex &parent = QModelIndex())										const	override { return _dataSets.size(); }
@@ -39,8 +39,6 @@ public:
 			void					setDataMode(		bool mode);
 			void					setShowRSyntax(		bool showRSyntax);
 			
-			void					dbLoad(std::function<void(float)> progressCallback = [](float){}, Version doUpgradeFrom = Version());
-			void					dbUpdate();
 			void					dbDelete();
 			
 			bool					checkForUpdates(std::function<void(float)> progressCallback = [](float){});

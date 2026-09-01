@@ -26,7 +26,7 @@
 #include <QFileInfo>
 #include <json/json.h>
 #include "workspace.h"
-#include "databaseinterface.h"
+// The excision, Cut 3: databaseinterface.h include died with the class.
 #include <QSortFilterProxyModel>
 
 class DataSetPackageSubNodeModel;
@@ -64,8 +64,9 @@ public:
 		void				createWorkspace();
 		DataSet			*	createDataSet();	///< Creates *OR* recreates a dataset in database
 		void				connectWorkspace();
-        void                loadWorkspace(std::function<void(float)> progressCallback = [](float){});      ///< Assumes internal.sqlite has just been loaded from a JASPFile and will init DataSet etc with it.
-		void				deleteWorkspace(bool dbDeletePlease=true);	///< Deletes dataset from memory but not from database
+        // The excision, Cut 3: loadWorkspace (the .jasp sqlite restore) and
+        // updateDbToCurrentVersion died with DatabaseInterface.
+		void				deleteWorkspace(bool dbDeletePlease=true);	///< Tears every dataset down (in memory)
 		bool				hasDataSet() { return dataSet(); }
 
 		void				pauseEngines();
@@ -120,8 +121,7 @@ public:
 				void				setAnalysesData(const Json::Value & analysesData);
 				void				setArchiveVersion(Version archiveVersion)			{ _archiveVersion				= archiveVersion;	}
 				void				setJaspVersion(Version jaspVersion)					{ _jaspVersion					= jaspVersion;		}
-				void				updateDbToCurrentVersion();							///< Should be ran immediately after loading the jasp file
-				void				setWarningMessage(std::string message)				{ _warningMessage				= message;			}
+				void				setWarningMessage(std::string message)				{ _warningMessage				= message;		}
 					void				setDataFilePath(std::string filePath, long timestamp = 0);
 					void				neoOpenDataset(std::string filePath);	///< NEO: submit a source file as a data_open work to the orchestrator (main thread only)
 					void				setDatabaseJson(const Json::Value & dbInfo);
@@ -226,8 +226,8 @@ private:
 
 private:
 	static DataSetPackage	*	_singleton;
-	DatabaseInterface		*	_db							= nullptr;
-	Workspace				*	_workspace					= nullptr;
+	// The excision, Cut 3: _db (a DatabaseInterface) died with the class.
+	Workspace				*	_workspace						= nullptr;
 
 	QString						_currentFile,
 								_folder,

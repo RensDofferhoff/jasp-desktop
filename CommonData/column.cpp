@@ -7,8 +7,12 @@
 #include "workspace.h"
 #include "dataenums.h"
 #include "columnutils.h"
-#include "databaseinterface.h"
 #include "columnencoder.h"
+#include <atomic>
+
+// The excision, Cut 3: DatabaseInterface is gone; Column ids are minted from this
+// process-global counter (they only key in-memory label/undo bookkeeping now).
+static std::atomic<int> g_nextColumnId{1};
 
 bool Column::_autoSortByValuesByDefault = true;
 
@@ -22,16 +26,13 @@ void Column::setAutoSortByValuesByDefault(bool autoSort)
 	_autoSortByValuesByDefault = autoSort;
 }
 
-Column::Column(DataSet * data, int id)
+Column::Column(DataSet * data)
 :	DataSetBaseNode(dataSetBaseNodeType::column, data),
 	_data(				data),
-	_id(				id),
+	_id(				g_nextColumnId++),	// The excision, Cut 3: ids are minted locally (no sqlite rows exist)
 	_emptyValues(		new EmptyValues(data->emptyValues())),
 	_autoSortByValue(	_autoSortByValuesByDefault)
 {
-	if(_id != -1)
-		db().columnSetAutoSort(_id, _autoSortByValue); //Store autosort in db
-	
 	connect(this, &Column::manualEditMade,			data, &DataSet::manualEditMade				);
 	connect(this, &Column::dataSetShouldRefresh,	data, &DataSet::refresh						);
 	connect(this, &Column::columnChanged,			data, &DataSet::handleColumnChanged			);
@@ -58,183 +59,9 @@ Column::~Column()
 	catch(...){}
 }
 
-void Column::dbCreate(int index)
-{
-	JASPTIMER_SCOPE(Column::dbCreate);
-
-	assert(_id == -1);
-	db().columnInsert(_id, index);
-	assert(_id != -1);
-}
-
-void Column::dbLoad(int id, bool getValues)
-{
-	JASPTIMER_SCOPE(Column::dbLoad);
-
-	assert(_id == id || (id != -1 && _id == -1) || _id != -1);
-
-	if(id != -1)
-		_id = id;
-
-	db().transactionReadBegin();
-	
-	Json::Value			emptyVals;
-	int					dropLevelsTypeInt	= static_cast<int>(_dropLevels);
-	std::string			oldError			= _error;
-	
-	db().columnGetBasicInfo(	_id, _name, _title, _description, _type, _revision, emptyVals, _autoSortByValue, dropLevelsTypeInt, _hasLabels);
-	db().columnGetComputedInfo(	_id, _analysisId, _invalidated, _codeType, _rCode, _error, _constructorJson, _computeFilter);
-	
-	if(oldError != _error)
-		emit errorChanged();
-	
-	try { _dropLevels = dropLevelsType(dropLevelsTypeInt); } catch(...){}
-	
-	_emptyValues->fromJson(emptyVals);
-	
-	if(getValues)
-	{
-		if(_hasLabels)
-		{
-			db().labelsLoad(this);
-			db().columnGetValues(_id, _ints);
-		}
-		else
-			db().columnGetValues(_id, _dbls, _strs);
-	}
-
-	_resetLabelValueMap();
-
-	db().transactionReadEnd();
-}
-
-void Column::dbLoadOldIndex(int index)
-{
-	JASPTIMER_SCOPE(Column::dbLoadOldIndex);
-	
-	_id = db().columnIdForIndex(_data->id(), index);
-
-	assert(_id != -1);
-
-	db().transactionWriteBegin();
-	
-	dbLoad(_id, false);
-	
-	db().columnGetValues(_id, _ints,		"INT");
-	db().columnGetValues(_id, _dbls, _strs, "DBL");
-	
-	if(true)
-	{
-		JASPTIMER_START(Column::dbLoadOldIndex look for trouble);
-		
-		bool					thisCantBeRight = false;
-		std::map<int, double>	lookForTrouble; //0.18 messed up some things, and maybe 0.19, make sure we only import logical labels. These messed up things could also be in upgraded jaspfiles...
-		
-		for(size_t r=0; r<_ints.size() && !thisCantBeRight; r++)
-		{			
-			if(lookForTrouble.count(_ints[r]))
-			{
-				if(lookForTrouble.at(_ints[r]) != _dbls[r] && !(std::isnan(_dbls[r]) && std::isnan(lookForTrouble.at(_ints[r]))))
-					thisCantBeRight = true;
-			}
-			else
-				lookForTrouble[_ints[r]] = _dbls[r];
-		}
-		
-		JASPTIMER_STOP(Column::dbLoadOldIndex look for trouble);
-		
-		//Turns out one label is used in conjunction with more than 1 value... That cant be right, so lets throw away all these integers		
-		if(thisCantBeRight)
-			for(size_t r=0; r<_ints.size(); r++)
-				_ints[r] = Label::NO_LABEL;
-		else // we should still check if these labels even exist and otherwise clean that up too
-		{
-			intset existingLabels = db().labelsExisting(_id);
-			
-			for(size_t r=0; r<_ints.size(); r++)
-				if(existingLabels.count(_ints[r]) == 0)
-					_ints[r] = Label::NO_LABEL;
-		}
-	}
-	
-	if(std::all_of(_ints.begin(), _ints.end(), [](int i){ return i == Label::NO_LABEL || i == EmptyValues::missingValueInteger; }))
-	{
-		JASPTIMER_START(Column::dbLoadOldIndex remove all labels);
-		
-		_hasLabels = false;
-		_ints.clear();
-		labelsClear();
-		db().labelsClear(_id);
-		
-		for(int row=0; row<_strs.size() && row < _dbls.size(); row++)
-		{
-			//Log::log() << "_strs["<< row << "] == " << _strs[row] << " and  _dbls["<< row << "] == " << _dbls[row]  << std::endl;
-			
-			double dbl;
-			
-			if(ColumnUtils::getDoubleValue(_strs[row], dbl, false) && ((std::isnan(dbl) && std::isnan(_dbls[row])) || _dbls[row] == dbl))
-				_strs[row] = "";
-		}
-		
-		JASPTIMER_STOP(Column::dbLoadOldIndex remove all labels);
-		
-		
-	}
-	else
-	{
-		JASPTIMER_START(Column::dbLoadOldIndex load all labels);
-
-		
-		_hasLabels = true;
-		
-		db().labelsLoad(this);
-		_resetLabelValueMap();
-		
-		_strs.clear();
-		_dbls.clear();
-		
-		
-		bool everythingIsTheSame = true;
-		
-		for(Label * label : _labels)
-			if(label->originalValueAsString(false, true) != label->label(false))
-			{
-				everythingIsTheSame = false;
-				break;
-			}
-		
-		if(everythingIsTheSame)
-			labelsToNoLabels(false);
-		
-		JASPTIMER_STOP(Column::dbLoadOldIndex load all labels);
-	}
-	
-	db().columnSetHasLabels(_id, _hasLabels);
-	incRevision();
-	
-	db().transactionWriteEnd();
-}
-
-void Column::dbLoadIndex(int index, bool getValues)
-{
-	JASPTIMER_SCOPE(Column::dbLoadIndex);
-
-	_id = db().columnIdForIndex(_data->id(), index);
-	
-	assert(_id != -1);
-
-	dbLoad(_id, getValues);
-}
-
-void Column::dbDelete(bool cleanUpRest)
-{
-	assert(_id != -1);
-
-	labelsClear(false);
-	db().columnDelete(_id, cleanUpRest);
-
-	_id = -1;
-}
+// The excision, Cut 3: Column::dbLoad / dbLoadOldIndex / dbLoadIndex / dbDelete died with
+// DatabaseInterface — the sqlite restore paths are gone (.jasp persistence returns in a later
+// NEO era); Column ids are minted in the ctor.
 
 void Column::loadComputedColumnJsonBackwardsCompatibly(const Json::Value & json)
 {
@@ -289,7 +116,6 @@ bool Column::setName(const std::string &name)
 	if(!_title.empty() && (_title == orgName || _title == _name)) 
 		setTitle(_name);
 
-	db().columnSetName(_id, _name);
 	incRevision();
 	
 	emit nameChanged();
@@ -310,7 +136,6 @@ void Column::setTitle(const std::string &title)
 		return;
 
 	_title = _name != title ? title : "";
-	db().columnSetTitle(_id, _title);
 	incRevision();
 	
 	emit titleChanged();
@@ -332,7 +157,6 @@ void Column::setDescription(const std::string &description)
 		return;
 
 	_description = description;
-	db().columnSetDescription(_id, _description);
 	incRevision();
 	
 	emit descriptionChanged();
@@ -356,7 +180,6 @@ void Column::setComputeFilter(const std::string &filter)
 
 	_computeFilter = filter;
 	invalidate();
-	db().columnSetComputeFilter(_id, _computeFilter);
 	incRevision();
 	
 	emit computeFilterChanged();
@@ -385,7 +208,6 @@ void Column::setType(columnType colType)
 		return;
 	
 	_type = colType;
-	db().columnSetType(_id, _type);
 	incRevision();
 	
 	if(!wasUnknown)
@@ -415,7 +237,6 @@ void Column::setHasCustomEmptyValues(bool hasCustom)
 		return;
 	
 	_emptyValues->setHasCustomEmptyValues(hasCustom);
-	db().columnSetEmptyVals(_id, _emptyValues->toJson().toStyledString());
 	
 	nonFilteredCountersReset();
 	
@@ -433,7 +254,6 @@ bool Column::setCustomEmptyValues(const stringset& customEmptyValues)
 		return false;
 
 	_emptyValues->setEmptyValues(customEmptyValues, _emptyValues->hasEmptyValues());
-	db().columnSetEmptyVals(_id, _emptyValues->toJson().toStyledString());
 
 	nonFilteredCountersReset();
 	
@@ -449,7 +269,6 @@ void Column::dbUpdateComputedColumnStuff()
 {
 	std::string oldError = _error;
 	
-	db().columnSetComputedInfo(_id, _analysisId, _invalidated, _codeType, _rCode, _error, constructorJsonStr(), _computeFilter);
 	incRevision();
 	
 	if(oldError != _error)
@@ -464,7 +283,6 @@ void Column::setInvalidated(bool invalidated)
 		return;
 	
 	_invalidated = invalidated;
-	db().columnSetInvalidated(_id, _invalidated);
 	incRevision();
 }
 
@@ -517,7 +335,6 @@ void Column::setAutoSortByValue(bool sort)
 	
 	_autoSortByValue = sort;
 	
-	db().columnSetAutoSort(_id, _autoSortByValue);
 	
 	emit autoSortByValueChanged();
 
@@ -607,7 +424,6 @@ void Column::setIndex(int index)
 {
 	JASPTIMER_SCOPE(Column::setIndex);
 
-	db().columnSetIndex(id(), index);
 	incRevision();
 }
 
@@ -704,7 +520,6 @@ void Column::setDropLevels(dropLevelsType dropEm)
 	
 	_dropLevels = dropEm;
 	
-	db().columnSetDropLevels(_id, static_cast<int>(_dropLevels));
 	
 	incRevision();
 	
@@ -720,14 +535,7 @@ void Column::setDropLevels(dropLevelsType dropEm)
 
 void Column::dbUpdateValues()
 {
-	if(!_data->writeBatchedToDB())
-	{
-		if(_hasLabels)
-			db().columnSetValues(_id, _ints);
-		else
-			db().columnSetValues(_id, _dbls, _strs);
-	}
-	
+	// The excision, Cut 3: the sqlite value write died with DatabaseInterface.
 	incRevision();
 }
 
@@ -1074,7 +882,6 @@ void Column::_dbUpdateLabelOrder(bool noIncRevisionWhenBatchedPlease)
 		return;
 	}
 	
-	db().labelsSetOrder(_updateNonEmptyIndexesAndLabelOrder());
 	
 	incRevision();
 }
@@ -1086,12 +893,8 @@ void Column::_sortLabelsByOrder()
 
 void Column::labelsClear(bool doIncRevision)
 {
-	bool hadLabels = _labels.size() > 0;
 	for (Label* label : _labels)
-		delete label;
-	
-	if(hadLabels)
-		db().labelsClear(_id);
+		delete label;	// The excision, Cut 3: in-memory only (was a db labelsClear too)
 	
 	_labelNonEmptyIndexByLabel.clear();
 	_labelByNonEmptyIndex.clear();
@@ -1149,7 +952,6 @@ void Column::endBatchedLabelsDB(bool wasWritingBatch)
 	{
 		if(wasWritingBatch)
 		{
-			db().labelsWrite(this);
 			incRevision(); //Should trigger reload at engine end
 		}
 	}	
@@ -1288,7 +1090,6 @@ void Column::labelsRemove(int labelIndex)
 				_ints[i] = EmptyValues::missingValueInteger;
 	}
 	
-	db().columnSetValues(_id, _ints);
 	nonFilteredCountersReset();
 	_dbUpdateLabelOrder();
 	
@@ -1348,9 +1149,8 @@ void Column::labelsRemoveByIntsId(std::set<int> valuesToRemove, bool updateOrder
 					
 					if(_labelsByDisplay.count(valDis.second))
 						_labelsByDisplay.at(valDis.second).erase(label);
-						
-					label->dbDelete();
-					delete label;
+					
+					delete label;	// The excision, Cut 3: in-memory only (was label->dbDelete())
 					return true;
 				}
 				return false;
@@ -2167,7 +1967,6 @@ bool Column::setValue(size_t row, int valueInt, bool writeToDB)
 	
 	if(writeToDB && !_data->writeBatchedToDB())
 	{
-		db().columnSetValue(_id, row, valueInt);
 		incRevision();
 	}
 	
@@ -2188,7 +1987,6 @@ bool Column::setValue(size_t row, double valueDbl,  const std::string & valueStr
 	
 	if(writeToDB && !_data->writeBatchedToDB())
 	{
-		db().columnSetValue(_id, row, valueDbl, valueStr);
 		incRevision();
 	}
 	
@@ -2505,15 +2303,7 @@ void Column::valuesReverse()
 
 }
 
-DatabaseInterface & Column::db()
-{
-	return _data->db();
-}
-
-const DatabaseInterface  & Column::db() const
-{
-	return _data->db();
-}
+// The excision, Cut 3: Column::db() died with DatabaseInterface.
 
 bool Column::allLabelsPassFilter() const
 {
@@ -2530,14 +2320,12 @@ bool Column::hasLabelFilter() const
 
 void Column::resetFilter()
 {
-	db().transactionWriteBegin();
 	
 	for(Label * label : _labels)
 		label->setFilterAllows(true);
 	
 	incRevision();
 
-	db().transactionWriteEnd();
 }
 
 void Column::incRevision()
@@ -2546,7 +2334,7 @@ void Column::incRevision()
 
 	if(!_data->writeBatchedToDB())
 	{
-		_revision = db().columnIncRevision(_id);
+		_revision++;	// was db().columnIncRevision (the excision, Cut 3)
 		checkForChanges();
 	}
 	else
@@ -2555,14 +2343,9 @@ void Column::incRevision()
 
 bool Column::checkForUpdates()
 {
-	assert(_id != -1);
-
-	if(_revision >= db().columnGetRevision(_id))
-		return false;
-
-	dbLoad();
-	refresh();
-	return true;
+	// The excision, Cut 3: was the sqlite revision diff-poll (dbLoad on change). Nothing
+	// external can mutate this Column anymore — there is never anything to update.
+	return false;
 }
 
 void Column::addLabelManually(QString value, QString label)
@@ -2603,7 +2386,6 @@ void Column::deleteLabelManually(int labelIndex)
 		if(_ints[i] == intsId)
 			_ints[i] = EmptyValues::missingValueInteger;
 
-	db().columnSetValues(_id, _ints);
 	nonFilteredCountersReset();
 	_dbUpdateLabelOrder();
 	incRevision();
@@ -2762,7 +2544,6 @@ void Column::checkForDependentColumnsToBeSent(bool refreshMe)
 
 	emit data()->workspace()->checkForDependentAnalyses(this);
 }
-
 
 
 Json::Value Column::serialize() const
@@ -3526,7 +3307,6 @@ void Column::showAnalysisForm()
 }
 
 
-
 void Column::setHasLabels(bool haveLabels)
 {
 	if(haveLabels == _hasLabels)
@@ -3545,7 +3325,6 @@ void Column::labelsToNoLabels(bool signalOthers)
 	const auto size = _ints.size();
 	
 	if(signalOthers)
-		db().transactionWriteBegin();
 	
 	_strs.clear();
 	_strs.reserve(size);
@@ -3583,9 +3362,6 @@ void Column::labelsToNoLabels(bool signalOthers)
 	
 	if(signalOthers)
 	{
-		db().columnSetValues(_id, _dbls, _strs);
-		db().columnSetHasLabels(_id, _hasLabels);
-		db().transactionWriteEnd();
 		
 		incRevision();
 	}
@@ -3595,7 +3371,6 @@ void Column::noLabelsToLabels()
 {
 	const auto size = _dbls.size();
 	
-	db().transactionWriteBegin();
 	beginBatchedLabelsDB();
 	_hasLabels	= true;
 	_hasShadows = false;
@@ -3609,14 +3384,11 @@ void Column::noLabelsToLabels()
 	_dbls.clear();
 	_strs.clear();
 	
-	db().columnSetValues(_id, _ints);
-	db().columnSetHasLabels(_id, _hasLabels);
 	
 	labelsHandleAutoSort(false);
 
 	endBatchedLabelsDB();
 	
-	db().transactionWriteEnd();
 	
 	emit hasLabelsChanged();
 	emit labelFilterChanged();

@@ -35,15 +35,7 @@ Workspace::~Workspace()
 }
 
 
-DatabaseInterface &Workspace::db()	
-{ 
-	return *DatabaseInterface::singleton(); 
-}
-
-const DatabaseInterface &Workspace::db() const
-{ 
-	return *DatabaseInterface::singleton(); 
-}
+// The excision, Cut 3: Workspace::db() died with DatabaseInterface.
 
 QVariant Workspace::data(const QModelIndex &index, int role) const
 {
@@ -82,120 +74,29 @@ void Workspace::setDataMode(bool mode)
 	refresh();
 }
 
-void Workspace::setShowRSyntax(bool showRSyntax)					
+void Workspace::setShowRSyntax(bool showRSyntax)				
 { 
 	_showRSyntax		= showRSyntax;			
-	dbUpdate();
+	// was dbUpdate() — the sqlite workspace row died with DatabaseInterface (the excision, Cut 3)
 	
 	emit showRSyntaxChanged(_showRSyntax);
 }
 
-void Workspace::dbLoad(std::function<void(float)> progressCallback, Version doUpgradeFrom)
-{
-	intset	dataSets = db().dataSetIds();
-	
-	int		numLoaded = 0;
-	
-	for(int id : dataSets)
-	{
-		auto progressCallbackPerData = [&](float p)
-		{
-			float	d = dataSets.size(),
-					i = 1.0 / d;
-			
-			progressCallback((numLoaded * i) + (p * i));	
-		};
-		
-		
-		_dataSets[id] = new DataSet(this, 0);
-		_dataSets[id]->dbLoad(id, progressCallbackPerData, doUpgradeFrom);
-		numLoaded++;
-		emit dataSetCreated(id);
-		
-		if(!_shownDataSet)
-			setShownDataSet(_dataSets[id]);
-	}
-	
-	bool prev = _showRSyntax;
-	db().workspaceLoad(_showRSyntax);
-	
-	if(prev != _showRSyntax)
-		emit showRSyntaxChanged(_showRSyntax);
-}
-
-void Workspace::dbUpdate()
-{
-	db().workspaceUpdate(_showRSyntax);
-}
+// The excision, Cut 3: Workspace::dbLoad/dbUpdate died with DatabaseInterface — the sqlite
+// workspace restore (.jasp persistence) returns in a later NEO era.
 
 void Workspace::dbDelete()
 {
 	for(auto & idData : _dataSets)
 		idData.second->dbDelete();
-	
-	db().truncateAllTables();
 }
 
-//Should be merged with dbLoad() probably?
 bool Workspace::checkForUpdates(std::function<void(float)> progressCallback)
 {
-	intset	dataSets = db().dataSetIds(),
-			missing;
-
-	bool aChange = false;
-	
-	int numChecked = 0;
-	float d = std::max(1, (int)dataSets.size());
-
-	for(int id : dataSets)
-		if(_dataSets.count(id))
-		{
-			if(_dataSets.at(id)->checkForUpdates([&](float p){ progressCallback((numChecked + p) / d); }))
-				aChange = true;
-			numChecked++;
-		}
-		else
-		{
-			_dataSets[id] = new DataSet(this, id);
-			aChange = true;
-			emit dataSetCreated(id);
-			
-			if(!_shownDataSet)
-				setShownDataSet(_dataSets[id]); //Full setter so encoder/undoStack/varInfo stay consistent
-			numChecked++;
-			progressCallback(numChecked / d);
-		}
-	
-	for(auto & idDataSet : _dataSets)
-		if(!dataSets.count(idDataSet.first))
-			missing.insert(idDataSet.first);
-	
-	for(int id : missing)
-	{
-		if(_shownDataSet == _dataSets[id])
-			_shownDataSet = nullptr;
-		delete _dataSets[id];
-		_dataSets.erase(id);
-		emit dataSetRemoved(id);
-		aChange = true;
-	}
-	
-	//Never leave even a dangling pointer to a deleted (previously shown) dataset.
-	if(!_shownDataSet)
-	{
-		if(_dataSets.empty())
-			_varInfo->setProvider(nullptr);
-		else
-			setShownDataSet(_dataSets.begin()->second);
-	}
-	
-	bool prev = _showRSyntax;
-	db().workspaceLoad(_showRSyntax);
-	
-	if(prev != _showRSyntax)
-		emit showRSyntaxChanged(_showRSyntax);
-	
-	return aChange;
+	// The excision, Cut 3: this was the sqlite diff-poll (new/removed dataset rows, showRSyntax
+	// reload). Nothing external can mutate the workspace anymore — never anything to update.
+	(void) progressCallback;
+	return false;
 }
 
 

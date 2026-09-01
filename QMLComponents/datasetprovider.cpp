@@ -43,13 +43,13 @@ DataSetProvider::~DataSetProvider()
 {
 	assert(_singleton == this);
 	delete _workspace;
-	delete _db;
 	_singleton = nullptr;
 }
 
 DataSetProvider::DataSetProvider(bool inMemory, QObject *parent) : QAbstractTableModel(parent), _inMemory(inMemory)
 {
-	_db	= new DatabaseInterface(true, inMemory);
+	// The excision, Cut 3: the provider no longer owns a DatabaseInterface — its sqlite-backed
+	// loadDatabase/closeDatabase died with the class (.jasp persistence returns in a later era).
 	_workspace = new Workspace();
 
 	new VariableInfo(this);
@@ -59,10 +59,7 @@ DataSetProvider::DataSetProvider(bool inMemory, QObject *parent) : QAbstractTabl
 void DataSetProvider::resetDataSet()
 {
 	if (_workspace)
-	{
-		_workspace->dbDelete();
 		delete _workspace;
-	}
 	
 	_workspace = new Workspace(this);
 	_workspace->createDataSet();
@@ -124,35 +121,9 @@ void DataSetProvider::loadDataSet(const std::map<std::string, stringvec > & data
 
 }
 
-void DataSetProvider::closeDatabase()
-{
-	_db->close();
-}
-
-void DataSetProvider::loadDatabase(const Version & jaspVersion)
-{
-	delete _workspace;
-	_workspace = nullptr;
-
-	try
-	{
-		_db->close();
-		_db->load();
-		_db->upgradeDBFromVersion(jaspVersion);
-
-		_workspace = new Workspace(this);
-		_workspace->createDataSet();
-		dataSet()->dbLoad(1, [](float p) {}, jaspVersion);
-
-		dataSet()->encoder().setCurrentNames(dataSet()->getColumnTypesMap());
-	}
-	catch (...)
-	{
-		_workspace = new Workspace(this);
-		_workspace->createDataSet();
-		throw;
-	}
-}
+// The excision, Cut 3: DataSetProvider::closeDatabase/loadDatabase (the sqlite/.jasp restore
+// path) died with DatabaseInterface. Their only caller was syntaxbridge.cpp, which is not part
+// of the NEO build — nothing needs them until .jasp persistence returns (a later era).
 
 QVariantList DataSetProvider::_getDoubleList(Column * column) const
 {

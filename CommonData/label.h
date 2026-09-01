@@ -7,7 +7,7 @@
 #include "columntype.h"
 
 class Column;
-class DatabaseInterface;
+// The excision, Cut 3: the DatabaseInterface forward declaration is gone with the class.
 
 /// A label
 /// 
@@ -32,12 +32,10 @@ public:
 	friend Column;
 	static const int NO_LABEL;
 	
-			void				dbDelete();
-			void				dbCreate();
-			void				dbLoad(int labelId = -1);
-			void				dbUpdate();
-			
-			int					rowCount(		const QModelIndex &parent = QModelIndex())										const	override;
+	// The excision, Cut 3: the db* family (dbCreate/dbLoad/dbDelete/dbUpdate/db()) died with
+	// DatabaseInterface — labels are purely in-memory until the labels-overlay era.
+	
+			int				rowCount(		const QModelIndex &parent = QModelIndex())												const	override;
 			int					columnCount(	const QModelIndex &parent = QModelIndex())										const	override;
 			QVariant			data(			const QModelIndex &index, int role = Qt::DisplayRole)							const	override;
 
@@ -85,9 +83,6 @@ public:
 
 			Json::Value			serialize(bool forCompare = false)	const;
 
-			DatabaseInterface	& db();
-	const	DatabaseInterface	& db() const;
-	
 signals:
 	void				manualEditMade();
 	void				labelFilterChanged();

@@ -15,8 +15,8 @@ class DataSet;
 class VariableInfo;
 class FilteredData;
 class VarInfoModelProxy;
-class DatabaseInterface;
 class LabelFilterGenerator;
+// The excision, Cut 3: the DatabaseInterface forward declaration is gone with the class.
 
 ///Interface to sqlite Filters table
 ///
@@ -74,16 +74,13 @@ public:
 	QString						statusBarText()			const	{ return _statusBarText;			}
 	QString						filterErrorMsgQ()		const;
 	QString						generatedFilterQ()		const;
-	QString						constructorJsonQ()		const;
+	QString					constructorJsonQ()		const;
 
-	void						dbCreate();
-	void						dbUpdate(bool writeFiltered = false);
-	void						dbUpdateErrorMsg();
-	void						dbLoad();
-	bool						dbLoadResultAndError();					///< Loads (updated) filtervalues from database and the (possible) error msg, returns true if an error is set
-	void						dbDelete();
-	void						incRevision() override;
-	bool						checkForUpdates();
+	// The excision, Cut 3: the db* family (dbCreate/dbUpdate/dbUpdateErrorMsg/dbLoad/
+	// dbLoadResultAndError/dbDelete/db()) died with DatabaseInterface — the id is minted in
+	// the ctor from a process-global counter; setters bump the revision inline.
+	void					incRevision() override;
+	bool					checkForUpdates();
 			
 	bool						columnUsed(const QString & name) const;
 
@@ -110,16 +107,17 @@ public:
 	void						setRowCount(		size_t	rows);
 	void						setId(				int		id)			{ _id = id; }
 
-	stringset					columnsUsedInConstructor()	const;
+	stringset				columnsUsedInConstructor()	const;
+
+	// The excision, Cut 3: Filter::db() died with DatabaseInterface.
 	stringset					columnsUsedInRFilter()		const;
 
-	static bool					filterNameIsFree(DataSet * dataSet, const std::string & filterName);
+	static	bool				filterNameIsFree(const std::string & filterName, DataSet * dataSet);
 	void						checkFilterResults();
 
-	void						reset();
+	void					reset();
 
-	DatabaseInterface		&	db();
-	const DatabaseInterface	&	db() const;
+	// The excision, Cut 3: Filter::db() died with DatabaseInterface.
 	
 	VariableInfo			*	varInfo();
 	FilteredData			*	rowFilteredData();

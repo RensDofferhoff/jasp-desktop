@@ -56,30 +56,24 @@ class Column : public DataSetBaseNode
 	Q_PROPERTY(QString				constructorJson		READ constructorJsonQ		WRITE setConstructorJsonQ		NOTIFY constructorJsonChanged	)
 	// Emit signals also in refresh
 	
-	friend DatabaseInterface;
+	// The excision, Cut 3: `friend DatabaseInterface` is gone with the class.
 public:
 	typedef std::map<std::pair<std::string, std::string>, Label*>	LabelByStrStr;
 	typedef std::map<std::string, Labelset>							LabelsByStr;
 	friend DataSet;
 
 protected:
-									Column(DataSet * data, int id = -1);	///< Dont use directly! Use DataSet::_createColumn
+										Column(DataSet * data);	///< Dont use directly! Use DataSet::_createColumn
 
 public:
-									~Column();			
-									
-				DatabaseInterface & db();
-		const	DatabaseInterface & db() const;
-
-			void					dbCreate(	int index);
-			void					dbLoad(		int id=-1, bool getValues = true);	///< Loads *and* reloads from DB!
-			void					dbLoadOldIndex(	int index);		///< Loads pre ~0.96.1 data (with both DBL and INT cols)
-			void					dbLoadIndex(int index, bool getValues = true);
-			void					dbUpdateComputedColumnStuff();
-			void					dbUpdateValues();
-			void					dbDelete(bool cleanUpRest = true);
+										~Column();			
 			
-			int						rowCount(		const QModelIndex &parent = QModelIndex())										const	override;
+			// The excision, Cut 3: the db* family died with DatabaseInterface (ids are minted in
+			// the ctor; dbUpdateValues/dbUpdateComputedColumnStuff survive as revision-bump stubs).
+			void				dbUpdateComputedColumnStuff();
+			void				dbUpdateValues();
+			
+			int					rowCount(		const QModelIndex &parent = QModelIndex())												const	override;
 			int						columnCount(	const QModelIndex &parent = QModelIndex())										const	override;
 			QVariant				headerData(		int section, Qt::Orientation orientation, int role = Qt::DisplayRole )			const	override;
 			QVariant				data(			const QModelIndex &index, int role = Qt::DisplayRole)							const	override;

@@ -60,10 +60,9 @@ class DataSet : public DataSetBaseNode
 	
 public:
 	typedef 	std::map<std::string,columnType>	colTypeMap;
-	typedef		DatabaseInterface					DBIF;
-	typedef		DatabaseConnectionInfo				DBCIF;
+	// The excision, Cut 3: DatabaseInterface is gone — the DBIF/DBCIF aliases died with it.
 	
-							DataSet(Workspace * workspace, int index = -1); ///< index==-1: create a new dataSet, >0: load that dataSet, 0: do nothing
+							DataSet(Workspace * workspace); ///< a fresh dataset: id minted from the process-global counter
 							~DataSet();
 	
 			Workspace	*	workspace()			const		{ return	_workspace; }
@@ -143,15 +142,14 @@ public:
 			bool			insertRows(		int row,		int count, const QModelIndex & aparent = QModelIndex())					override;
 			bool			insertColumns(	int column,		int count, const QModelIndex & aparent = QModelIndex())					override;
 			bool			removeRows(		int row,		int count, const QModelIndex & aparent = QModelIndex())					override;
-			bool			removeColumns(	int column,		int count, const QModelIndex & aparent = QModelIndex())					override;
+			bool		removeColumns(	int column,		int count, const QModelIndex & aparent = QModelIndex())				override;
 
+			// The excision, Cut 3: dbCreate/dbUpdate/dbLoad died with DatabaseInterface; dbDelete
+			// survives as the PURELY IN-MEMORY teardown (no sqlite rows exist). Ids are minted from
+			// the process-global counter in the ctor; setters keep bumping the legacy revision
+			// (incRevision) so behaviour is unchanged minus the sqlite writes.
 			int				columnsLabelFilteredCount()	const;
-
-			void			dbCreate();
-			void			dbUpdate();
-			void			dbLoad(int id = -1, std::function<void(float)> progressCallback = [](float){}, Version doUpgradeFrom = Version());
 			void			dbDelete();
-
 			void			beginBatchedToDB();
 			void			endBatchedToDB(std::function<void(float)> progressCallback = [](float){}, Columns columns={});
 			void			endBatchedToDB(Columns columns) { endBatchedToDB([](float){}, columns); }
@@ -212,10 +210,10 @@ public:
 			
 			void			emitColumnChanged(		const QString		& name);
 
-			void			setDataFile( const std::string & dataFilePath, long timestamp)	{ _dataFilePath	= dataFilePath;	_dataFileTimestamp = timestamp; dbUpdate(); }
-			void			setDatabaseJson(	const std::string & databaseJson)	{ Json::Reader().parse(databaseJson, _database); dbUpdate(); }
-			char			csvDelimiter()		const								{ return _csvDelimiter; }
-			void			setCsvDelimiter(	char delimiter)						{ _csvDelimiter		= delimiter;			dbUpdate(); }
+			void			setDataFile( const std::string & dataFilePath, long timestamp)	{ _dataFilePath	= dataFilePath;	_dataFileTimestamp = timestamp; incRevision(); }	// was dbUpdate()
+			void			setDatabaseJson(	const std::string & databaseJson)	{ Json::Reader().parse(databaseJson, _database); incRevision(); }	// was dbUpdate()
+			char			csvDelimiter()		const									{ return _csvDelimiter; }
+			void			setCsvDelimiter(	char delimiter)						{ _csvDelimiter		= delimiter;			incRevision(); }	// was dbUpdate()
 
 			void			setColumnCount(	size_t colCount);
 			void			setRowCount(	size_t rowCount, bool alsoLoadData = true);
@@ -261,8 +259,7 @@ public:
 			void			loadOldComputedColumnsJson(const Json::Value & json); ///< Should act the same as the old ComputedColumns::fromJson() to allow loading "older jaspfiles"
 			stringset		findUsedColumnNames(std::string searchThis);
 
-			DBIF		&	db();
-	const	DBIF		&	db() const;
+	// The excision, Cut 3: DBIF & db() died with DatabaseInterface.
 	
 			void			setEmptyValuesJson(			const Json::Value & emptyValues, bool updateDB = true);
 			

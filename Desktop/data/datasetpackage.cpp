@@ -41,8 +41,7 @@ DataSetPackage::DataSetPackage(QObject * parent) : QObject(parent)
 	if(_singleton) throw std::runtime_error("DataSetPackage can be constructed only once!");
 	_singleton = this;
 	//NEO: true init is done in MainWindow after the client is up (was: setEngineSync)
-	
-	_db			= new DatabaseInterface(true);
+	// The excision, Cut 3: the package no longer owns a DatabaseInterface (was: _db = new ...).
 
 	createWorkspace();
 	
@@ -105,50 +104,9 @@ DataSet * DataSetPackage::createDataSet()
 	return dataSet;
 }
 
-void DataSetPackage::loadWorkspace(std::function<void(float)> progressCallback)
-{
-	if(workspace())
-		deleteWorkspace(false); //no dbDelete necessary cause we just copied an old sqlite file here from the JASP file
-	
-	_db->close();
-	stopEngines();
-
-	// Whatever happens below (a failed DB migration, a corrupt column, ...) we must not leave the
-	// application without engines. This guard restarts them on every exit path - success or
-	// exception - so a failed load fails cleanly with a still-usable session instead of a dead app.
-	struct EngineRestarter
-	{
-		DataSetPackage * pkg;
-		~EngineRestarter() { try { pkg->restartEngines(); } catch(...) {} } // never throw during unwind
-	} engineRestarter{ this };
-
-	_db->load();
-	_db->upgradeDBFromVersion(_jaspVersion);
-
-	bool do019Upgrade = _jaspVersion < "0.19"; // A tweak needs to be made to the data as its loaded, see https://github.com/jasp-stats/jasp-desktop/pull/5367
-	
-	createWorkspace();
-	
-	workspace()->dbLoad(progressCallback, _jaspVersion);
-	
-	if (do019Upgrade)
-	{
-		// In 0.18.3 and before, there was a bug with the order of dataFilePath and description in the database.
-		// dataFilePath was set empty and description has dataFilePath.
-		if (dataSet()->dataFilePath().empty())
-		{
-			QFileInfo fileInfo(description());
-			if (fileInfo.isFile())
-				dataSet()->setDataFileQ(description());
-		}
-	}
-
-	workspace()->initializeComputedColumns();
-	workspace()->initializeComputedDatasets();
-
-	refresh();
-	// engines are restarted by engineRestarter on scope exit (also on the exception paths above)
-}
+// The excision, Cut 3: DataSetPackage::loadWorkspace (the .jasp sqlite restore) died with
+// DatabaseInterface — its only callers were the JASP-import paths removed in Cut 2. The
+// .jasp restore returns in a later NEO era.
 
 void DataSetPackage::deleteWorkspace(bool dbDeletePlease)
 {

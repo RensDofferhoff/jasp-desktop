@@ -268,11 +268,7 @@ MainWindow::~MainWindow()
 	delete _rpcServer;
 	delete _rpcDispatcher;
 
-	try
-	{
-		DatabaseInterface::closeInterfaces();
-	}
-	catch(...) {}
+	// The excision, Cut 3: DatabaseInterface::closeInterfaces() died with the class.
 
 	try
 	{

@@ -66,6 +66,9 @@ target_link_libraries(
 	PRIVATE
 	Common
 	CommonData
+	# The excision, Cut 3: LibArchive moved here from CommonData — ExtractArchive (module .zip
+	# installation, autosave metadata) is its one remaining user; CommonData's ArchiveReader died.
+	LibArchive::LibArchive
 )
 
 list(POP_BACK CMAKE_MESSAGE_CONTEXT)

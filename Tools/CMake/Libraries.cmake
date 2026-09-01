@@ -40,7 +40,9 @@ endif()
 
 find_package(ZLIB 1.2 REQUIRED)
 find_package(Iconv 1.16 REQUIRED)
-find_package(SQLite3 3.37.0 REQUIRED)
+# The excision, Cut 3: find_package(SQLite3) died with DatabaseInterface.
+# LibArchive STAYS: ExtractArchive (QMLComponents — module .zip installation, autosave
+# metadata) still uses it; only CommonData's ArchiveReader (.jasp reading) died.
 
 #if(USE_CONAN)
 #  find_package(jsoncpp 1.9 REQUIRED)
