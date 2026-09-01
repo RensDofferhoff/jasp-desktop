@@ -12,7 +12,6 @@ class JaspConanConfig(ConanFile):
     generators = "CMakeToolchain", "CMakeDeps"
     options = {"syntax_interface_only": [True, False]}
     default_options = {
-        "brotli*:shared": True,
         "syntax_interface_only": False,
     }
 
@@ -24,7 +23,11 @@ class JaspConanConfig(ConanFile):
         #   - sqlite3          died with DatabaseInterface (the excision, Cut 3).
         #   - gmp / mpfr       died: zero references anywhere in the build (no find_package,
         #                     no link, no include) — cargo cult from the pre-conanfile.txt era.
-        #   - freexl / librdata died with the importers (Cut 2), bison with readstat.
+        #   - freexl / librdata   died with the importers (Cut 2), bison with readstat,
+        #     brotli              died 2026-09-02: it was macOS packaging glue for WebEngine's
+        #                         libbrotlicommon.dylib (QTBUG-100686), but the install line was
+        #                         commented out and nothing ever linked a Brotli target. If conan's
+        #                         libarchive pulls brotli transitively it manages it itself.
         # Still here: libarchive (ExtractArchive), libsodium (secret store), and the
         # compression/TLS set (zlib/zstd/openssl/libiconv) that conan's libarchive and the
         # Windows/macOS packaging graphs may pull — trim those only with a Win/mac check.
@@ -38,7 +41,6 @@ class JaspConanConfig(ConanFile):
             # jsoncpp is vendored in Common/json/ so Conan's copy is not linked,
             # but keep it here for the full build to avoid unexpected Conan graph changes
             self.requires("jsoncpp/1.9.6")
-            self.requires("brotli/1.1.0")
             self.requires("libsodium/1.0.20")
 
     def build_requirements(self):

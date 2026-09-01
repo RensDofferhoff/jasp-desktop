@@ -23,8 +23,8 @@
 #       point to the right place, and then I have everything...
 #
 # On macOS,
-#   - I had to look for the `libbrotlicommon.dylib` and provide it to the JASP.app
-#     because `macdeployqt` cannot deal with it
+#   - (2026-09-02) the libbrotlicommon.dylib lookup died — it was packaging glue for the
+#     old macdeployqt's WebEngine bundling; nothing links or bundles brotli anymore.
 #
 # On Windows,
 #   - Conan does the most work,
@@ -200,9 +200,9 @@ endif()
 
 if(APPLE AND NOT JASP_SYNTAX_INTERFACE_ONLY)
 
-  message(CHECK_START "Looking for 'libbrotlicommon'")
-
-  find_package(Brotli 1.0.9 REQUIRED)
+  # The excision aftermath (2026-09-02): Brotli died — it was macOS packaging glue for
+  # Qt WebEngine's libbrotlicommon.dylib (the old macdeployqt couldn't bundle it), but the
+  # install line was long commented out and nothing ever linked a Brotli target.
   # The excision, Cut 2: freexl / librdata died with the importers.
   find_package(libsodium 1.0.20 REQUIRED)
 

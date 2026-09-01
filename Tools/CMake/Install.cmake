@@ -168,12 +168,8 @@ if(APPLE)
    )
   endif()
 
-
-  # I had to do this manually, since `macdeployqt` misses it.
-  # See here: https://bugreports.qt.io/browse/QTBUG-100686
-  #
-  # Feel free to remove it when the bug is fixed
-  #install(FILES ${_LIB_BROTLICOMMON} DESTINATION ${JASP_INSTALL_FRAMEWORKDIR})
+  # (2026-09-02) The manual libbrotlicommon.dylib install (macdeployqt QTBUG-100686
+  # workaround) died — nothing links or bundles brotli anymore.
 
   install(
     DIRECTORY ${MODULES_BINARY_PATH}/binary_pkgs ${MODULES_BINARY_PATH}/manifests ${MODULES_BINARY_PATH}/module_libs ${MODULES_BINARY_PATH}/Tools
