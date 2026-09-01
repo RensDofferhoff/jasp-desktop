@@ -4,7 +4,6 @@
 class DataSetPackage;
 class Importer;
 class DataSet;
-class DataSetSyncer;
 namespace Json { class Value; }	///< moc-compiles standalone — the fixture below only references it
 
 class TestAll: public QObject
@@ -24,14 +23,6 @@ private slots:
 	void	testSavLabels();
 	void	testFilterLabels();
 
-	// DataSetSyncer tests
-	void	testSyncerStartStopFileSyncing();
-	void	testSyncerFileChangeEmitsSignal();
-	void	testSyncerStartStopDatabaseSyncing();
-	void	testSyncerSyncNowWithoutDataSource();
-	void	testSyncerMultipleStartStop();
-	void	testSyncerReleasesSyncGuardOnCompletion();
-	void	testSyncerRetriesFileChangeMissedDuringSync();
 
 	// DataExporter tests
 	void	testDataExporterShownDataSetOnly();
@@ -59,14 +50,10 @@ private slots:
 	void	testFilterRemoveFilter();
 
 	// Sync + export integration tests
-	void	testSyncerExportModifyReimport();
-	void	testSyncerExportModifyReimportChangesDetected();
 
 	// AsyncLoader FileEvent sync flow test
-	void	testFileSyncerFullAsyncFlow();
 
 	// SQLite database sync test
-	void	testSyncerDatabaseSyncFromSQLite();
 
 	    // Closing/removing datasets and workspaces must never crash (regression for the dataset-close crash
 	    // and the workspace teardown paths).

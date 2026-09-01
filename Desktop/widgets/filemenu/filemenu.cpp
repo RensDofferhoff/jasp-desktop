@@ -149,30 +149,10 @@ FileEvent *FileMenu::save()
 
 void FileMenu::sync()
 {
-	DataSet * ds = DataSetPackage::pkg()->dataSet();
-	if(!ds)
-		return;
-
-	if(ds->isDatabase())
-	{
-		ds->syncer().syncNow();
-	}
-	else
-	{
-		QString path = _currentDataFile->getCurrentFilePath();
-
-		if (path.isEmpty())
-		{
-			if(!MessageForwarder::showYesNo(tr("No associated data file"),
-						tr("JASP has no associated data file to be synchronized with.\nDo you want to search for such a data file on your computer?\nNB: You can also set this data file via menu File/Sync Data.")))
-				return;
-
-			path =  MessageForwarder::browseOpenFile(tr("Find Data File"), "", tr("Data File").arg("*.csv *.txt *.tsv *.sav *.zsav *.ods *.xls *.xlsx *.dta *.por *.sas7bdat *.sas7bcat *.xpt *.rdata *.rds *.mwx *.mpx"));
-		}
-
-		_mainWindow->setCheckAutomaticSync(false);
-		setSyncRequest(path);
-	}
+	// Legacy sync is REMOVED (the excision, Cut 1) — the syncer is gone; sync returns as a
+	// backend feature (P14: refactor_design/HANDOVER-excision.md). The UI affordances die
+	// with the sync-file sweep.
+	Log::log() << "FileMenu::sync: data synchronization is not available in NEO yet" << std::endl;
 }
 
 void FileMenu::close()
@@ -189,13 +169,7 @@ void FileMenu::setCurrentDataFile(const QString &path)
 	Log::log() << "[FileMenu::setCurrentDataFile] START: path=" << path.toStdString() << std::endl;
 	QString currentPath = _currentDataFile->getCurrentFilePath();
 
-	if (!currentPath.isEmpty())
-	{
-		DataSet * ds = DataSetPackage::pkg()->dataSet();
-		if(ds)
-			ds->syncer().stopFileSyncing();
-	}
-
+	(void) currentPath;
 	bool setCurrentPath = true;
 	if (!path.isEmpty())
 	{
@@ -203,9 +177,7 @@ void FileMenu::setCurrentDataFile(const QString &path)
 		if (checkSyncFileExists(path))
 		{
 			Log::log() << "[FileMenu::setCurrentDataFile] File exists" << std::endl;
-			DataSet * ds = DataSetPackage::pkg()->dataSet();
-			if(ds)
-				ds->syncer().startFileSyncing(path);
+			// Sync-file watching removed with DataSetSyncer (the excision, Cut 1).
 		}
 		else
 		{
@@ -227,18 +199,9 @@ void FileMenu::setCurrentDataFile(const QString &path)
 
 void FileMenu::setDataFileWatcher(bool watch)
 {
-	QString path = _currentDataFile->getCurrentFilePath();
-	if (path.isEmpty())
-		return;
-
-	DataSet * ds = DataSetPackage::pkg()->dataSet();
-	if(!ds)
-		return;
-
-	if(watch && !_currentDataFile->isOnlineFile(path))
-		ds->syncer().startFileSyncing(path);
-	else
-		ds->syncer().stopFileSyncing();
+	// Sync-file watching removed with DataSetSyncer (the excision, Cut 1) — sync returns as
+	// a backend feature (P14: refactor_design/HANDOVER-excision.md).
+	(void) watch;
 }
 
 
@@ -306,13 +269,7 @@ void FileMenu::dataSetIOCompleted(FileEvent *event)
 				if (datafile.isEmpty())
 					datafile = QString::fromStdString(DataSetPackage::pkg()->dataSet()->dataFilePath());
 				setCurrentDataFile(datafile);
-				if	(	event->operation() == FileEvent::FileOpen
-					&& !event->isReadOnly()
-					&&	event->type() == Utils::FileType::jasp
-					&& !DataSetPackage::pkg()->isReadOnlyFile()
-					&&	DataSetPackage::pkg()->dataSet()->dataFileSynch()
-				)
-					DataSetPackage::pkg()->dataSet()->syncer().startFileSyncing(datafile);
+				// .jasp re-sync removed with DataSetSyncer (the excision, Cut 1).
 			}
 
 			QFileInfo info(event->path());

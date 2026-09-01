@@ -539,24 +539,8 @@ void MainWindow::makeConnections()
 	connect(_package,				&DataSetPackage::refreshAllAnalyses,		_analyses,				&Analyses::refreshAllAnalysesOfFilter,				Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::shownDataSetChanged,		_datasetTableModel,		&DataSetTableModel::handleDataSetChange				);
 	connect(_package,				&DataSetPackage::shownDataSetChanged,		this,				&MainWindow::updateShownFilterInQmlContext			);
-	//Every dataset (not just the currently shown one) must trigger its own reload when it needs to sync.
-	//Qt::UniqueConnection is required because wireDataSetSync is re-run on every shownDataSetChanged
-	//(emitted from both setShownDataSet and refresh) and on dataSetCreated; without it the same
-	//(sender, signal) -> loader connection would accumulate, fanning one logical sync out to many reloads.
-	auto wireDataSetSync = [this](DataSet * ds) {
-		if(ds)
-			connect(ds, &DataSet::syncRequired, _loader, &AsyncLoader::onSyncRequired, static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::UniqueConnection));
-	};
-	//Datasets that already exist (e.g. loaded from a file/db before connections were made) and any created later.
-	wireDataSetSync(_package->workspace() ? _package->workspace()->shownDataSet() : nullptr);
-	for(DataSet * ds : _package->workspace() ? _package->workspace()->dataSets() : DataSets())
-		wireDataSetSync(ds);
-	connect(_package,				&DataSetPackage::shownDataSetChanged,		this,				[wireDataSetSync](DataSet * ds){ wireDataSetSync(ds); });
-	connect(_package,				&DataSetPackage::dataSetCreated,		this,				[this](int dataSetId){
-		DataSet * ds = _package->workspace() ? _package->workspace()->dataSetById(dataSetId) : nullptr;
-		if(ds)
-			connect(ds, &DataSet::syncRequired, _loader, &AsyncLoader::onSyncRequired, static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::UniqueConnection));
-  });
+	// Legacy per-dataset sync wiring REMOVED with DataSetSyncer (the excision, Cut 1):
+	// DataSet::syncRequired is gone; sync returns as a backend feature (P14).
   //The worker thread finishes the sync; route the completion back to the dataset's syncer on the main
   //thread (via a QueuedConnection, since syncCompleted is emitted from the loader worker) so its
   //re-entrancy guard (_isSyncing) is released exactly once for whichever dataset syncs.
@@ -566,16 +550,10 @@ void MainWindow::makeConnections()
 	  if(_package->workspace())
 		  _package->workspace()->refresh();
   },												Qt::QueuedConnection);
-  connect(_loader,				&AsyncLoader::syncCompleted,				this,				[this](int dataSetId, bool success){
-    Log::log() << "[MainWindow::syncCompleted] Received: dataSetId=" << dataSetId << ", success=" << success << std::endl;
-    DataSet * ds = _package->workspace() ? _package->workspace()->dataSetById(dataSetId) : nullptr;
-    Log::log() << "[MainWindow::syncCompleted] dataSetById returned: " << (ds ? QString::number(ds->id()) : "NULL") << std::endl;
-    if(ds)
-    {
-      Log::log() << "[MainWindow::syncCompleted] Calling setSyncingResult for datasetId=" << ds->id() << std::endl;
-      ds->syncer().setSyncingResult(success);
-      Log::log() << "[MainWindow::syncCompleted] setSyncingResult returned" << std::endl;
-    }
+  connect(_loader,				&AsyncLoader::syncCompleted,			this,				[this](int dataSetId, bool success){
+    // Legacy sync completed — the syncer is gone (the excision, Cut 1); the signal still
+    // fires from the loader for old flows. Nothing to do.
+    (void) dataSetId; (void) success;
   },												Qt::QueuedConnection);
 	connect(_package,				&DataSetPackage::shownFilterChanged,		this,				&MainWindow::updateShownFilterInQmlContext			);
 	connect(_package,				&DataSetPackage::shownFilterChanged,		_filterModel,			&FilterModel::filterChanged,						Qt::QueuedConnection);
@@ -1984,7 +1962,7 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 						if (currentDataFileTimestamp > _package->dataSet()->dataFileTimestamp())
 						{
 							setCheckAutomaticSync(true);
-							_package->dataSet()->syncer().startFileSyncing(dataFilePath);
+							// File-sync watching removed with DataSetSyncer (the excision, Cut 1).
 						}
 					}
 					else
@@ -1992,12 +1970,14 @@ void MainWindow::dataSetIOCompleted(FileEvent *event)
 						_package->dataSet()->setDataFile("");
 					}
 				}
-				
-				if(_package->dataSet()->databaseJson() != Json::nullValue)
-					_package->dataSet()->syncer().startDatabaseSyncing(_package->dataSet()->databaseJson(), true);
+			
+				// DB-sync autostart removed with DataSetSyncer (the excision, Cut 1).
 			}
 			else if(event->isDatabase())
-				_package->dataSet()->syncer().startDatabaseSyncing(event->database(), false);
+			{
+				// DB-sync autostart removed with DataSetSyncer (the excision, Cut 1).
+				(void) event;
+			}
 
 			if (resultXmlCompare::compareResults::theOne()->testMode())
 			{				

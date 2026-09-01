@@ -26,7 +26,8 @@
 #include "version.h"
 #include "columnencoder.h"
 #include "columninfo.h"
-#include "datasetsyncer.h"
+// The legacy DataSetSyncer is REMOVED (the excision, Cut 1): sync returns as a BACKEND
+// feature — the pinned policy (P14) lives in refactor_design/HANDOVER-excision.md.
 #include "qutils.h"
 #include <unordered_map>
 
@@ -164,8 +165,6 @@ public:
 			Column		*	createComputedColumn(	const std::string & name, columnType type		= columnType::unknown, computedColumnType desiredType = computedColumnType::analysis, int analysisId = -1);
 			ColumnEncoder	&	encoder()			{ return *_encoder; }
 	const	ColumnEncoder	&	encoder()	const	{ return *_encoder; }
-			DataSetSyncer	&	syncer()			{ return *_syncer; }
-	const	DataSetSyncer	&	syncer()	const	{ return *_syncer; }
 			int				getColumnIndex(	const	std::string &	name	) const;
 			int				columnIndex(	const	Column		*	col		) const;
 			void			columnsReorder(			stringvec		order	); ///< Expects a sane order vector, with or without computed columns
@@ -208,9 +207,8 @@ public:
 			void			setDataFile(		const std::string & dataFilePath);
 			void			setDataTimestamp(	long timestamp);
 			void			setDatabaseJson(	const Json::Value & databaseJson);
-			void			setDataFileSynch(	bool synchronizing);
-			bool			synchingData()		const { return _synchingDataNow; }
-			void			startSynching(		bool synchImmediately = true);
+			void		setDataFileSynch(	bool	synchronizing);
+			bool		synchingData()		const { return _synchingDataNow; }
 			
 			void			emitColumnChanged(		const QString		& name);
 
@@ -305,10 +303,7 @@ signals:
 			void			filtersCountChanged();
 			void			shownFilterChanged(DataSet * data);
 			void			filterRemoved(Filter * f);
-			void			synchronizeStart(DataSet *);
-			void			synchronizeDo(DataSet *);
-			void			syncRequired(int dataSetId, DataSet * dataSet, QString locator, QString extension, QString databaseJson);
-			void			labelChanged(		const Column * column, QString originalLabel, QString newLabel);
+			void		labelChanged(		const Column * column, QString originalLabel, QString newLabel);
 			QString			askPassword(	QString title, QString message);
 			bool			showYesNo(		QString title, QString message);
 			void			shownColumnChanged();
@@ -325,10 +320,7 @@ public slots:
 			void			handleColumnChanged(		const Column * column);
 			void			handleLabelsReordered(		const Column * column);
 			bool			setColumnTypes(stringset columnIndexes, columnType newColumnType);
-			void			filterByNameDone(int dataSetID, const QString & name, const QString & error);
-			void			synchronize();
-			void			synchronizeFromDatabase();
-			void			synchronizeFromDataFile();
+			void		filterByNameDone(int dataSetID, const QString & name, const QString & error);
 			
 
 public:
@@ -371,7 +363,6 @@ private:
 	Columns					_columns;
 	Column				*	_shownColumn			= nullptr;
 	ColumnEncoder		*	_encoder				= nullptr;
-	DataSetSyncer		*	_syncer					= nullptr;
 	Filter				*	_defaultFilter			= nullptr,
 						*	_shownFilter			= nullptr;
 	Filters					_filters;

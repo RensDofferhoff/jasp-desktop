@@ -340,8 +340,7 @@ void DatabaseFileMenu::setInterval(int newInterval)
 		if(ds)
 		{
 			ds->setDatabaseJson(_info.toJson());
-			if(_info._interval == 0)	ds->syncer().stopDatabaseSyncing();
-			else						ds->syncer().startDatabaseSyncing(_info.toJson(), previousInterval == 0);
+			// DB sync removed with DataSetSyncer (the excision, Cut 1).
 		}
 	}
 	else					Settings::setValue(Settings::DB_IMPORT_INTERVAL, _info._interval);

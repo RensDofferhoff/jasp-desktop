@@ -36,7 +36,6 @@ DataSet::DataSet(Workspace * workspace, int id)
 	Log::log() << "DataSet::DataSet(id=" << id << ")" << std::endl;
 
 	_encoder = new ColumnEncoder();
-	_syncer  = new DataSetSyncer(this);
 	_emptyValues	= new EmptyValues(nullptr);
 	connect(_emptyValues,	&EmptyValues::emptyValuesChanged,	this,		&DataSet::emptyValuesChanged			);
 	connect(this,			&DataSet::emptyValuesChanged,		_workspace, &Workspace::emptyValuesChanged			);
@@ -67,11 +66,6 @@ DataSet::DataSet(Workspace * workspace, int id)
 	setTitle(name().replace("_", " "));
 
 	_description = fq(tr("Originally created empty by %1 on %2").arg(tq(AppInfo::getShortDesc())).arg(tq(Utils::currentDateTime())));
-
-	connect(_syncer, &DataSetSyncer::askPassword,  this, [this](int, QString title, QString msg) -> QString { return emit askPassword(title, msg); });
-	connect(_syncer, &DataSetSyncer::askYesNo,     this, [this](int, QString title, QString msg) -> bool   { return emit showYesNo(title, msg); });
-	connect(_syncer, &DataSetSyncer::showWarning,  this, [this](int, QString title, QString msg)          { emit showWarning(title, msg); });
-	connect(_syncer, &DataSetSyncer::syncRequired, this, &DataSet::syncRequired);
 }
 
 DataSet::~DataSet()
@@ -83,8 +77,6 @@ DataSet::~DataSet()
 	if(ColumnEncoder::currentEncoder() == _encoder)
 		ColumnEncoder::setCurrentEncoder(nullptr);
 
-	delete _syncer;
-	_syncer = nullptr;
 	delete _encoder;
 	_encoder = nullptr;
 
@@ -607,39 +599,6 @@ void DataSet::setDataFileSynch(bool synchronizing)
 	
 	if(isChange)
 		emit dataFileSynchChanged();
-}
-
-void DataSet::synchronize()
-{
-	_syncer->syncNow();
-}
-
-void DataSet::synchronizeFromDatabase()
-{
-	if(!isDatabase())
-	{
-		Log::log()	<< "Trying to synch from db but there is no databaseJson" << std::endl;
-		return;
-	}
-
-	_syncer->syncNow();
-}
-
-void DataSet::synchronizeFromDataFile()
-{
-	if(dataFileQ() == "")
-	{
-		Log::log()	<< "Trying to synch from a file but there is no datafile path" << std::endl;
-		return;
-	}
-
-	if(!QFileInfo::exists(dataFileQ()))
-	{
-		Log::log()	<< "Trying to synch from a file but it does not exist (" << dataFileQ() << ")." << std::endl;
-		return;
-	}
-
-	_syncer->syncNow();
 }
 
 void DataSet::dbCreate()
