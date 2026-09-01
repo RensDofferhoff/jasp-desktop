@@ -966,6 +966,22 @@ QT_QPA_PLATFORM=offscreen build/Desktop_Qt_6_11_0-Debug/Tests/JASPTest testSavLa
   (block at col 1 on a 2-col dataset); the regression test `far_anchor_creates_null_
   holes_without_panicking` (block at (5,4) → holes V3/V4, in-block overflow V5) was
   verified to reproduce the exact panic pre-fix. Suite 148; clippy clean; release rebuilt.
+- **ANALYSIS FORMS SHOWED NO VARIABLES (found + fixed 2026-09-01, post-mirror-removal)**:
+  the R2 mirror removal had a casualty the canaries couldn't see: the analysis-form
+  provider chain (AnalysisForm → VariableInfo → **Filter** → FilteredData →
+  VarInfoModelProxy → provideInfo) bottoms out in **DataSet's own model API**, which read
+  the legacy `_columns` — empty on lane. `VariableNames` (getColumnNames) served [] →
+  every opened form's variable list was empty; data()/headerData()/flags() were worse:
+  `columns()[i]` on the empty vector is OUT-OF-BOUNDS UB (columnCount serves the schema's
+  30, the vector holds 0). Root fix (the schema serves the legacy model API for lane):
+  `getColumnNames()` schema-aware; `data()` lane branch (name/title/columnType/
+  description/levels/nonFilteredNumericValuesCount/computed-not, filter→true, honest
+  QVariant() for value/display roles — cells live in the view lane); `headerData()` lane
+  branch (same metadata + safe defaults; previews honest-absent); `flags()` lane guard.
+  NOTE: `ColumnsModel`'s lane provider was already schema-correct — the forms just never
+  used it (setAnalysisUp picks the Filter). Analyses still cannot RUN on lane data
+  (R-era) — forms now at least see the variables. NB: the app link had broken on a
+  system nng upgrade (1.8.0 → 1.12.2) — re-running cmake re-resolves it.
 
 - **THE RACE (found 2026-08-31, the rename smoke test — REAL)**: ~~UNFIXED~~ **FIXED
   2026-09-01 — the edit chain; see §6's first bullet for the full design.**

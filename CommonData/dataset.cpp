@@ -517,6 +517,17 @@ stringvec DataSet::getColumnNames()
 {
 	stringvec names;
 
+	// NEO (R2 step 4): the schema is the column truth for lane datasets — the legacy
+	// mirror no longer exists. This is what the analysis-form provider chain serves as
+	// VariableNames (Filter::provideInfo): an empty list here = "no variables" in every
+	// opened analysis form.
+	if (!_laneDatasetId.empty())
+	{
+		for (const ColumnInfo & col : _schemaColumns)
+			names.push_back(col.name);
+		return names;
+	}
+
 	for(Column * col : _columns)
 		names.push_back(col->name());
 
@@ -1399,6 +1410,44 @@ QVariant DataSet::data(const QModelIndex &index, int role) const
 	
 	JASPTIMER_SCOPE(DataSet::data);
 	
+	// NEO (R2 step 4): the SCHEMA serves the metadata roles for lane datasets — the legacy
+	// mirror no longer exists (indexing it was out-of-bounds UB), and the analysis-form
+	// provider chain reads through this model API (Filter → FilteredData →
+	// VarInfoModelProxy → provideInfo). Cell VALUES live in the view lane, never here:
+	// the value/display roles serve honest empties.
+	if (!_laneDatasetId.empty())
+	{
+		const ColumnInfo * info = schemaColumnAt(size_t(index.column()));
+		if (!info)
+			return QVariant();
+		switch(role)
+		{
+		case int(dataPkgRoles::name):							return tq(info->name);
+		case int(dataPkgRoles::title):							return tq(info->displayName);
+		case int(dataPkgRoles::columnType):					return int(info->type);
+		case int(dataPkgRoles::description):					return tq(info->description);
+		case int(dataPkgRoles::nonFilteredLevels):
+		{
+			// The levels list (column-constant through any row index — the wire's capped UI
+			// prefix; distinct_count stays the truth for counts).
+			QStringList levels;
+			for (const std::string & level : info->levels)
+				levels.append(tq(level));
+			return levels;
+		}
+		case int(dataPkgRoles::nonFilteredNumericValuesCount):
+			// ColumnsModel's lane convention: scale — every value numeric (distinctCount);
+			// categorical — the wire's numeric_levels hint (never parsed on the frontend).
+			if (info->type == columnType::scale)
+				return qulonglong(info->distinctCount);
+			return qulonglong(info->numericLevels);
+		case int(dataPkgRoles::computedColumnType):			return int(computedColumnType::notComputed);
+		case int(dataPkgRoles::columnPkgIndex):				return index.column();
+		case int(dataPkgRoles::filter):						return true;	// no filter compaction on lane (v1)
+		default:												return QVariant();	// display/value/label/lines: the view lane owns cells
+		}
+	}
+
 	Column * column = columns()[index.column()];
 
 	switch(role)
@@ -1554,6 +1603,34 @@ QVariant DataSet::headerData(int section, Qt::Orientation orientation, int role)
 		}
 	else
 	{
+		// NEO (R2 step 4): schema-served metadata for lane datasets (see data()'s lane
+		// branch) — indexing the empty legacy vector was out-of-bounds UB.
+		if (!_laneDatasetId.empty())
+		{
+			const ColumnInfo * info = schemaColumnAt(size_t(section));
+			if (!info)
+				return QVariant();
+			switch(role)
+			{
+			case Qt::DisplayRole:
+			case int(dataPkgRoles::name):							return tq(info->name);
+			case int(dataPkgRoles::title):							return tq(info->displayName);
+			case int(dataPkgRoles::columnType):					return int(info->type);
+			case int(dataPkgRoles::description):					return tq(info->description);
+			case int(dataPkgRoles::computedColumnType):			return int(computedColumnType::notComputed);
+			case int(dataPkgRoles::columnIsComputed):				return false;
+			case int(dataPkgRoles::computedColumnError):			return QString();
+			case int(dataPkgRoles::computedColumnIsInvalidated):	return false;
+			case int(dataPkgRoles::filter):
+			case int(dataPkgRoles::labelsHasFilter):				return false;
+			case int(dataPkgRoles::maxColumnHeaderString):			return tq(info->name) + "XXX";
+			case int(dataPkgRoles::maxColString):					return tq(info->displayName) + "XXXXXXX";	// a width estimate — no cell scan on lane
+			case int(dataPkgRoles::maxRowHeaderString):			return QString::number(rowCount()) + "XXX";
+			case Qt::TextAlignmentRole:								return QVariant(Qt::AlignCenter);
+			default:													return QVariant();	// previews: honest none until data_view serves them
+			}
+		}
+
 		Column * col = columns()[section];
 				
 		switch(role)
@@ -1630,6 +1707,12 @@ QVariant DataSet::headerData(int section, Qt::Orientation orientation, int role)
 
 Qt::ItemFlags DataSet::flags(const QModelIndex &index) const
 {
+	// NEO (R2 step 4): no legacy Columns exist on lane datasets — indexing the empty
+	// vector was out-of-bounds UB. Editability is served by the NEO grid path (the
+	// proxy's gate), not by this legacy model.
+	if (!_laneDatasetId.empty())
+		return Qt::ItemIsSelectable | Qt::ItemIsEnabled | (_workspace && _workspace->dataMode() ? Qt::ItemIsEditable : Qt::NoItemFlags);
+
 	bool	isEditable	= _workspace && _workspace->dataMode() && index.column() >= 0 && index.column() < columnCount() && !columns()[index.column()]->isComputed();
 
 	return Qt::ItemIsSelectable | Qt::ItemIsEnabled | (isEditable ? Qt::ItemIsEditable : Qt::NoItemFlags);
