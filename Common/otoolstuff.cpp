@@ -18,7 +18,7 @@
 #include "otoolstuff.h"
 #include "stringutils.h"
 #include <fstream>
-#include <boost/algorithm/string/predicate.hpp>
+// The excision aftermath (2026-09-02): boost died — ends_with is std::string::ends_with (C++20).
 #include "utils.h"
 #include "appinfo.h"
 #include <iostream>
@@ -52,7 +52,7 @@ std::string _system(std::string cmd)
 
 void _moduleLibraryFixer(const std::string & moduleLibraryPath, bool engineCall, bool printStuff, bool devMod)
 {
-	using namespace boost;
+	// The excision aftermath (2026-09-02): `using namespace boost;` died with boost.
 
 #ifdef JASP_DEBUG
 	printStuff = true; // If debugging please always print stuff
@@ -201,11 +201,11 @@ void _moduleLibraryFixer(const std::string & moduleLibraryPath, bool engineCall,
 					}
 
 					// Replacing the known fixed paths, and id's
-					for(auto &entry : ids_to_be_replaced) 
+					for(auto &entry : ids_to_be_replaced)
 					{
-						if (boost::algorithm::ends_with(line, entry.first))
+						if (line.ends_with(entry.first))
 						{
-							if (boost::algorithm::ends_with(line, libName)) {
+							if (line.ends_with(libName)) {
 								install_name_tool_id_cmd(entry.second);
 							}
 							install_name_tool_cmd(line, entry.second);

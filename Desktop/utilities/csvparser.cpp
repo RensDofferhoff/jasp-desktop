@@ -16,8 +16,8 @@
 // <http://www.gnu.org/licenses/>.
 //
 #include "csvparser.h"
-
-#include <boost/algorithm/string.hpp>
+// The excision aftermath (2026-09-02): boost died — replaceLineEndings uses a local
+// replace_all helper (std::string has no multi-char replace_all).
 
 using namespace std;
 
@@ -212,7 +212,13 @@ void CSVParser::finishRow()
 
 void CSVParser::replaceLineEndings(string& field) const
 {
-	boost::algorithm::replace_all(field, "\r\n", " ");
-	boost::algorithm::replace_all(field, "\r", " ");
-	boost::algorithm::replace_all(field, "\n", " ");
+	static const auto replace_all = [](string & str, const string & from, const char * to)
+	{
+		for (size_t pos = 0; (pos = str.find(from, pos)) != string::npos; pos += strlen(to))
+			str.replace(pos, from.size(), to);
+	};
+
+	replace_all(field, "\r\n", " ");
+	replace_all(field, "\r",   " ");
+	replace_all(field, "\n",   " ");
 }

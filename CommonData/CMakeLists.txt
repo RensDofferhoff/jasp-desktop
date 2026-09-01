@@ -44,7 +44,7 @@ target_include_directories(
 	${R_INCLUDE_PATH}
 	${R_HOME_PATH}/include
 	${RCPP_PATH}/include
-	${Boost_INCLUDE_DIRS}
+	# The excision aftermath (2026-09-02): ${Boost_INCLUDE_DIRS} died — nothing includes boost.
 	)
 
 target_link_libraries(

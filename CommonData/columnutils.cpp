@@ -19,19 +19,17 @@
 #include "utils.h"
 //#include "emptyvalues.h"
 
-#ifndef IGNORE_BOOST
-#include <boost/date_time/posix_time/posix_time.hpp>
-#include <boost/algorithm/string/predicate.hpp>
-#endif
+// The excision aftermath (2026-09-02): boost died — lexical_cast's strict full-string,
+// C-locale parses are served by QString::toInt/toDouble (locale-independent, reject
+// "12.3" for ints, accept inf/nan for doubles). The date_time include above was vestigial.
 #include <codecvt>
 #include <regex>
+#include "qutils.h"
 #include "emptyvalues.h"
 #include "timers.h"
 
 
 using namespace std;
-using namespace boost::posix_time;
-using namespace boost;
 
 std::string				ColumnUtils::_decimalPoint			= ".";
 std::string				ColumnUtils::_currentQLocaleId		= "C";
@@ -60,7 +58,14 @@ bool ColumnUtils::getIntValue(const string &value, int &intValue)
 
 	try
 	{
-		intValue = boost::lexical_cast<int>(value);
+		// was boost::lexical_cast<int> — QString::toInt keeps the strict full-string,
+		// locale-independent semantics ("12.3" fails, surrounding whitespace is tolerated)
+		bool ok = false;
+		int parsed = tq(value).toInt(&ok);
+		if (!ok)
+			return false;
+
+		intValue = parsed;
 		return true;
 	}
 	catch (...)	{}
@@ -113,7 +118,14 @@ bool ColumnUtils::getDoubleValue(const string &value, double &doubleValue, bool 
 	
 	try
 	{
-		doubleValue = boost::lexical_cast<double>((value));
+		// was boost::lexical_cast<double> — QString::toDouble is locale-independent
+		// (always '.') and accepts inf/nan, matching the old C-locale cast
+		bool ok = false;
+		double parsed = tq(value).toDouble(&ok);
+		if (!ok)
+			return false;
+
+		doubleValue = parsed;
 		return true;
 	}
 	catch (...)

@@ -71,8 +71,7 @@
 #include "rpc/jasprpcserver.h"
 #include "ai/agentstatetracker.h"
 
-#include "boost/iostreams/stream.hpp"
-#include <boost/iostreams/device/null.hpp>
+// The excision aftermath (2026-09-02): the boost/iostreams includes died with the null_sink.
 
 #include "communitydefs.h"
 
@@ -1085,7 +1084,10 @@ void MainWindow::initLog()
 {
 	assert(_preferences != nullptr);
 
-	static boost::iostreams::stream<boost::iostreams::null_sink> nullstream((boost::iostreams::null_sink())); //https://stackoverflow.com/questions/8243743/is-there-a-null-stdostream-implementation-in-c-or-libraries
+	// The excision aftermath (2026-09-02): the boost::iostreams null_sink died — a tiny
+	// null streambuf (every character silently swallowed) is the std-only equivalent.
+	static struct NullBuf : std::streambuf { int_type overflow(int_type c) override { return c; } } nullBuf;
+	static std::ostream nullstream(&nullBuf); //https://stackoverflow.com/questions/8243743/is-there-a-null-stdostream-implementation-in-c-or-libraries
 
 	Log::logFileNameBase = (AppDirs::logDir() + "JASP "  + getSortableTimestamp()).toStdString();
 	Log::init(&nullstream);

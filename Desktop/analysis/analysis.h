@@ -18,7 +18,7 @@
 #ifndef ANALYSIS_H
 #define ANALYSIS_H
 
-#include <boost/uuid/uuid.hpp>
+// The excision aftermath (2026-09-02): the boost/uuid include died — nothing ever used it.
 
 #include "enginedefinitions.h"
 

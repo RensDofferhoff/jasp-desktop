@@ -24,8 +24,6 @@
 #include <QFileInfo>
 #include <QThread>
 
-#include <boost/algorithm/string.hpp>
-
 #include "qutils.h"
 #include "utils.h"
 #include "osf/onlinedatamanager.h"
@@ -146,8 +144,11 @@ void AsyncLoader::loadPackage(QString id)
 		//so a local open here is just a fresh empty dataset: no import, no MD5 pass over the
 		//file, no external-synch watcher. Online (OSF) nodes fail clearly too until the lane
 		//learns their paths (a later era; their MD5 wiring rides along then).
+		// The excision aftermath (2026-09-02): boost::iequals died — a lowercased QString
+		// compare (the suffixes are plain ASCII).
+		const QString extensionLower = QString::fromStdString(extension).toLower();
 		const bool laneOwned = !_currentEvent->isOnlineNode()
-			&& (boost::iequals(extension, ".csv") || boost::iequals(extension, ".txt") || boost::iequals(extension, ".tsv"));
+			&& (extensionLower == ".csv" || extensionLower == ".txt" || extensionLower == ".tsv");
 
 		if (!laneOwned)
 			throw LoaderException(fq(FileEvent::notSupportedInNeoMsg(tr("Opening %1 files").arg(extension.empty() ? QString("this type of") : QString::fromStdString(extension)))));

@@ -69,8 +69,9 @@ if((NOT LibArchive_FOUND) AND (NOT WIN32))
   endif()
 endif()
 
-set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost 1.78)
+# The excision aftermath (2026-09-02): find_package(Boost) died — the last boost uses
+# (lexical_cast/iequals/ends_with/replace_all/uuid/null_sink) were replaced with
+# QString/std/C++20 equivalents. Nothing in the desktop build includes or links boost.
 find_package(Qt6 REQUIRED COMPONENTS Core)
 
 get_target_property(QT_TARGET_TYPE Qt6::Core TYPE)
