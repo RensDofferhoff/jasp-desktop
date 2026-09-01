@@ -68,7 +68,6 @@ public slots:
 				void			applyRFilter(			QString rFilter);
 				void			resetRFilter();
 				void			computeColumnSucceeded(QString columnName, QString warning, bool dataChanged);
-				void			processFilterResult(QString name);
 				void			onFilterChanged();
 	
 private:

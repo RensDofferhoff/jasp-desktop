@@ -61,15 +61,6 @@ void FilterModel::resetRFilter()
 }
 
 
-void FilterModel::processFilterResult(QString name)
-{
-	// The excision, Cut 6: the filter-result vector died with the per-row mask — engine
-	// results land nowhere until filters return as derived boolean columns. Keep the slot
-	// (it is signal-wired) but make it an honest no-op.
-	Q_UNUSED(name);
-	Log::log() << "FilterModel::processFilterResult: filter results return with derived columns — ignored" << std::endl;
-}
-
 void FilterModel::onFilterChanged()
 {
 	if(filter())

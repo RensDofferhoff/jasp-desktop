@@ -280,17 +280,16 @@ FocusScope
 			StackLayout
 			{
 				id:					stack
-				currentIndex:		tabbar.currentIndex >= 0 ? componentIndex[columnModel.tabs[tabbar.currentIndex].name] : -1
-				clip:				true
+				currentIndex:	tabbar.currentIndex >= 0 ? componentIndex[columnModel.tabs[tabbar.currentIndex].name] : -1
+				clip:			true
 				
 				property var componentIndex:
 				{
-					"computed":			0,
-					"label" :			1,
-					"missingValues" :	2,
-					"basicInfo":		3
+					// The excision, Cut 7: only "basicInfo" survives — computed (Cut 4/5), the label
+					// editor and per-column empty values (Cut 5) rode the legacy Column; they return
+					// as derivations / the jasp:labels overlay (B2).
+					"basicInfo":			0
 				}
-				
 
 				anchors
 				{
@@ -303,51 +302,11 @@ FocusScope
 					topMargin:	jaspTheme.generalAnchorMargin * 0.25
 				}
 
-				// The excision, Cut 5: ComputeColumnWindow dereffed columnModel.column (a legacy
-				// Column) — computed columns return as derivations; the window returns with them.
-				// (was: ComputeColumnWindow { id: computedColumnWindow })
+				// The excision, Cut 7: the three dead stack children died with their QML —
+				// ComputeColumnWindow (computed columns return as derivations), the labelsView
+				// (LabelEditorWindow + the "Use labels" checkbox — B2), and missingValuesView
+				// (per-column empty values were a legacy loading concept).
 
-				Rectangle
-				{
-					id:			labelsView
-					color:		jaspTheme.uiBackground
-					enabled:	!columnModel.isVirtual
-					
-					CheckBox
-					{
-						id:						columnHasLabels
-						label:					qsTr("Use labels")
-						checked:			columnModel.hasLabels
-						onCheckedChanged:	// The excision, Cut 5: hasLabels rode the legacy Column (B2 rebuilds on the jasp:labels overlay)
-					}
-				
-					LabelEditorWindow
-					{
-						id:					labelEditonWindow
-						enabled:			false	// The excision, Cut 5: the label editor rode the legacy Column (B2)
-						height:				labelsView.height - y
-						opacity:			enabled ? 1 : .5
-						anchors
-						{
-							top:		columnHasLabels.bottom
-							left:		parent.left
-							right:		parent.right
-							margins:	jaspTheme.generalAnchorMargin
-						}
-					}
-				}
-
-				Rectangle
-				{
-					id:		missingValuesView
-					color:		jaspTheme.uiBackground
-					// The excision, Cut 5: the custom-empty-values panel rode the legacy Column
-					// (per-column empty values were a legacy loading concept). Returns with a
-					// NEO-era design.
-					visible:	false
-					enabled:	false
-				}
-			
 				ColumnBasicInfo
 				{
 					id:				tabInfo

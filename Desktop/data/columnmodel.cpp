@@ -12,13 +12,10 @@
 
 ColumnModel::ColumnModel() : QIdentityProxyModel(DataSetPackage::pkg())
 {
-	connect(DataSetPackage::pkg(),	&DataSetPackage::shownFilterChanged,			this, &ColumnModel::refreshFilteredOut				);
-
-	connect(DataSetPackage::pkg(),	&DataSetPackage::allFiltersReset,				this, &ColumnModel::allFiltersReset				);
-	
-	connect(DataSetPackage::pkg(),	&DataSetPackage::datasetChanged,				this, &ColumnModel::checkCurrentColumn			);
-	connect(DataSetPackage::pkg(),	&DataSetPackage::workspaceEmptyValuesChanged,	this, &ColumnModel::emptyValuesChanged			);
-	connect(DataSetPackage::pkg(),	&DataSetPackage::chooseColumn,					this, &ColumnModel::setChosenColumn				);
+	// The excision, Cut 7: the shownFilterChanged/allFiltersReset/workspaceEmptyValuesChanged
+	// relays died with the label editor QML (label-filter state rode the legacy Column).
+	connect(DataSetPackage::pkg(),	&DataSetPackage::datasetChanged,				this, &ColumnModel::checkCurrentColumn		     );
+	connect(DataSetPackage::pkg(),	&DataSetPackage::chooseColumn,					this, &ColumnModel::setChosenColumn		     );
 	connect(DataSetPackage::pkg(),	&DataSetPackage::shownDataSetChanged,			this, &ColumnModel::shownDataSetChangedHandler	);
 }
 
@@ -181,26 +178,6 @@ void ColumnModel::setColumnTitle(const QString & newColumnTitle)
 		_dummyColumn.title = newColumnTitle;
 }
 
-void ColumnModel::setDropLevels(QString dropLevels)
-{
-	if (_beingRefreshed)
-		return;
-
-	// NEO gate: the lane dictionary never prunes (≡ keep, by engine invariant), so the
-	// drop/keep distinction has no lane meaning until data goes to R (analyses era).
-	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
-	if (neoDataSet && neoDataSet->isOpen())
-	{
-		Log::log() << "ColumnModel::setDropLevels: not applicable to lane datasets (the dictionary never prunes) — ignored" << std::endl;
-		return;
-	}
-
-	dropLevelsType dropEm = dropLevelsType::drop;
-	
-	try { dropEm = dropLevelsTypeFromQString(dropLevels); } catch(...){}
-	Q_UNUSED(dropEm); // only the legacy route consumed it — that route is gone (Cut 4)
-}
-
 QString ColumnModel::columnDescription() const
 {
 	if (_virtual) return _dummyColumn.description;
@@ -213,32 +190,9 @@ QString ColumnModel::columnDescription() const
 	return QString();
 }
 
-QString ColumnModel::computeFilter() const
-{
-	if (_virtual) 
-		return _dummyColumn.computeFilter;
-	
-	// The excision, Cut 5: compute filters lived on Columns — computed columns return as derivations.
-	return "";
-	
-	return "";
-}
-
-
-bool ColumnModel::autoSort() const
-{
-	if (_virtual) 
-		return PreferencesModel::prefs()->orderByValueByDefault();
-	
-	// The excision, Cut 5: label autosort lived on Columns (B2).
-	return false;
-}
-
-void ColumnModel::setAutoSort(bool newAutoSort)
-{
-	Q_UNUSED(newAutoSort);
-	// The excision, Cut 5: label autosort lived on Columns (B2).
-}
+// The excision, Cut 7: computeFilter()/autoSort()/setAutoSort()/dropLevels() reads died with
+// the label editor QML (compute filters return as derivations; autosort rides the B2 overlay;
+// the lane dictionary never prunes).
 
 int ColumnModel::rowsTotal() const
 {
@@ -255,16 +209,7 @@ int ColumnModel::rowCount(const QModelIndex &parent) const
 	return 0;
 }
 
-QString ColumnModel::dropLevels() const
-{
-	// The excision, Cut 5: dropLevels lived on Columns (the lane dictionary never prunes).
-	return dropLevelsTypeToQString(dropLevelsType::drop);
-}
-
-void ColumnModel::resetEmptyValues()
-{
-	// The excision, Cut 5: per-column empty values lived on Columns — inert.
-}
+// The excision, Cut 7: dropLevels()/resetEmptyValues() died with the label editor QML.
 
 UndoStack *ColumnModel::undoStack()
 {
@@ -274,16 +219,11 @@ UndoStack *ColumnModel::undoStack()
 
 QVariantList ColumnModel::tabs() const
 {
+	// The excision, Cut 7: only "basicInfo" survives — computed (Cuts 4/5), the label editor
+	// and per-column empty values (Cut 5) rode the legacy Column; they return as derivations /
+	// the jasp:labels overlay (B2).
 	QVariantList tabs;
-	// The excision, Cut 5: the computed/label tabs rode the legacy Column (computed columns
-	// return as derivations; the label editor returns in B2).
-	
-	if(_compactMode)
-		tabs.push_back(QMap<QString, QVariant>({  std::make_pair("name", "basicInfo"), std::make_pair("title", tr("Column definition"))}));
-	
-	QMap<QString, QVariant> misingValues =	{  std::make_pair("name", "missingValues"), std::make_pair("title", tr("Missing values"))};
-	tabs.push_back(misingValues);
-
+	tabs.push_back(QMap<QString, QVariant>{  std::make_pair("name", "basicInfo"), std::make_pair("title", tr("Column definition"))});
 	return tabs;
 }
 
@@ -343,53 +283,6 @@ void ColumnModel::setColumnDescription(const QString & newColumnDescription)
 		_dummyColumn.description = newColumnDescription;
 }
 
-void ColumnModel::setComputedType(QString type)
-{
-	if (_beingRefreshed || type.isEmpty() || type == computedType() || !computedColumnTypeValidName(fq(type)))
-		return;
-
-	computedColumnType cType = computedColumnTypeFromString(type.toStdString());
-
-	// NEO gate: computed columns on lane data are a future era (no analyses run on lane
-	// data yet).
-	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
-	if (neoDataSet && neoDataSet->isOpen())
-	{
-		Log::log() << "ColumnModel::setComputedType: computed columns are not yet available on lane datasets — ignored" << std::endl;
-		return;
-	}
-
-	if (_virtual)
-		_dummyColumn.computedType = cType;
-
-	// The excision, Cut 4: the legacy computed-column command is gone; computed columns
-	// return as derivations (ChangeKind::derived).
-
-	emit tabsChanged();
-}
-
-void ColumnModel::setComputeFilter(const QString &newComputeFilter)
-{
-	if(_beingRefreshed)
-		return;
-
-	// NEO gate: computed columns on lane data are a future era.
-	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
-	if (neoDataSet && neoDataSet->isOpen())
-	{
-		Log::log() << "ColumnModel::setComputeFilter: computed columns are not yet available on lane datasets — ignored" << std::endl;
-		return;
-	}
-
-	if (_virtual)
-		_dummyColumn.computeFilter = newComputeFilter;
-	
-	// The excision, Cut 4: the legacy compute-filter command is gone; computed columns
-	// return as derivations (ChangeKind::derived).
-
-	emit tabsChanged();
-}
-
 void ColumnModel::setColumnType(QString type)
 {
 	if (_beingRefreshed || type.isEmpty() || type == currentColumnType() || !columnTypeValidName(fq(type))) 
@@ -426,99 +319,33 @@ void ColumnModel::setColumnType(QString type)
 	// the schema_change op above.
 }
 
-std::vector<size_t> ColumnModel::getSortedSelection() const
-{
-	if (_virtual) return {};
-
-	std::map<QString, size_t> mapValueToRow;
-
-	for(size_t r=0; r<size_t(rowCount()); r++)
-		mapValueToRow[data(index(r, 0), int(dataPkgRoles::value)).toString()] = r;
-
-	std::vector<size_t> out;
-
-	for(const QString & v : _selected)
-		out.push_back(mapValueToRow[v]);
-
-	std::sort(out.begin(), out.end());
-
-	return out;
-}
-
-void ColumnModel::setValueMaxWidth()
-{
-	size_t maxWidthChars = std::max(size_t(tr("Value").size()), size_t(0));	// Cut 5: Column width scan is gone
-	
-	double prevMaxWidth = _valueMaxWidth;
-	_valueMaxWidth = JaspTheme::fontMetrics().size(Qt::TextSingleLine, QString(maxWidthChars, 'X')).width();
-
-	if(_valueMaxWidth != prevMaxWidth)
-		emit valueMaxWidthChanged();
-}
-
-void ColumnModel::setLabelMaxWidth()
-{
-	size_t maxWidthChars = std::max(size_t(tr("Label").size()), size_t(0));	// Cut 5: Column width scan is gone
-	
-	double prevMaxWidth = _labelMaxWidth;
-	_labelMaxWidth = JaspTheme::fontMetrics().size(Qt::TextSingleLine, QString(maxWidthChars, 'X')).width();
-
-	if(_labelMaxWidth != prevMaxWidth)
-		emit labelMaxWidthChanged();
-}
+// The excision, Cut 7: getSortedSelection/setValueMaxWidth/setLabelMaxWidth died with the
+// label editor QML (the selection set and the width caches were its).
 
 bool ColumnModel::setData(const QModelIndex & index, const QVariant & value, int role)
 {
-	if(role == int(dataPkgRoles::selected))
-		return false;
-
-	bool result = QIdentityProxyModel::setData(index, value, role);
-
-	if (!_editing && (role == Qt::EditRole || role == int(dataPkgRoles::filter)))
-		setSelected(index.row(), 0);
-
-	return result;
+	// The excision, Cut 7: the label-editor selection hook died with the label editor.
+	Q_UNUSED(index);
+	Q_UNUSED(value);
+	Q_UNUSED(role);
+	return false;
 }
 
 QVariant ColumnModel::data(	const QModelIndex & index, int role) const
 {
-	if(role == int(dataPkgRoles::selected))
-	{
-		bool s = _selected.count(data(index, int(dataPkgRoles::value)).toString()) > 0;
-		return s;
-	}
-
 	return QIdentityProxyModel::data(index, role > 0 ? role : int(dataPkgRoles::label));
 }
 
 QVariant ColumnModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
-	if(role == int(dataPkgRoles::columnWidthFallback))
-		return rowWidth();
-	
+	// The excision, Cut 7: the rowWidth fallback (columnWidthFallback role) died with the
+	// label editor's table view.
+	Q_UNUSED(role);
 	return !sourceModel() ? false : sourceModel()->headerData(section, orientation, role);
 }
 
-void ColumnModel::refreshFilteredOut()
-{
-	JASPTIMER_SCOPE(ColumnModel::refreshFilteredOut);
-
-	//Re-query the chosen column's label-filter state so QML's `filteredOut` reacts to label-filter
-	//changes while the chosen column itself stays unchanged (previously only re-emitted on selection).
-	emit filteredOutChanged();
-	emit columnIsFilteredChanged();
-}
-
-int ColumnModel::filteredOut() const
-{
-	// The excision, Cut 5: per-column label-filter counts lived on Columns.
-	return 0;
-}
-
-void ColumnModel::resetFilterAllows()
-{
-	// The excision, Cut 5: per-column filter-allow flags lived on Columns — inert.
-}
+// The excision, Cut 7: refreshFilteredOut()/filteredOut()/resetFilterAllows() died with the
+// label editor QML (per-column label-filter counts/flags rode the legacy Column).
 
 void ColumnModel::setVisible(bool visible)
 {
@@ -620,12 +447,6 @@ void ColumnModel::checkRemovedColumns(int columnIndex, int count)
 	}
 }
 
-void ColumnModel::openComputedColumn(const QString name)
-{
-	setChosenColumnByName(name);
-	setVisible(true);
-}
-
 void ColumnModel::checkCurrentColumn(int dataSetId, QStringList, QStringList missingColumns, QMap<QString, QString> changeNameColumns, bool, bool hasNewColumns)
 {
 	DataSet * current = DataSetPackage::pkg()->dataSet();
@@ -660,7 +481,6 @@ void ColumnModel::shownDataSetChangedHandler(DataSet * newDataSet)
 	{
 		_virtual = true;
 		emit isVirtualChanged();
-		emit filteredOutChanged();
 		emit columnIsFilteredChanged();
 		return;
 	}
@@ -696,39 +516,6 @@ void ColumnModel::laneSchemaRefreshed()
 	}
 }
 
-void ColumnModel::removeAllSelected()
-{
-	QMap<QString, size_t> mapValueToRow;
-
-	for(size_t r=0; r<size_t(rowCount()); r++)
-		mapValueToRow[data(index(r, 0), int(dataPkgRoles::value)).toString()] = r;
-
-	QVector<QString> selectedValues;
-	for (const QString& s : _selected)
-		selectedValues.append(s);
-
-	_selected.clear();
-	_lastSelected = -1;
-	for (const QString& selectedValue : selectedValues)
-	{
-		if (mapValueToRow.contains(selectedValue))
-		{
-			int selectedRow = int(mapValueToRow[selectedValue]);
-            emit dataChanged(ColumnModel::index(selectedRow, 0), ColumnModel::index(selectedRow, 0), {int(dataPkgRoles::selected)});
-		}
-	}
-}
-
-void ColumnModel::setRowWidth(double len)
-{
-	if(std::abs(_rowWidth - len) < 0.001)
-		return;
-	
-	_rowWidth = len;
-	emit rowWidthChanged();
-	refresh();
-}
-
 void ColumnModel::refresh()
 {
 	beginResetModel();
@@ -737,11 +524,7 @@ void ColumnModel::refresh()
 
 void ColumnModel::notifyColumnChanged()
 {
-	setValueMaxWidth();
-	setLabelMaxWidth();
-
 	emit chosenColumnChanged();
-	emit filteredOutChanged();
 	emit nameEditableChanged();
 	emit computedTypeChanged();
 	emit computedTypeEditableChanged();
@@ -750,59 +533,20 @@ void ColumnModel::notifyColumnChanged()
 	emit columnTypeValuesChanged();
 	emit rowsTotalChanged();
 	emit tabsChanged();
-	emit emptyValuesChanged();
-	emit dropLevelsChanged();
 	emit columnIsFilteredChanged();
 	// The editor-field properties (the R2 adapter rebinds ColumnBasicInfo's TextFields to
-	// these): without these emits the Long-name/Description/Use-labels fields NEVER rebind
+	// these): without these emits the Long-name/Description fields NEVER rebind
 	// on a column switch — they kept serving the PREVIOUS column's values (the "infection"
 	// seen as values that "keep and get set"). Name heals via chosenColumnChanged; these
-	// three were simply missing from the notify set.
+	// two were simply missing from the notify set.
 	emit columnTitleChanged();
 	emit columnDescriptionChanged();
-	emit hasLabelsChanged();
+	// The excision, Cut 7: hasLabelsChanged/dropLevelsChanged/emptyValuesChanged and the
+	// width-cache recompute died with the label editor QML.
 }
 
-void ColumnModel::setSelected(int row, int modifier)
-{
-	if (modifier & Qt::ShiftModifier && _lastSelected >= 0)
-	{
-		int start = _lastSelected >= row ? row : _lastSelected;
-		int end = start == _lastSelected ? row : _lastSelected;
-		for (int i = start; i <= end; i++)
-		{
-			QString rowValue = data(index(i, 0), int(dataPkgRoles::value)).toString();
-			_selected.insert(rowValue);
-            emit dataChanged(ColumnModel::index(i, 0), ColumnModel::index(i, 0), {int(dataPkgRoles::selected)});
-		}
-	}
-	else if (modifier & Qt::ControlModifier)
-	{
-		QString rowValue = data(index(row, 0), int(dataPkgRoles::value)).toString();
-		_selected.insert(rowValue);
-        emit dataChanged(ColumnModel::index(row, 0), ColumnModel::index(row, 0), {int(dataPkgRoles::selected)});
-	}
-	else
-	{
-		QString rowValue = data(index(row, 0), int(dataPkgRoles::value)).toString();
-		bool disableCurrent = _selected.count(rowValue) > 0;
-		removeAllSelected();
-		
-		if (!disableCurrent)	_selected.insert(rowValue);
-		else					_selected.erase(rowValue);
-        emit dataChanged(ColumnModel::index(row, 0), ColumnModel::index(row, 0), {int(dataPkgRoles::selected)});
-	}
-	
-	_lastSelected = row;
-
-}
-
-void ColumnModel::unselectAll()
-{
-	_selected.clear();
-	_lastSelected = -1;
-	refresh(); //emit dataChanged(ColumnModel::index(0, 0), ColumnModel::index(rowCount(), 0), {int(dataPkgRoles::selected)});
-}
+// The excision, Cut 7: setSelected/removeAllSelected/unselectAll/setRowWidth died with the
+// label editor QML — the whole per-label selection machinery was its.
 
 bool ColumnModel::columnIsFiltered() const
 {
@@ -821,7 +565,6 @@ void ColumnModel::clearVirtual()
 	_dummyColumn.description.clear();
 	_dummyColumn.name.clear();
 	_dummyColumn.title.clear();
-	_dummyColumn.computeFilter.clear();
 
 	_dummyColumn.type			= columnType::scale;
 	_dummyColumn.computedType	= computedColumnType::notComputed;
@@ -848,43 +591,5 @@ void ColumnModel::languageChangedHandler()
 	emit tabsChanged();
 }
 
-bool ColumnModel::hasLabels() const
-{
-	// NEO adapter: no labels on lane data until B2 (the jasp:labels overlay era) — and
-	// notably the mirror's flag is meaningless there anyway (it is a STORAGE mode).
-	if (laneSchemaColumn())
-		return false;
-
-	// The excision, Cut 5: hasLabels was the legacy STORAGE MODE (B2 rebuilds on the overlay).
-	return false;
-}
-
-void ColumnModel::setHasLabels(bool newHasLabels)
-{
-	if (_beingRefreshed)
-		return;
-
-	// NEO gate: hasLabels is legacy's STORAGE MODE; the NEO equivalent is the jasp:labels
-	// overlay (P11), which arrives with the labels editor (B2). When built, this control
-	// enables off ColumnInfo::distinctCount vs WIRE_LEVELS_CAP — one source of truth.
-	DataSet * neoDataSet = DataSetPackage::pkg()->dataSet();
-	if (neoDataSet && neoDataSet->isOpen())
-	{
-		Log::log() << "ColumnModel::setHasLabels: labels arrive with the labels editor (B2) on lane datasets — ignored" << std::endl;
-		return;
-	}
-
-	// The excision, Cut 5: hasLabels was legacy's STORAGE MODE; the NEO equivalent is the
-	// jasp:labels overlay (P11, B2).
-}
-
-bool ColumnModel::isColumnNameFree(const QString & name)
-{
-	DataSet * dataSet = DataSetPackage::pkg()->dataSet();
-
-	// NEO: the lane schema is the name space (GridModel's twin) — the mirror's names go
-	// stale after NEO renames (grow-only, never renamed).
-	// The excision, Cut 5: the lane schema is the name space (GridModel's twin) — the legacy
-	// Column fallback is gone with Column.
-	return dataSet && dataSet->isOpen() && dataSet->schemaColumnIndex(fq(name)) < 0;
-}
+// The excision, Cut 7: isColumnNameFree died with CreateComputeColumnDialog (DataSet's schema
+// predicate is the truth for the rename flows that return).

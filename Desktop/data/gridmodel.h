@@ -27,8 +27,9 @@ class GridModel : public QAbstractTableModel
 {
 	Q_OBJECT
 
-	Q_PROPERTY(int	columnsFilteredCount	READ columnsFilteredCount					NOTIFY columnsFilteredCountChanged	)
-	Q_PROPERTY(bool showInactive			READ showInactive	WRITE setShowInactive	NOTIFY showInactiveChanged		)
+	// The excision, Cut 7: the columnsFilteredCount Q_PROPERTY died with the label editor QML
+	// (v1 has no filters; the signal was never emitted).
+	Q_PROPERTY(bool showInactive			READ showInactive	WRITE setShowInactive	    NOTIFY showInactiveChanged	     	 )
 	/// Status line for the grid's status bar: "" while the fill is in progress or complete;
 	/// a note when the fill stopped early (buffer budget exhausted / lane failure).
 	Q_PROPERTY(QString viewStatus		READ viewStatus							NOTIFY viewStatusChanged		)
@@ -58,8 +59,9 @@ public:
 	Q_INVOKABLE QVariant	getColumnTypesWithIcons() const;
 	Q_INVOKABLE QVariant	columnTypesWithIcons() const { return getColumnTypesWithIcons(); }///< multi-dataset PR QML renamed the call (no "get")
 	Q_INVOKABLE bool		columnUsedInEasyFilter(int column) const;		///< false until filters
-	Q_INVOKABLE void		resetAllFilters();							///< no-op until filters
-	Q_INVOKABLE bool		isColumnNameFree(QString name) const;
+	Q_INVOKABLE void		resetAllFilters();					///< no-op until filters
+	// The excision, Cut 7: isColumnNameFree died with CreateComputeColumnDialog (DataSet's
+	// schema predicate stays for the rename flows that return).
 	Q_INVOKABLE void		toggleColType(int column, bool next = true);	///< edit-era: logged no-op (fail loudly, merge-multidataset.md §6)
 
 	int					columnsFilteredCount() const { return 0; }		///< no filters in v1

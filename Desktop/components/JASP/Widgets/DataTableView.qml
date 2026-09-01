@@ -273,16 +273,17 @@ FocusScope
 				Item
 				{
 					width:			dataTableView.rowNumberWidth
-					
+						
 					JaspControls.RectangularButton
 					{
 						id:				filterToggleButton
-						
+							
 						toolTip:		filterModel.filterVisible ? qsTr("Hide filter") : qsTr("Show filter")
-						iconSource:		jaspTheme.iconPath + "filter.png"
-						onClicked:		filterModel.filterVisible = !filterModel.filterVisible
+						iconSource:	jaspTheme.iconPath + "filter.png"
+						onClicked:	filterModel.filterVisible = !filterModel.filterVisible
 						border.width:	1
-						
+						visible:		false	// the excision, Cut 7: the filter panel is unreachable until filters return as derived boolean columns
+							
 						anchors
 						{
 							fill:		parent
@@ -299,10 +300,10 @@ FocusScope
 					y:				-1
 					width:			visible ? height + 2 : 0
 					toolTip:		qsTr("Add computed column")
-					iconSource:		jaspTheme.iconPath + "/addition-sign.svg"
-					onClicked:		createComputeDialog.open()
+					iconSource:	jaspTheme.iconPath + "/addition-sign.svg"
+					onClicked:	createComputeDialog.open()
 					border.width:	1
-					visible:		!dataTableView.expandDataSet
+					visible:		false	// the excision, Cut 7: computed columns return as derivations (ChangeKind::derived)
 				}
 
 

@@ -272,7 +272,8 @@ Window
 			}
 		}
 
-		CreateComputeColumnDialog	{ id: createComputeDialog	}
+		// The excision, Cut 7: CreateComputeColumnDialog died with the computed-column editor
+		// (computed columns return as derivations, ChangeKind::derived).
 		ModuleInstaller				{ id: moduleInstallerDialog	}
 		ResizeDataDialog			{ id: resizeDataDialog		}
 		RenameColumnDialog			{ id: renameColumnDialog	}

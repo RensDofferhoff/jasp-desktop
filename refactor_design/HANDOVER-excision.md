@@ -1,10 +1,23 @@
 # HANDOVER — The Great Excision: removing the entire legacy data route
 
-**Status:** 2026-09-01. Direction set by the user: **neo-jasp is a major refactor — remove
-everything legacy, replace it with sanity, and crawl functionality back. We are not
-shipping tomorrow.** The strategic question "what legitimately loads via legacy?" is
-ANSWERED: **nothing**. Lane datasets (CSV via the orchestrator, today) are the only data
-route; every other format/feature returns later as a NEO-era reimplementation.
+**Status:** 2026-09-02 — **THE EXCISION IS COMPLETE (Cuts 1–7 all landed on `development`).**
+Direction set by the user: **neo-jasp is a major refactor — remove everything legacy,
+replace it with sanity, and crawl functionality back. We are not shipping tomorrow.** The
+strategic question "what legitimately loads via legacy?" was ANSWERED: **nothing**. Lane
+datasets (CSV via the orchestrator, today) are the only data route; every other
+format/feature returns later as a NEO-era reimplementation.
+
+**Where things stand now:** the wire schema is THE implementation (no Column, no mirror, no
+sqlite, no per-row filter mask); forms/QML are served by injected schema providers
+(ColumnsModel in the desktop app, DataSetProvider in engine/test worlds) via
+`Workspace::formProvider()`; Filter is pure expression metadata; the legacy undo commands,
+importers/exporters, DataSetTableModel and the label-editor/computed-column QML are gone;
+SQLite/ReadStat/librdata/freexl are fully dropped (LibArchive lives on in QMLComponents for
+module .zip installs). Remaining legacy-adjacent surfaces, deliberately kept: the Filter
+GUI files (gated/unreachable — return with derived boolean columns), workspace-level empty
+values (loading concept; redesign later), the analysis-filter dropdown (metadata flows to
+the engine), syntaxbridge.cpp (out of build, GUT_TODO), and libsodium/nng (verify before
+touching). **The NEO-era return designs below are the roadmap for crawling it all back.**
 
 ## What dies (the scope)
 
@@ -182,9 +195,40 @@ new producers on the existing rail.
       data_view). Tests: testFilterSetFilterVectorResizesToResult died with the mask (14→13);
       **13 JASPTest / 63 QuickTest (the provider gate — forms serve through DataSetProvider) / 5 / 8 green**.
       Note: workspace.h now includes variableinfo.h directly (filter.h used to drag it in transitively).
-- [ ] **Cut 7 — sweep**: grep `_columns|column\(|Column \*|DatabaseInterface|DataSetSyncer`
-      for survivors; remove now-dead QML (filter panels, label editor windows) or gate
-      them; final handover consolidation.
+- [x] **Cut 7 — the sweep** (2026-09-02): grep survivors clean — `_columns` hits only
+      unrelated code (VariablesListBase's column count, third-party toml), `column(`/`Column *`
+      only QModelIndex::column()/engine-side R code; DatabaseInterface/DataSetSyncer only in
+      excision comments + syntaxbridge.cpp (out of build, GUT_TODO). **Dead QML deleted**:
+      LabelEditorWindow.qml, ComputeColumnWindow.qml, CreateComputeColumnDialog.qml (its
+      MainWindow.qml instantiation too), FilterConstructor/ComputedColumnsConstructor.qml +
+      OperatorSelectorComputedColumns.qml (its private operator selector; consumer was
+      ComputeColumnWindow), and the stale tracked FilterConstructor.qmlc cache artifact.
+      **VariablesWindow**: the StackLayout's three dead children (the was-ComputeColumnWindow
+      placeholder, labelsView, missingValuesView) removed — componentIndex is
+      `{"basicInfo": 0}` and `ColumnModel::tabs()` serves ONLY "Column definition"
+      (this also fixes the Cut-5 leftover where non-compact mode served a dead "Missing
+      values" tab whose view was hidden). **Filter UI gated** (unreachable, files stay for
+      the derived-columns era): the DataTableView corner filter-toggle button and the
+      "Add computed column" extra-column button are `visible: false`; the column-header
+      easy-filter opener was already sealed by `columnUsedInEasyFilter → false`. **ColumnModel
+      sweep** (its QML surface is now only the ColumnBasicInfo editor + window mechanics):
+      hasLabels/setHasLabels(Q), autoSort/setAutoSort(Q), computeFilter/setComputeFilter(Q),
+      dropLevels/setDropLevels(Q), setUseCustomEmptyValues, setCustomEmptyValues,
+      setComputedType, filteredOut, resetFilterAllows, resetEmptyValues, unselectAll,
+      setSelected/removeAllSelected/getSortedSelection (the whole per-label selection set),
+      rowWidth/valueMaxWidth/labelMaxWidth (+setRowWidth/setValueMaxWidth/setLabelMaxWidth and
+      the width-cache members), openComputedColumn, isColumnNameFree — all deleted, with their
+      Q_PROPERTYs and signals; setData/data simplified (no selected role, no selection hook),
+      headerData's rowWidth fallback gone, notifyColumnChanged slimmed, the ctor's dead relays
+      (shownFilterChanged→refreshFilteredOut, allFiltersReset, workspaceEmptyValuesChanged)
+      disconnected. **GridModel**: columnsFilteredCount Q_PROPERTY + isColumnNameFree deleted
+      (no binders). **Phantoms found**: the `Column * _column` member SURVIVED Cut 5 in
+      ColumnModel — a stale `class Column;` fwd-decl in undostack.h kept it compiling (both
+      died now; analysis.h's twin fwd-decl too). **Enums**: dropLevelsType + dbDbl deleted from
+      columntype.h (zero users). **FilterModel**: processFilterResult slot deleted (orphaned
+      since Cut 1 — no connect sites). Tests: 13 JASPTest / 63 QuickTest / 5 ColumnEncoder /
+      8 CsvPrev green; cmake re-run (GLOB) after every file deletion; orphan-QML scan over
+      Desktop/components + QMLComponents/components/widgets: ZERO orphans remain.
 
 ## Validation per cut
 

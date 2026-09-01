@@ -520,11 +520,6 @@ void GridModel::toggleColType(int column, bool doubleClick)
 			doubleClick ? tr("Change all column types") : tr("Change column type")));
 }
 
-bool GridModel::isColumnNameFree(QString name) const
-{
-	return _dataSet ? _dataSet->schemaColumnIndex(fq(name)) < 0 : true;
-}
-
 void GridModel::setShowInactive(bool showInactive)
 {
 	if (_showInactive == showInactive)

@@ -30,9 +30,9 @@
 #include <QQuickItem>
 
 class Filter;
-class Column;
 class DataSet;
 class AnalysisForm;
+// The excision, Cut 7: the stale `class Column;` fwd-decl died with Column's last phantom use.
 
 
 ///

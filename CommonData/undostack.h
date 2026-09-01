@@ -21,7 +21,8 @@
 
 class DataSet;
 class Workspace;
-class Column;
+// The excision, Cut 7: the stale `class Column;` fwd-decl died — it survived Cut 5 only to
+// keep ColumnModel's dead `Column* _column` member compiling.
 
 class UndoModelCommand : public QUndoCommand
 {
