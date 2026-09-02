@@ -19,6 +19,7 @@
 #include "columntypesmodel.h"
 #include "variableinfo.h"
 #include "qutils.h"
+#include "jasptheme.h"	// the icon fix below: menuImageSource must be a full theme URL
 
 columnTypeVec ColumnTypesModel::_allTypes;
 
@@ -60,7 +61,7 @@ QVariant ColumnTypesModel::data(const QModelIndex &index, int role) const
 	{
 	case TypeRole:				return int(_types[index.row()]);
 	case DisplayRole:			return QColumnUtils::getTypeFriendly(_types[index.row()]);
-	case MenuImageSourceRole:	return getIconFilename(_types[index.row()], varIconType::DefaultIconType);
+	case MenuImageSourceRole:	return JaspTheme::currentIconPath() + getIconFilename(_types[index.row()], varIconType::DefaultIconType);	// full theme URL — a bare filename made QML resolve it against CustomMenu.qml's own folder (the qrc:/.../Widgets/variable-*.svg warnings)
 	case IsEnabledRole:			return true;
 	case IsSeparatorRole:		return false;
 	case JSFunctionRole:
