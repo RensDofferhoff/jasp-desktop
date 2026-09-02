@@ -28,16 +28,10 @@
 //!
 //! Run: `JASP_ORCH_URL=tcp://127.0.0.1:9555 cargo run --bin jasp-data-runner`
 
-#[path = "../arrowview.rs"]
 mod arrowview;
-#[path = "../csv2arrow.rs"]
 mod csv2arrow;
-#[path = "../dataedit.rs"]
 mod dataedit;
-#[path = "../messages.rs"]
-mod messages;
 
-use messages::{Capability, DataOp, Envelope, Message, Status, WorkPayload};
 use nng::options::{
     Options, RecvBufferSize, RecvMaxSize, RecvTimeout, SendBufferSize, SendTimeout,
 };
@@ -45,44 +39,11 @@ use nng::{Pipe, PipeEvent, Protocol, Socket};
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use wire as messages;
+use wire::framing::{deframe, deframe_parts, frame_envelope, frame_parts};
+use wire::{Capability, DataOp, Envelope, Message, Status, WorkPayload};
 
-// ─── Framing (§18.1) — same as the orchestrator ──────────────────────
-
-fn frame_bytes(json: &[u8]) -> Vec<u8> {
-    frame_parts(json, &[])
-}
-
-/// Frame with an optional binary tail: `[u32 BE json_len][JSON][binary…]` (§18.1). View
-/// results put the escaped TSV in the tail — never inside a JSON string.
-fn frame_parts(json: &[u8], binary: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(4 + json.len() + binary.len());
-    out.extend_from_slice(&(json.len() as u32).to_be_bytes());
-    out.extend_from_slice(json);
-    out.extend_from_slice(binary);
-    out
-}
-
-fn frame_envelope(env: &Envelope) -> Vec<u8> {
-    frame_bytes(&serde_json::to_vec(env).expect("serialize envelope"))
-}
-
-fn deframe(body: &[u8]) -> Option<Envelope> {
-    deframe_parts(body).map(|(env, _)| env)
-}
-
-/// Framing with the binary tail (§18.1) — the edit family's forward cells (§1.2 TSV) and
-/// inverse IPC bytes ride it, exactly like a view result's TSV.
-fn deframe_parts(body: &[u8]) -> Option<(Envelope, &[u8])> {
-    if body.len() < 4 {
-        return None;
-    }
-    let len = u32::from_be_bytes([body[0], body[1], body[2], body[3]]) as usize;
-    if body.len() < 4 + len {
-        return None;
-    }
-    let env = serde_json::from_slice(&body[4..4 + len]).ok()?;
-    Some((env, &body[4 + len..]))
-}
+// ─── Framing (§18.1) — shared in `wire::framing` ──────────────────────────
 
 // ─── Wire helpers ────────────────────────────────────────────────────────────
 
@@ -192,6 +153,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             ],
             priority: 0,
+            // The credit window (v2-era wire field, default 1): this worker runs one job
+            // at a time — a blocking conversion loop. v2's router will never send a second
+            // work until this one's terminal returns the credit.
+            slots: 1,
             environment: json!(null),
         }),
     };

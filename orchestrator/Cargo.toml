@@ -1,34 +1,54 @@
-[package]
-name = "jasp-orchestrator"
+# NEO JASP orchestrator workspace.
+#
+# Orchestrator v2 design §11: one Cargo workspace, four crates —
+#   wire         the protocol (messages + framing) and the shared NNG plumbing,
+#                THE single source of truth — extract, don't fork
+#   classic      the as-built pipe orchestrator (jasp-orchestrator); FROZEN once
+#                v2 exists (bugfix-only; its test suite is the spec of record)
+#   v2           the scheduler (jasp-orchestrator-v2): pull/credit dispatch,
+#                router-owned queues, (work_id, revision) supersession,
+#                abort-push at checkpoints
+#   data_runner  the Rust data worker (jasp-data-runner)
+#
+# Both orchestrator binaries answer the same env/URL contract (JASP_ORCH_URL);
+# the desktop and e2e scripts pick per test.
+#
+# Binaries land in orchestrator/target/{debug,release}/ exactly as before the
+# workspace split, so every existing script/doc path keeps working.
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/wire",
+    "crates/classic",
+    "crates/v2",
+    "crates/data_runner",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "NEO JASP orchestrator (alpha): PAIR v1 broker that forwards work frontend->runner and result runner->frontend."
-default-run = "jasp-orchestrator"
 
-[[bin]]
-name = "jasp-orchestrator"
-path = "src/main.rs"
-
-[[bin]]
-name = "jasp-data-runner"
-path = "src/bin/data_runner.rs"
-
-[dependencies]
+[workspace.dependencies]
 nng = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Generates a JSON Schema *from* the Rust message types — the shared-schema source of truth.
 schemars = "0.8"
-# Cross-platform user directories (XDG / Application Support / %LOCALAPPDATA%) for the
-# orchestrator's default dir root — mirrors the frontend's Qt AppLocalDataLocation.
+# Cross-platform user directories (XDG / Application Support / %LOCALAPPDATA%).
 dirs = "6"
-# CSV → Arrow data lane (the jasp-data-runner binary's data_open path; a port of
-# refactor_design/poc/csv_arrow). NB: arrow's LZ4 is pure-Rust (lz4_flex); we deliberately
-# avoid the umbrella `ipc_compression` feature because it also pulls zstd-sys (a C build).
+# CSV → Arrow data lane (the jasp-data-runner binary's data_open path). NB: arrow's
+# LZ4 is pure-Rust (lz4_flex); we deliberately avoid the umbrella `ipc_compression`
+# feature because it also pulls zstd-sys (a C build).
 arrow = { version = "59", features = ["csv", "prettyprint"] }
 arrow-ipc = { version = "59", features = ["lz4"] }
 csv = "1"
-# Ordered set (insertion order + O(1) dedup, one copy of each string) for the per-column
-# distinct set — gives a deterministic first-appearance dictionary order.
+# Ordered set (insertion order + O(1) dedup) for the per-column distinct set.
 indexmap = "2"
 regex = "1"
+wire = { path = "crates/wire" }
+
+[profile.release]
+# The orchestrator pair are long-running desktop brokers; debug symbols in release
+# cost little and have paid for themselves on post-mortem logs.
+debug = true

@@ -16,60 +16,23 @@
 //! Plus the lane-error path: a `dataset_open` of a missing source fails the open with a
 //! correlated `dataset_open_failed` error.
 
-#[path = "../src/messages.rs"]
-mod messages;
-
 use arrow::array::{Array, AsArray, DictionaryArray};
 use arrow::datatypes::{DataType, Int32Type};
 use arrow_ipc::reader::FileReader;
-use messages::{
-    AnalysisResult, AnalysisWork, Capability, DataResult, Envelope, Message, Register, ResultMsg,
-    ResultPayload, Settings, Status, Work, WorkPayload,
-};
 use nng::options::{Options, RecvBufferSize, RecvTimeout, SendBufferSize};
 use nng::{Protocol, Socket};
 use serde_json::{Value, json};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use wire as messages;
+use wire::framing::{deframe, deframe_parts, frame_envelope};
+use wire::{
+    AnalysisResult, AnalysisWork, Capability, DataResult, Envelope, Message, Register, ResultMsg,
+    ResultPayload, Settings, Status, Work, WorkPayload,
+};
 
-// ─── Framing (§18.1) ─────────────────────────────────────────────────────────
-
-fn frame_bytes(json: &[u8]) -> Vec<u8> {
-    frame_parts(json, &[])
-}
-
-/// Frame with a binary tail (§18.1): view results carry their escaped TSV after the JSON
-/// envelope.
-fn frame_parts(json: &[u8], binary: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(4 + json.len() + binary.len());
-    out.extend_from_slice(&(json.len() as u32).to_be_bytes());
-    out.extend_from_slice(json);
-    out.extend_from_slice(binary);
-    out
-}
-
-fn frame_envelope(env: &Envelope) -> Vec<u8> {
-    frame_bytes(&serde_json::to_vec(env).expect("serialize envelope"))
-}
-
-fn deframe(body: &[u8]) -> Option<Envelope> {
-    deframe_parts(body).map(|(env, _)| env)
-}
-
-/// Split a frame into its JSON envelope and trailing binary payload (§18.1) — the bulk
-/// bytes never go through the JSON parser.
-fn deframe_parts(body: &[u8]) -> Option<(Envelope, &[u8])> {
-    if body.len() < 4 {
-        return None;
-    }
-    let len = u32::from_be_bytes([body[0], body[1], body[2], body[3]]) as usize;
-    if body.len() < 4 + len {
-        return None;
-    }
-    let env = serde_json::from_slice(&body[4..4 + len]).ok()?;
-    Some((env, &body[4 + len..]))
-}
+// ─── Framing (§18.1) — shared in `wire::framing` ──────────────────────────
 
 // ─── Child-process guard ─────────────────────────────────────────────────────
 
@@ -186,6 +149,7 @@ fn register_runner(url: &str, caps: Vec<Capability>) -> Socket {
             runner_id: None,
             capabilities: caps,
             priority: 0,
+            slots: 1,
             environment: Value::Null,
         }),
     );
@@ -302,7 +266,10 @@ fn open_dataset(fe: &Socket, path: &str, work_id: &str) -> (Status, DataResult) 
 #[test]
 fn csv_open_work_and_feather_read() {
     let (_orch, url, dir_root) = spawn_orch("full");
-    let csv = format!("{}/../test_data/debug.csv", env!("CARGO_MANIFEST_DIR"));
+    let csv = format!(
+        "{}/../../../test_data/debug.csv",
+        env!("CARGO_MANIFEST_DIR")
+    );
 
     // 1. data_open work → the orchestrator provisions the data-runner, which converts
     //    debug.csv; the terminal result is a kind:"data" result: the orchestrator-filled
@@ -593,7 +560,7 @@ fn view_dataset(
     let Message::Result(r) = body else {
         panic!("expected result");
     };
-    let status = r.status.clone();
+    let status = r.status;
     let ResultPayload::Data(d) = r.payload else {
         panic!("expected data result payload");
     };
@@ -607,7 +574,10 @@ fn view_dataset(
 #[test]
 fn view_matches_source_values_byte_exact() {
     let (_orch, url, _dir_root) = spawn_orch("view");
-    let csv = format!("{}/../test_data/debug.csv", env!("CARGO_MANIFEST_DIR"));
+    let csv = format!(
+        "{}/../../../test_data/debug.csv",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let (fe, _session) = hello_frontend(&url);
     let (status, data) = open_dataset(&fe, &csv, "w-open");
     assert!(matches!(status, Status::Complete), "open failed: {data:?}");
@@ -673,7 +643,10 @@ fn view_matches_source_values_byte_exact() {
 #[test]
 fn view_budget_truncates_at_row_boundary_and_continues() {
     let (_orch, url, _dir_root) = spawn_orch("viewtrunc");
-    let csv = format!("{}/../test_data/debug.csv", env!("CARGO_MANIFEST_DIR"));
+    let csv = format!(
+        "{}/../../../test_data/debug.csv",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let (fe, _session) = hello_frontend(&url);
     let (status, data) = open_dataset(&fe, &csv, "w-open");
     assert!(matches!(status, Status::Complete), "open failed: {data:?}");
@@ -704,7 +677,7 @@ fn view_budget_truncates_at_row_boundary_and_continues() {
 fn view_of_encoding_torture_matches_source_values() {
     let (_orch, url, _dir_root) = spawn_orch("viewtorture");
     let csv = format!(
-        "{}/../test_data/encoding_torture.csv",
+        "{}/../../../test_data/encoding_torture.csv",
         env!("CARGO_MANIFEST_DIR")
     );
     let (fe, _session) = hello_frontend(&url);
@@ -828,7 +801,7 @@ fn edit_dataset(
     let Message::Result(r) = res_env.body else {
         panic!("expected result");
     };
-    let status = r.status.clone();
+    let status = r.status;
     let ResultPayload::Data(d) = r.payload else {
         panic!("expected data result payload");
     };
@@ -869,7 +842,10 @@ fn view_row0(fe: &Socket, dataset_id: &str, work_id: &str) -> String {
 #[test]
 fn edit_undo_redo_crown_over_the_real_lane() {
     let (_orch, url, _dir_root) = spawn_orch("crown");
-    let csv = format!("{}/../test_data/debug.csv", env!("CARGO_MANIFEST_DIR"));
+    let csv = format!(
+        "{}/../../../test_data/debug.csv",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let (fe, _session) = hello_frontend(&url);
     let (status, data) = open_dataset(&fe, &csv, "w-crown-open");
     assert!(matches!(status, Status::Complete), "open failed: {data:?}");

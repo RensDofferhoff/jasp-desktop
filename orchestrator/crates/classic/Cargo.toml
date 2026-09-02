@@ -1,0 +1,23 @@
+[package]
+name = "classic"
+version.workspace = true
+edition.workspace = true
+description = "NEO JASP orchestrator (classic): PAIR v1 broker that forwards work frontend->runner and result runner->frontend. FROZEN once v2 exists (bugfix-only; tests are the spec of record)."
+default-run = "jasp-orchestrator"
+
+[[bin]]
+name = "jasp-orchestrator"
+path = "src/main.rs"
+
+[dependencies]
+wire = { workspace = true }
+nng = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+# The e2e test reads the converted Feather back with arrow to prove it is real.
+arrow = { workspace = true }
+arrow-ipc = { workspace = true }

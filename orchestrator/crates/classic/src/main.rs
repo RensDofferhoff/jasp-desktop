@@ -48,12 +48,7 @@
 //! * `JASP_ORCH_SPAWN_TIMEOUT_MS` spawned-runner boot timeout (default `120000`).
 //! * `JASP_ORCH_PARK_TIMEOUT_MS`  parked-work timeout (default `180000`).
 
-mod messages;
-mod provisioner;
-
-use messages::{Capability, DataOp, Envelope, Message, ModuleInfo, Status, WorkPayload};
-use nng::options::{LocalAddr, Options, RecvBufferSize, RecvMaxSize, SendBufferSize};
-use nng::{Aio, AioResult, Listener, Pipe, PipeEvent, Protocol, Socket};
+use nng::{Aio, Protocol, Socket};
 use provisioner::{LaneKind, LaneSpec, ProvEvent, ProvReq, RunnerProvisioner};
 use serde_json::json;
 use std::collections::{HashMap, VecDeque};
@@ -63,57 +58,15 @@ use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
     mpsc,
 };
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use wire as messages;
+use wire::framing::{frame_envelope, frame_parts, now_ms};
+use wire::janitor::{JanitorTx, Reclaim, start_janitor};
+use wire::provisioner;
+use wire::transport::{self as transport, listen_control};
+use wire::{Capability, DataOp, Envelope, Message, ModuleInfo, Status, WorkPayload};
 
-// ─── Framing (§18.1) ─────────────────────────────────────────────────────────
-
-/// Frame raw JSON bytes into `[u32 BE length][json bytes]`.
-fn frame_bytes(json: &[u8]) -> Vec<u8> {
-    frame_parts(json, &[])
-}
-
-/// Frame with an optional binary tail: `[u32 BE json_len][JSON][binary…]` (§18.1). View
-/// results carry their escaped TSV in the tail — bulk bytes never go through the JSON
-/// parser on any hop.
-fn frame_parts(json: &[u8], binary: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(4 + json.len() + binary.len());
-    out.extend_from_slice(&(json.len() as u32).to_be_bytes());
-    out.extend_from_slice(json);
-    out.extend_from_slice(binary);
-    out
-}
-
-/// Frame a typed [`Envelope`].
-fn frame_envelope(env: &Envelope) -> Vec<u8> {
-    frame_bytes(&serde_json::to_vec(env).expect("serialize envelope"))
-}
-
-/// Parse `[u32 BE length][json bytes][…]` into a typed [`Envelope`].
-fn deframe(body: &[u8]) -> Option<Envelope> {
-    deframe_parts(body).map(|(env, _)| env)
-}
-
-/// Split a frame (§18.1) into its JSON envelope and the trailing binary payload (empty
-/// slice when the frame is JSON-only). The bulk bytes are never parsed as JSON.
-fn deframe_parts(body: &[u8]) -> Option<(Envelope, &[u8])> {
-    if body.len() < 4 {
-        return None;
-    }
-    let len = u32::from_be_bytes([body[0], body[1], body[2], body[3]]) as usize;
-    if body.len() < 4 + len {
-        return None;
-    }
-    let env = serde_json::from_slice(&body[4..4 + len]).ok()?;
-    Some((env, &body[4 + len..]))
-}
-
-/// Epoch milliseconds (saturates to 0 before the epoch).
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
+// ─── Framing (§18.1) — shared in `wire::framing` ─────────────────────────
 
 // ─── Configuration (§8) ──────────────────────────────────────────────────────
 
@@ -309,24 +262,6 @@ impl Config {
     }
 }
 
-/// Read back the address a listener actually bound, as a dialable URL — the single source of truth
-/// for "what do peers dial?" For inproc/ipc this is the (unique) address we asked for; for tcp it is
-/// the OS-assigned ephemeral `:0` port.
-///
-/// Corrects a one-byte quirk in nng 1.0.1 (probe-verified): its `From<nng_sockaddr>` converts the
-/// address from network order but passes the port through raw, whereas NNG stores `sa_port` in
-/// network order and `SocketAddrV4/V6::new` expect host order — so the readback port is endian-
-/// flipped on little-endian hosts. `u16::from_be` is the portable network→host fix (a no-op on
-/// big-endian, a swap on little-endian).
-fn readback_url(listener: &Listener) -> Result<String, nng::Error> {
-    Ok(match listener.get_opt::<LocalAddr>()? {
-        nng::SocketAddr::Inet(v4) => format!("tcp://{}:{}", v4.ip(), u16::from_be(v4.port())),
-        nng::SocketAddr::Inet6(v6) => format!("tcp://[{}]:{}", v6.ip(), u16::from_be(v6.port())),
-        // inproc / ipc: the crate's Display already renders a dialable url.
-        other => format!("{other}"),
-    })
-}
-
 // ─── Runtimes (§4) ───────────────────────────────────────────────────────────
 
 /// A registered runner and its dedicated data channel.
@@ -359,16 +294,6 @@ struct FrontendRuntime {
     client_id: Option<String>,
 }
 
-/// Orchestrator-side outbound channel buffer (messages, orch → peer). This is the cushion that
-/// absorbs a slow or bursty peer — most importantly a frontend whose UI thread has momentarily
-/// stalled — before `try_send` returns `TryAgain`. Deeper = more tolerance for transient peer
-/// silence; the backpressure policy (runner → evict, frontend → drop) decides what a full buffer
-/// *means*. Runners/clients set 64 on their side.
-const ORCH_SEND_BUF: i32 = 256;
-/// Orchestrator-side inbound channel buffer (messages, peer → orch). The recv `Aio` drains this
-/// near-instantly (it only re-arms and enqueues to the router), so a shallow depth is ample.
-const ORCH_RECV_BUF: i32 = 128;
-
 impl RunnerRuntime {
     /// Non-blocking send on this channel (the socket carries `SENDBUF=ORCH_SEND_BUF`). Returns
     /// `Err(TryAgain)` when the peer's buffer is full (peer hung) or `Err(Closed)` when the peer is
@@ -386,28 +311,9 @@ impl FrontendRuntime {
     }
 }
 
-/// The work/result kind discriminator (§19.1/§19.2) — orchestrator-side bookkeeping where the
-/// full kind-specific payload is not needed (routing records, kind-correct synthetic results).
-/// Not a wire type: on the wire the kind is the tag of the adjacently-tagged payload enums.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorkKind {
-    AnalysisRClassicJaspbase,
-    Rcode,
-    Data,
-}
-
-impl messages::WorkPayload {
-    /// The kind discriminator of this work (§19.1).
-    fn kind(&self) -> WorkKind {
-        match self {
-            messages::WorkPayload::AnalysisRClassicJaspbase(_) => {
-                WorkKind::AnalysisRClassicJaspbase
-            }
-            messages::WorkPayload::Rcode(_) => WorkKind::Rcode,
-            messages::WorkPayload::Data(_) => WorkKind::Data,
-        }
-    }
-}
+/// The work/result kind discriminator lives in `wire` (`WorkKind`) — classic's internals
+/// reference it unqualified.
+use wire::WorkKind;
 
 /// One in-flight work unit's routing record (§6). Keyed in [`Router::work`] by
 /// `(session_id, work_id)`. `Clone` is cheap (two `Arc` bumps + small vecs).
@@ -498,46 +404,7 @@ enum RouterMsg {
     QueryDatasets(Reply<Vec<(String, String, PathBuf, usize)>>),
 }
 
-// ─── Janitor (off-router filesystem reclamation) ─────────────────────────────
-
-/// A deferred filesystem reclamation request. The router only *decides* (pure memory) and
-/// enqueues non-blocking; the janitor thread does the I/O sequentially. `Dir` reclaims a
-/// workspace tree (`remove_dir_all`); `File` reclaims a single retired dataset cache file
-/// (`remove_file`) — the dataset manager's new-file + map-swap mechanism retires files the
-/// janitor deletes once their refcount drains.
-enum Reclaim {
-    Dir(PathBuf),
-    File(PathBuf),
-}
-
-/// Mailbox for the janitor: reclamation requests.
-type JanitorTx = mpsc::Sender<Reclaim>;
-
-/// Spawn the single janitor thread and return its mailbox. Filesystem deletion is blocking
-/// I/O of unbounded duration, so it must never run on the router thread (the "router never
-/// blocks" invariant). Deletion is best-effort — `NotFound` is treated as success (already
-/// gone), so cleanup is idempotent and a failed or repeated delete is harmless; startup GC
-/// is the backstop for anything leaked.
-fn start_janitor() -> JanitorTx {
-    let (tx, rx) = mpsc::channel::<Reclaim>();
-    std::thread::Builder::new()
-        .name("orch-janitor".into())
-        .spawn(move || {
-            while let Ok(reclaim) = rx.recv() {
-                let (path, result) = match reclaim {
-                    Reclaim::Dir(path) => (path.clone(), std::fs::remove_dir_all(&path)),
-                    Reclaim::File(path) => (path.clone(), std::fs::remove_file(&path)),
-                };
-                match result {
-                    Ok(()) => println!("[orch] reclaimed {}", path.display()),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => eprintln!("[orch] cleanup failed for {}: {e}", path.display()),
-                }
-            }
-        })
-        .expect("spawn janitor thread");
-    tx
-}
+// ─── Janitor — shared in `wire::janitor` (extract, don't fork) ────────────
 
 // ─── Router (single-threaded owner of all broker state, §4/§5) ───────────────
 
@@ -792,55 +659,17 @@ impl Router {
 
     // ── Channel allocation (§2.2, scheme-aware) ──────────────────────────────
 
-    /// Allocate a dedicated PAIR data channel and return its `(socket, dialable_url)`.
-    ///
-    /// Uniform across transports: bind a candidate address with `Listener::new`, then use the
-    /// address the OS *actually* bound as the dialable URL. For inproc/ipc the candidate is a unique
-    /// name/path we construct (the per-broker `nonce` keeps it collision-free across brokers in one
-    /// process, since inproc names are process-global) and the dialable URL is the candidate itself.
-    /// For tcp the candidate is `host:0`, so the OS assigns a guaranteed-free ephemeral port which we
-    /// read back via `readback_url`. No port ranges, no retry loops, and no transport-specific code
-    /// beyond the candidate-address syntax (inherent to each transport's addressing).
+    /// Allocate a dedicated PAIR data channel and return its `(socket, dialable_url)` —
+    /// via the shared plumbing in `wire::transport` (the NNG traps live in exactly one
+    /// place; classic and v2 must never diverge here).
     fn allocate_channel(&self, id: &str) -> Result<Channel, nng::Error> {
-        let sock = Socket::new(Protocol::Pair1)?;
-        let url = match self.config.scheme() {
-            "inproc" => {
-                let url = format!("inproc://jasp-ch-{}-{id}", self.nonce);
-                let listener = Listener::new(&sock, &url)?;
-                let _ = listener; // socket keeps the listener alive; handle is Copy
-                url
-            }
-            "ipc" => {
-                let url = format!(
-                    "ipc:///tmp/jasp-ch-{}-{id}-{}.sock",
-                    self.nonce,
-                    std::process::id()
-                );
-                let listener = Listener::new(&sock, &url)?;
-                let _ = listener;
-                url
-            }
-            // tcp: delegate the port to the OS (`:0`); the readback tells us which port we got.
-            _ => {
-                let listener =
-                    Listener::new(&sock, &format!("tcp://{}:0", self.config.tcp_host()))?;
-                readback_url(&listener)?
-            }
-        };
-        // Share the socket between the Aio recv loop and direct sends.
-        // Orchestrator-side buffers: the outbound SENDBUF is the backpressure cushion for a slow
-        // peer (256 — tolerates a stalled frontend / bursty results); the inbound RECVBUF stays
-        // shallow (128) because the recv Aio drains it immediately. When SENDBUF fills, `try_send`
-        // returns `TryAgain` and the per-peer policy applies (runner → evict, frontend → drop).
-        sock.set_opt::<SendBufferSize>(ORCH_SEND_BUF)?;
-        sock.set_opt::<RecvBufferSize>(ORCH_RECV_BUF)?;
-        // §18.4/§4.4: raise the recv ceiling on BOTH the frontend and runner channels — the
-        // libnng default (~1 MiB) silently discards anything larger, and view chunks (~20 MB)
-        // plus any future bulk ride these channels. One ceiling + margin, never thought about
-        // again.
-        sock.set_opt::<RecvMaxSize>(self.config.max_inline_payload + messages::RECV_MARGIN)?;
-        let channel = Arc::new(sock);
-        Ok((channel, url))
+        transport::allocate_channel(
+            self.config.scheme(),
+            self.config.tcp_host(),
+            self.nonce,
+            id,
+            self.config.max_inline_payload + messages::RECV_MARGIN,
+        )
     }
 
     // ── Handshake (control endpoint) ─────────────────────────────────────────
@@ -1048,94 +877,52 @@ impl Router {
 
     // ── Channel Aio loops (§5) ───────────────────────────────────────────────
     //
-    // Callbacks run on NNG's pool threads and do NO routing. They re-arm the recv immediately (so
-    // the socket is always receptive and a peer's blocking send can always land in RECVBUF), then
-    // forward the message to the router over the mailbox. Disconnects surface via `pipe_notify`'s
-    // `RemovePost` (a *listening* PAIR's recv does NOT return `Closed` when the peer leaves).
+    // The loops themselves live in `wire::transport::arm_peer_channel` (extract, don't
+    // fork); classic only wires them to its mailbox and keeps the strong `Aio` refs alive
+    // in `self.aios` (the canonical keep-alive). Disconnects surface via `pipe_notify`'s
+    // `RemovePost` (a *listening* PAIR's recv does NOT return `Closed` when the peer
+    // leaves).
 
     fn arm_runner_channel(&mut self, runner: Arc<RunnerRuntime>) -> Result<(), nng::Error> {
-        let tx_pn = self.tx.clone();
+        let tx_msg = self.tx.clone();
+        let tx_disc = self.tx.clone();
         let rid = runner.runner_id.clone();
-        runner
-            .channel
-            .pipe_notify(move |_pipe: Pipe, event: PipeEvent| {
-                if matches!(event, PipeEvent::RemovePost) {
-                    let _ = tx_pn.send(RouterMsg::EvictRunner(rid.clone()));
-                }
-            })?;
-        let tx = self.tx.clone();
         let rt = Arc::clone(&runner);
-        let aio = Aio::new(move |aio: Aio, res: AioResult| match res {
-            AioResult::Recv(Ok(msg)) => {
-                rt.last_activity.store(now_ms(), Ordering::Relaxed);
-                // Re-arm BEFORE forwarding so the recv is always armed.
-                if let Err(e) = rt.channel.recv_async(&aio) {
-                    eprintln!("[orch] runner {} re-arm failed: {e}", rt.runner_id);
-                }
-                if let Some((env, binary)) = deframe_parts(&msg[..]) {
-                    let _ = tx.send(RouterMsg::RunnerData {
-                        runner: Arc::clone(&rt),
-                        env,
-                        binary: binary.to_vec(),
-                    });
-                }
-            }
-            AioResult::Recv(Err(e)) => {
-                println!("[orch] runner {} channel closed: {e}", rt.runner_id);
-                let _ = tx.send(RouterMsg::EvictRunner(rt.runner_id.clone()));
-            }
-            _ => {}
-        })?;
-        runner.channel.recv_async(&aio)?;
+        let aio = transport::arm_peer_channel(
+            &runner.channel,
+            Box::new(move |env, binary| {
+                let _ = tx_msg.send(RouterMsg::RunnerData {
+                    runner: Arc::clone(&rt),
+                    env,
+                    binary,
+                });
+            }),
+            Box::new(move || {
+                let _ = tx_disc.send(RouterMsg::EvictRunner(rid.clone()));
+            }),
+        )?;
         self.aios.insert(runner.runner_id.clone(), aio);
         Ok(())
     }
 
     fn arm_frontend_channel(&mut self, frontend: Arc<FrontendRuntime>) -> Result<(), nng::Error> {
-        let tx_pn = self.tx.clone();
+        let tx_msg = self.tx.clone();
+        let tx_disc = self.tx.clone();
         let sid = frontend.session_id.clone();
-        frontend
-            .channel
-            .pipe_notify(move |_pipe: Pipe, event: PipeEvent| {
-                if matches!(event, PipeEvent::RemovePost) {
-                    let _ = tx_pn.send(RouterMsg::DropFrontend(sid.clone()));
-                }
-            })?;
-        let tx = self.tx.clone();
         let fe = Arc::clone(&frontend);
-        let aio = Aio::new(move |aio: Aio, res: AioResult| match res {
-            AioResult::Recv(Ok(msg)) => {
-                // Re-arm BEFORE forwarding so the recv is always armed.
-                if let Err(e) = fe.channel.recv_async(&aio) {
-                    eprintln!("[orch] frontend {} re-arm failed: {e}", fe.session_id);
-                }
-                if let Some((env, binary)) = deframe_parts(&msg[..]) {
-                    let _ = tx.send(RouterMsg::FrontendData {
-                        frontend: Arc::clone(&fe),
-                        env,
-                        binary: binary.to_vec(),
-                    });
-                } else {
-                    // Never-swallow (the 2026-08-31 UI smoke-test lesson): an unparseable
-                    // frame would otherwise vanish with NO trace on either side — the
-                    // client saw its TX, the router saw nothing. A missing required field
-                    // (id, work_id) is the classic cause; log it loudly so the seam bug
-                    // shows itself.
-                    eprintln!(
-                        "[orch] frontend {} sent an undecodable frame ({} bytes) — dropped \
-                         (missing required fields? id / work_id)",
-                        fe.session_id,
-                        msg.len()
-                    );
-                }
-            }
-            AioResult::Recv(Err(e)) => {
-                println!("[orch] frontend {} channel closed: {e}", fe.session_id);
-                let _ = tx.send(RouterMsg::DropFrontend(fe.session_id.clone()));
-            }
-            _ => {}
-        })?;
-        frontend.channel.recv_async(&aio)?;
+        let aio = transport::arm_peer_channel(
+            &frontend.channel,
+            Box::new(move |env, binary| {
+                let _ = tx_msg.send(RouterMsg::FrontendData {
+                    frontend: Arc::clone(&fe),
+                    env,
+                    binary,
+                });
+            }),
+            Box::new(move || {
+                let _ = tx_disc.send(RouterMsg::DropFrontend(sid.clone()));
+            }),
+        )?;
         self.aios.insert(frontend.session_id.clone(), aio);
         Ok(())
     }
@@ -1143,11 +930,23 @@ impl Router {
     // ── Message handling & routing (§6) ──────────────────────────────────────
 
     fn on_runner_message(&mut self, runner: &RunnerRuntime, env: Envelope, binary: Vec<u8>) {
+        // Liveness is stamped router-side now (the shared transport's callbacks forward,
+        // they never touch state — P1). Same semantics: every inbound runner message,
+        // including `activity`, refreshes `last_activity`.
+        runner.last_activity.store(now_ms(), Ordering::Relaxed);
         match &env.body {
             Message::Result(r) => {
+                // `Aborted` is terminal (v2-era wire addition): a runner unwinding at a
+                // checkpoint after `abort`/`work_close` returns its credit here. For
+                // close-initiated aborts the slot was already released at abort time — the
+                // saturating decrement makes the late terminal harmless (bugfix-only
+                // change, classic is otherwise frozen).
                 let terminal = matches!(
                     r.status,
-                    Status::Complete | Status::FatalError | Status::ValidationError
+                    Status::Complete
+                        | Status::FatalError
+                        | Status::ValidationError
+                        | Status::Aborted
                 );
                 if terminal {
                     let _ = runner.outstanding.fetch_update(
@@ -1158,7 +957,7 @@ impl Router {
                 }
                 self.route_result(env, terminal, binary);
             }
-            Message::Activity(_) => { /* last_activity already bumped on recv */ }
+            Message::Activity(_) => { /* last_activity bumped above */ }
             other => println!("[orch] runner {} -> {other:?}", runner.runner_id),
         }
     }
@@ -1895,7 +1694,7 @@ impl Router {
     /// JSON parser here.
     fn route_result(&mut self, env: Envelope, terminal: bool, binary: Vec<u8>) {
         let (work_id, revision, status) = match &env.body {
-            Message::Result(r) => (r.work_id.clone(), r.revision, r.status.clone()),
+            Message::Result(r) => (r.work_id.clone(), r.revision, r.status),
             _ => return,
         };
         let session_id = env.session_id.clone().unwrap_or_default();
@@ -2961,37 +2760,23 @@ impl Broker {
         Arc::new(Broker { tx })
     }
 
-    /// Arm the control REP socket's recv loop. The callback forwards each handshake to the router
-    /// and waits (briefly, on a one-shot channel) for the reply envelope, which it sends back on the
-    /// REP socket. REP enforces recv→send alternation, so we send the reply *then* re-arm.
+    /// Arm the control REP socket's recv loop — via the shared plumbing in
+    /// `wire::transport::arm_control_rep`; classic only does the mailbox round-trip
+    /// (the router thread does the actual work) and keeps the strong `Aio` ref alive
+    /// through the router's keep-alive map.
     fn arm_control(self: &Arc<Broker>, control: Arc<Socket>) -> Result<(), nng::Error> {
         let broker = Arc::clone(self);
-        let ctl = Arc::clone(&control);
-        let aio = Aio::new(move |aio: Aio, res: AioResult| match res {
-            AioResult::Recv(Ok(msg)) => {
-                // REP must reply to every request before the next recv, so always produce one.
-                let reply = match deframe(&msg[..]) {
-                    Some(env) => {
-                        let reply_to = env.id.clone();
-                        let (rtx, rrx) = mpsc::channel();
-                        let _ = broker.tx.send(RouterMsg::Handshake { env, reply: rtx });
-                        rrx.recv().unwrap_or_else(|_| {
-                            orch_err(Some(&reply_to), "router_unavailable", "router stopped")
-                        })
-                    }
-                    None => orch_err(None, "bad_frame", "undecodable handshake"),
-                };
-                if let Err((_m, e)) = ctl.try_send(frame_envelope(&reply).as_slice()) {
-                    eprintln!("[orch] control reply failed: {e} (handshake peer gone?)");
-                }
-                if let Err(e) = ctl.recv_async(&aio) {
-                    eprintln!("[orch] control re-arm failed: {e}");
-                }
-            }
-            AioResult::Recv(Err(e)) => println!("[orch] control socket closed: {e}"),
-            _ => {}
-        })?;
-        control.recv_async(&aio)?;
+        let aio = transport::arm_control_rep(
+            &control,
+            Box::new(move |env| {
+                let reply_to = env.id.clone();
+                let (rtx, rrx) = mpsc::channel();
+                let _ = broker.tx.send(RouterMsg::Handshake { env, reply: rtx });
+                rrx.recv().unwrap_or_else(|_| {
+                    orch_err(Some(&reply_to), "router_unavailable", "router stopped")
+                })
+            }),
+        )?;
         // Hand the strong Aio ref to the router so the loop stays alive.
         let _ = self.tx.send(RouterMsg::KeepAlive {
             key: "control".to_string(),
@@ -3208,46 +2993,6 @@ fn orch_err(reply_to: Option<&str>, code: &str, message: &str) -> Envelope {
     }
 }
 
-// ─── Control-endpoint listen (stale-socket handling, §2.2) ───────────────────
-
-/// Listen on the control URL. For IPC, a hard crash can leave a stale socket file; on
-/// `AddressInUse` we probe-connect, and if nothing answers, unlink the stale file and retry once.
-/// TCP/inproc have no stale-file problem.
-fn listen_control(sock: &Socket, url: &str) -> Result<(), nng::Error> {
-    match sock.listen(url) {
-        Ok(()) => Ok(()),
-        Err(nng::Error::AddressInUse) if url.starts_with("ipc://") => {
-            let path = url.trim_start_matches("ipc://");
-            let answered = Socket::new(Protocol::Pair1)
-                .and_then(|p| p.dial(url))
-                .is_ok();
-            if !answered {
-                let _ = std::fs::remove_file(path);
-                sock.listen(url)
-            } else {
-                Err(nng::Error::AddressInUse)
-            }
-        }
-        Err(e) => Err(e),
-    }
-}
-
-// ─── Hang detector (§7) ──────────────────────────────────────────────────────
-
-/// A dedicated slow loop (design §7 explicitly permits this) that asks the router to scan for
-/// wedged runners (outstanding work with no activity past the timeout). The scan itself runs on the
-/// router thread; this thread only paces it.
-fn start_hang_detector(tx: mpsc::Sender<RouterMsg>) {
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(Duration::from_secs(1));
-            if tx.send(RouterMsg::Tick).is_err() {
-                break; // router gone
-            }
-        }
-    });
-}
-
 // ─── main ────────────────────────────────────────────────────────────────────
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -3266,7 +3011,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let broker = Broker::start(config);
     broker.arm_control(Arc::clone(&control))?;
-    start_hang_detector(broker.tx.clone());
+    transport::start_hang_detector(|| RouterMsg::Tick, broker.tx.clone());
 
     println!("[orch] control endpoint (REP) listening on {control_url}");
     println!("[orch] broker ready — waiting for peers");
@@ -3287,9 +3032,12 @@ mod tests {
         AnalysisResult, AnalysisWork, DataResult, Register, ResultMsg, ResultPayload, Settings,
         Work,
     };
-    use nng::options::RecvTimeout;
+    use nng::Listener;
+    use nng::options::{Options, RecvBufferSize, RecvTimeout, SendBufferSize};
     use serde_json::Value;
     use std::sync::atomic::AtomicU64 as SeqAtomic;
+    use wire::framing::{deframe, deframe_parts};
+    use wire::transport::readback_url;
 
     static TEST_SEQ: SeqAtomic = SeqAtomic::new(0);
     fn unique() -> u64 {
@@ -3399,6 +3147,7 @@ mod tests {
                 base_uri,
             }],
             priority,
+            slots: 1,
             environment: Value::Null,
         }));
         req.send(frame_envelope(&reg).as_slice())
@@ -3922,7 +3671,7 @@ mod tests {
         let (broker, _ctl) = start_broker(url.clone());
 
         let probe = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../refactor_design/probe_register_disconnect.R");
+            .join("../../../refactor_design/probe_register_disconnect.R");
         let status = match std::process::Command::new("Rscript")
             .arg(&probe)
             .arg(&url)
@@ -4566,6 +4315,7 @@ mod tests {
             runner_id: None,
             capabilities: caps,
             priority: 0,
+            slots: 1,
             environment: Value::Null,
         }));
         req.send(frame_envelope(&reg).as_slice())
@@ -4972,7 +4722,7 @@ mod tests {
         let (back, tail) = deframe_parts(&framed).expect("frame with tail");
         assert!(matches!(back.body, Message::Ping));
         assert_eq!(tail, tsv, "the tail survives untouched");
-        let json_only = frame_bytes(&json);
+        let json_only = wire::framing::frame_bytes(&json);
         let (back2, tail2) = deframe_parts(&json_only).expect("json-only frame");
         assert!(matches!(back2.body, Message::Ping));
         assert!(tail2.is_empty());

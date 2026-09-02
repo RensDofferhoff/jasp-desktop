@@ -39,7 +39,7 @@ step (see `refactor_design/jaspbase-plugin.md`).
 # 1. Orchestrator + runner (one shot)
 sh refactor_design/launch_alpha.sh
 #   or by hand, in two terminals:
-#     cargo run --manifest-path orchestrator/Cargo.toml   # tcp://127.0.0.1:9555 + :9556
+#     cargo run --manifest-path orchestrator/Cargo.toml --bin jasp-orchestrator   # tcp://127.0.0.1:9555 (workspace: add --bin for a specific binary)
 #     Rscript refactor_design/runner_alpha.R              # dials :9556
 
 # 2. JASP (separate terminal) — normal Linux build, e.g. in the devcontainer

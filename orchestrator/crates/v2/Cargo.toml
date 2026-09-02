@@ -1,0 +1,16 @@
+[package]
+name = "v2"
+version.workspace = true
+edition.workspace = true
+description = "NEO JASP orchestrator v2 — the scheduler: pull/credit dispatch, router-owned queues, (work_id, revision) supersession, abort-push at checkpoints. Design: refactor_design/orchestrator-v2-design.md."
+
+[[bin]]
+name = "jasp-orchestrator-v2"
+path = "src/main.rs"
+
+[dependencies]
+wire = { workspace = true }
+nng = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }

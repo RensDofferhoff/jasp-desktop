@@ -165,6 +165,12 @@ is_err <- function(x) {
   else inherits(x, "errorValue")
 }
 
+# Is an aio's recv still pending? (nanonext's `$data` is an *unresolvedValue*
+# placeholder — not NULL — until completion; probe-verified.)
+still_pending <- function(ra) {
+  tryCatch(isTRUE(unresolved(ra$data)), error = function(e) TRUE)
+}
+
 # Liveness ping (§19.4/§25.4). Sent once per loop pass — reaching the loop is real activity (a work
 # cycle finished / runner ready), so no work_id is attached and there is nothing to rate-limit: the
 # cadence is bounded by the work rate itself. The orchestrator bumps the runner's last_activity on
@@ -173,6 +179,110 @@ send_activity <- function(sock) {
   act <- list(v = 1, id = sprintf("rn-act-%s", format(Sys.time(), "%s")), type = "activity")
   send(sock, pack_envelope(toJSON(act, auto_unbox = TRUE, null = "null")),
        mode = "raw", block = 100L)
+}
+
+# ── the abort plane (orchestrator-v2 §7): two planes, one flag ─────────────
+#
+# `abort {work_id}` is the ONE unsolicited message a busy runner may see (works pull,
+# aborts push). Two planes, one flag:
+#
+#   * Wrapper plane (this section): while run_analysis blocks the R thread, the PAIR
+#     socket is free (the loop's recv consumed the work), so a mid-run abort parks in
+#     a pending recv_aio. Arming/disarming never touches R state mid-run.
+#   * R plane (checkpoint-gated): jaspBase's check code calls `jasp_checkpoint()` at
+#     its cooperative unwind points (that integration lands in the jaspBase bridge —
+#     this script defines the hook). A checkpoint DRAINS the pending recv
+#     non-blocking; an abort for the running work raises the `jaspAbort` condition,
+#     which unwinds run_analysis (nothing in jaspBase catches it — it is not an
+#     `error`), and the loop sends `result(status="aborted")`.
+#
+# No protocol can beat checkpoint density (§7): an analysis grinding in a C call sees
+# nothing, hears nothing, aborts never — the router has no "aborting soon" state and
+# simply keeps seeing RUNNING until the terminal (or its hang detector recycles us).
+# A raced completion (the run finished before the abort was processed) pops the abort
+# at loop-top: a documented NO-OP.
+
+# The abort state: `.ab$current` = the running (work_id, revision); `.ab$aio` = the
+# pending mid-run recv; `.ab$hit` = an abort for the current work was seen.
+.ab <- new.env(parent = emptyenv())
+
+arm_abort_plane <- function(sock, work) {
+  .ab$current <- list(work_id = work$work_id, revision = work$revision,
+                      session_id = work$session_id, id = work$id)
+  .ab$hit <- FALSE
+  # One pending recv for the whole run — the socket is otherwise idle (pull
+  # discipline: nothing but an abort may arrive). Wrapped: a pipe error mid-run
+  # surfaces at the next loop recv either way.
+  .ab$aio <- tryCatch(recv_aio(sock, mode = "raw"), error = function(e) NULL)
+  invisible(TRUE)
+}
+
+disarm_abort_plane <- function(sock) {
+  ra <- .ab$aio
+  .ab$aio <- NULL
+  if (is.null(ra)) return(invisible(FALSE))
+  if (still_pending(ra)) {
+    # Nothing arrived mid-run: cancel the pending recv (a cancelled aio's data is
+    # an ERROR value — never parse it; pipe trouble surfaces at the loop-top recv).
+    tryCatch(stop_aio(ra), error = function(e) NULL)
+    return(invisible(FALSE))
+  }
+  if (is_err(ra$data)) return(invisible(FALSE))  # pipe error: the loop handles it
+  note_abort_frame(ra$data)
+  invisible(.ab$hit)
+}
+
+# Parse a drained frame; flag (and log) an abort for the running work. Anything else
+# arriving mid-run would violate pull discipline — logged loudly, never silent.
+note_abort_frame <- function(raw) {
+  if (is_err(raw) || length(raw) == 0) return(invisible(FALSE))
+  parsed <- tryCatch(parse_envelope(raw), error = function(e) NULL)
+  msg <- if (is.null(parsed)) NULL else
+    tryCatch(fromJSON(parsed$json, simplifyVector = FALSE), error = function(e) NULL)
+  if (is.null(msg)) {
+    cat("[runner] WARN: undecodable frame drained mid-run — dropped\n")
+    return(invisible(FALSE))
+  }
+  if ((msg$type %||% "") == "abort") {
+    if (!is.null(msg$work_id) && !is.null(.ab$current) &&
+        msg$work_id == .ab$current$work_id) {
+      .ab$hit <- TRUE
+      cat(sprintf("[runner] abort received for work_id=%s (drained)\n", msg$work_id))
+    } else {
+      cat(sprintf("[runner] abort for work_id=%s ignored (raced/stale; running %s)\n",
+                  msg$work_id %||% "?", .ab$current$work_id %||% "?"))
+    }
+    return(invisible(TRUE))
+  }
+  cat(sprintf("[runner] WARN: non-abort type=%s arrived mid-run (pull violation?) — dropped\n",
+              msg$type %||% "?"))
+  invisible(FALSE)
+}
+
+# The checkpoint hook (R plane). Returns TRUE if an abort for the running work has
+# arrived; also raises `jaspAbort` so the caller unwinds cooperatively. jaspBase's
+# check code calls this at its unwind points — until that lands, the only callers
+# are the run boundaries (arm/disarm), which is correct but coarse.
+jasp_checkpoint <- function() {
+  ra <- .ab$aio
+  if (!is.null(ra) && !still_pending(ra) && !is_err(ra$data)) {
+    note_abort_frame(ra$data)
+    .ab$aio <- NULL  # the frame is consumed — disarm must not re-note it
+  }
+  if (isTRUE(.ab$hit)) {
+    stop(structure(list(message = sprintf("abort requested for work_id=%s",
+                                          .ab$current$work_id %||% "?")),
+                   class = c("jaspAbort", "condition", "error")), call. = FALSE)
+  }
+  invisible(FALSE)
+}
+
+# The aborted terminal payload (minimal — the router discards it by revision or
+# drops it on work_close; content is diagnostics only).
+aborted_result <- function(work) {
+  list(results = list(title = "aborted",
+                      errorMessage = "the analysis was aborted at a checkpoint"),
+       status = "aborted")
 }
 
 # ── the bridge: engine stand-in natives (globalenv) ───────────────────────────
@@ -1259,19 +1369,47 @@ main <- function(control_url = ORCH_URL) {
     if (is.null(parsed)) next
     work <- tryCatch(fromJSON(parsed$json, simplifyVector = FALSE), error = function(e) NULL)
     if (is.null(work)) next
-    if ((work$type %||% "") != "work") { cat(sprintf("[runner] ignoring type=%s\n", work$type)); next }
+    if ((work$type %||% "") != "work") {
+      # Loop-top type-switch (§7 as-built gap 2): `abort` here is a RACED COMPLETION —
+      # the router pushed it while we were finishing; the work it names already
+      # terminaled. A documented NO-OP (the socket is drained; nothing is lost).
+      if ((work$type %||% "") == "abort")
+        cat(sprintf("[runner] abort popped at loop-top (raced completion; work_id=%s) — no-op\n",
+                    work$work_id %||% "?"))
+      else
+        cat(sprintf("[runner] ignoring type=%s\n", work$type))
+      next
+    }
 
     cat(sprintf("[runner] <- work work_id=%s revision=%s base_revision=%s analysis=%s\n",
                 work$work_id, work$revision, work$base_revision %||% "-",
                 work$payload$analysis %||% "?"))
     t_work <- now_s()
 
-    out <- tryCatch(run_analysis(work), error = function(e) {
-      cat(sprintf("[runner] analysis error: %s\n", conditionMessage(e)))
-      list(results = list(error = TRUE, errorMessage = conditionMessage(e),
-                          title = work$payload$analysis %||% "error"),
-           status = "fatalError")
-    })
+    # The abort plane: armed for the whole run, drained at its boundaries (and at
+    # jaspBase checkpoints, once the bridge calls jasp_checkpoint()).
+    arm_abort_plane(sock, work)
+    out <- tryCatch(
+      run_analysis(work),
+      jaspAbort = function(c) {
+        cat(sprintf("[runner] cooperative unwind: %s\n", conditionMessage(c)))
+        list(results = list(title = "aborted",
+                            errorMessage = conditionMessage(c)),
+             status = "aborted")
+      },
+      error = function(e) {
+        cat(sprintf("[runner] analysis error: %s\n", conditionMessage(e)))
+        list(results = list(error = TRUE, errorMessage = conditionMessage(e),
+                            title = work$payload$analysis %||% "error"),
+             status = "fatalError")
+      })
+    if (isTRUE(disarm_abort_plane(sock)) && (out$status %||% "") != "aborted") {
+      # The abort landed after the last checkpoint but before the run finished:
+      # the run's own result is stale at the router (revision check) — report the
+      # abort, the truthful terminal for what the router asked.
+      cat("[runner] abort drained at run boundary — reporting aborted\n")
+      out <- aborted_result(work)
+    }
 
     result_msg <- list(
       v          = 1,

@@ -34,7 +34,7 @@
 //! dies is reported by the router as `RunnerGone` (it noticed the channel close) and simply allows
 //! re-provisioning on the next `Provision`.
 
-use crate::messages::ModuleInfo;
+use crate::ModuleInfo;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -81,6 +81,17 @@ pub enum ProvReq {
     /// A runner for these modules/lanes was evicted or died. Modules: forget, so a later
     /// `Provision` re-spawns. Lanes: re-spawn immediately (auto-restart — lanes are pinned).
     RunnerGone {
+        modules: Vec<String>,
+        lanes: Vec<LaneKind>,
+    },
+    /// **v2 (additive; classic never sends it):** the router's hang detector declared a
+    /// wedged runner (outstanding work, no activity past the timeout). Kill every spawned
+    /// child providing any of these modules/lanes — the process death surfaces as a pipe
+    /// close on its channel, which evicts it router-side with full op-aware teardown.
+    /// Lanes re-spawn immediately (auto-restart, same as `RunnerGone`). Children nobody
+    /// spawned (attached runners) match nothing here; the router evicts those from its
+    /// books directly.
+    Recycle {
         modules: Vec<String>,
         lanes: Vec<LaneKind>,
     },
@@ -228,29 +239,55 @@ impl RunnerProvisioner {
                 }
             }
             ProvReq::RunnerGone { modules, lanes } => {
-                for m in modules {
-                    // Forget the module so a future Provision re-spawns. Leave the process record
-                    // for the reaper if it is still around (it may already be dead).
-                    if let Some(pid) = self.active.remove(&m)
-                        && let Some(s) = self.spawned.get_mut(&pid)
-                    {
-                        // If it was registered and is now gone, drop our claim on its other
-                        // modules too only when the process is reaped; here we just release `m`.
-                        if let Provides::Modules(modules) = &mut s.provides {
-                            modules.retain(|x| x != &m);
-                        }
+                self.forget(modules, lanes);
+            }
+            ProvReq::Recycle { modules, lanes } => {
+                // Kill every spawned child providing any of these (the reaper cleans up
+                // the records; the pipe close evicts it router-side).
+                let mut victims = 0usize;
+                for s in self.spawned.values_mut() {
+                    let matches = match &s.provides {
+                        Provides::Modules(ms) => ms.iter().any(|m| modules.contains(m)),
+                        Provides::Lane(l) => lanes.contains(l),
+                    };
+                    if matches {
+                        let _ = s.child.kill();
+                        victims += 1;
                     }
                 }
-                // Lanes are pinned: a registered lane that died is re-spawned immediately
-                // (auto-restart). Every respawn is caused by exactly one death of a registered
-                // lane, so this cannot loop on its own.
-                for lane in lanes {
-                    self.lane_active.remove(&lane);
-                    self.provision_lane(lane);
-                }
+                println!(
+                    "[provisioner] recycle: killed {victims} wedged child(ren) \
+                     (modules {modules:?}, lanes {lanes:?})"
+                );
+                // Same bookkeeping as RunnerGone: forget modules, re-spawn lanes
+                // (auto-restart). The kill makes lane re-spawn immediate.
+                self.forget(modules, lanes);
             }
         }
         true
+    }
+
+    /// `RunnerGone`/`Recycle` bookkeeping: forget modules (so a future `Provision`
+    /// re-spawns), re-spawn lanes immediately (auto-restart — lanes are pinned; every
+    /// respawn is caused by exactly one death, so this cannot loop on its own).
+    fn forget(&mut self, modules: Vec<String>, lanes: Vec<LaneKind>) {
+        for m in modules {
+            // Forget the module so a future Provision re-spawns. Leave the process record
+            // for the reaper if it is still around (it may already be dead).
+            if let Some(pid) = self.active.remove(&m)
+                && let Some(s) = self.spawned.get_mut(&pid)
+            {
+                // If it was registered and is now gone, drop our claim on its other
+                // modules too only when the process is reaped; here we just release `m`.
+                if let Provides::Modules(modules) = &mut s.provides {
+                    modules.retain(|x| x != &m);
+                }
+            }
+        }
+        for lane in lanes {
+            self.lane_active.remove(&lane);
+            self.provision_lane(lane);
+        }
     }
 
     /// Spawn a runner for `module` if nothing is already providing it.
@@ -533,7 +570,7 @@ fn parse_dcf(text: &str) -> HashMap<String, String> {
 /// byte outside RFC 3986's unreserved set (plus `/`) so paths with spaces or non-ASCII survive.
 /// `file://` on desktop; for the webapp the same path logic serves `http://` — the scheme is the
 /// only thing that changes.
-pub(crate) fn file_uri(dir: &Path) -> String {
+pub fn file_uri(dir: &Path) -> String {
     let path = dir
         .to_str()
         .map(str::to_string)

@@ -1239,7 +1239,7 @@ mod tests {
     #[test]
     fn encoding_torture_csv_lane_contract() {
         let src = format!(
-            "{}/../test_data/encoding_torture.csv",
+            "{}/../../../test_data/encoding_torture.csv",
             env!("CARGO_MANIFEST_DIR")
         );
         let dir = std::env::temp_dir().join("csv2arrow-tests-torture");

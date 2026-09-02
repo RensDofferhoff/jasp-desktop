@@ -1,0 +1,14 @@
+[package]
+name = "wire"
+version.workspace = true
+edition.workspace = true
+description = "NEO JASP wire protocol: message types + framing (+ shared NNG transport plumbing) — the single source of truth shared by every orchestrator and the data worker."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+# The shared channel/transport plumbing (extract, don't fork — orchestrator-v2
+# design §11 rule 1: the hard-won NNG traps live in exactly one place, and both
+# orchestrators use it).
+nng = { workspace = true }

@@ -144,6 +144,28 @@ pub enum WorkPayload {
     Data(DataWork),
 }
 
+/// The work/result kind discriminator (§19.1/§19.2) — orchestrator-side bookkeeping where
+/// the full kind-specific payload is not needed (routing records, kind-correct synthetic
+/// results). Not a wire type: on the wire the kind is the tag of the adjacently-tagged
+/// payload enums.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkKind {
+    AnalysisRClassicJaspbase,
+    Rcode,
+    Data,
+}
+
+impl WorkPayload {
+    /// The kind discriminator of this work (§19.1).
+    pub fn kind(&self) -> WorkKind {
+        match self {
+            WorkPayload::AnalysisRClassicJaspbase(_) => WorkKind::AnalysisRClassicJaspbase,
+            WorkPayload::Rcode(_) => WorkKind::Rcode,
+            WorkPayload::Data(_) => WorkKind::Data,
+        }
+    }
+}
+
 /// A data-plane work unit (frontend → orchestrator → data lane). The lane is **stateless**:
 /// the orchestrator assigns identity at dispatch — for `data_open` it mints the `dataset_id`,
 /// fills in the `cache_path` (the lane writes the converted `.arrow` there), and tracks the
@@ -549,13 +571,19 @@ pub struct DataChanged {
 }
 
 /// Result lifecycle status (wire values are camelCase, matching the existing engine strings).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum Status {
     Running,
     Complete,
     FatalError,
     ValidationError,
+    /// **v2-era (additive; `v` stays 1):** the runner unwound cooperatively at a checkpoint
+    /// after an `abort` — a TERMINAL status (it returns a credit). Produced by the runner's
+    /// checkpoint drain (orchestrator-v2 design §7); a raced normal completion instead
+    /// carries whatever status the run actually produced, and the router discards it by
+    /// revision.
+    Aborted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -658,10 +686,23 @@ pub struct Register {
     /// Higher = preferred when multiple runners can satisfy the same work.
     #[serde(default)]
     pub priority: u32,
+    /// **v2-era (additive; `v` stays 1):** the executor's credit window — how many work
+    /// units it may hold at once (`register` = the boot credit grant). Local R runners → 1
+    /// (R is single-threaded); the Rust data worker → 1 (one job at a time, as built);
+    /// remote pools → N (reserve). Classic ignores the field (its runners default to 1 and
+    /// it never checks) — the default keeps old peers wire-compatible.
+    #[serde(default = "Register::default_slots")]
+    pub slots: u32,
     /// Hardware/runtime environment (`r_version`, `gpu`, `high_memory`) for resource-matched
     /// routing (§9.5). Not a capability — these *qualify* how a capability runs.
     #[serde(default)]
     pub environment: Value,
+}
+
+impl Register {
+    fn default_slots() -> u32 {
+        1
+    }
 }
 
 /// A capability a runner advertises — the routing-key projection of a work `kind` (§9.3).

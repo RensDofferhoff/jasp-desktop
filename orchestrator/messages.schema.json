@@ -336,6 +336,13 @@
             "null"
           ]
         },
+        "slots": {
+          "description": "**v2-era (additive; `v` stays 1):** the executor's credit window — how many work units it may hold at once (`register` = the boot credit grant). Local R runners → 1 (R is single-threaded); the Rust data worker → 1 (one job at a time, as built); remote pools → N (reserve). Classic ignores the field (its runners default to 1 and it never checks) — the default keeps old peers wire-compatible.",
+          "default": 1,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
         "type": {
           "type": "string",
           "enum": [
@@ -1409,12 +1416,23 @@
     },
     "Status": {
       "description": "Result lifecycle status (wire values are camelCase, matching the existing engine strings).",
-      "type": "string",
-      "enum": [
-        "running",
-        "complete",
-        "fatalError",
-        "validationError"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "running",
+            "complete",
+            "fatalError",
+            "validationError"
+          ]
+        },
+        {
+          "description": "**v2-era (additive; `v` stays 1):** the runner unwound cooperatively at a checkpoint after an `abort` — a TERMINAL status (it returns a credit). Produced by the runner's checkpoint drain (orchestrator-v2 design §7); a raced normal completion instead carries whatever status the run actually produced, and the router discards it by revision.",
+          "type": "string",
+          "enum": [
+            "aborted"
+          ]
+        }
       ]
     },
     "ValidationIssue": {

@@ -1,0 +1,20 @@
+[package]
+name = "data_runner"
+version.workspace = true
+edition.workspace = true
+description = "NEO JASP data-runner — the Rust data-plane worker (CSV open, windowed views, the edit family). Renamed from 'lane' (orchestrator-v2 design §11: 'lane' was always CSV-lane vocabulary that outgrew itself)."
+
+[[bin]]
+name = "jasp-data-runner"
+path = "src/main.rs"
+
+[dependencies]
+wire = { workspace = true }
+nng = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+arrow = { workspace = true }
+arrow-ipc = { workspace = true }
+csv = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }
