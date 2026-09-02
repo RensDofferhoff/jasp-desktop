@@ -1,9 +1,29 @@
 # NEO JASP — A Frontend/Backend Separation and Data Refactor
 
-> Status: Draft for discussion · Doc JASP-NEO-001 · supersedes `architecture-refactor-plan.md`
-> and `comms-protocol-spec.md`, which are merged here. **Part I** is the architecture (the
-> *why* and the *shape*); **Part II** is the normative wire protocol (the *exactly what*).
-> Where they disagree, Part II wins.
+> Status: **implemented in the large** — amended 2026-09-02 after the data-edit era, the
+> data-view increments, and the Great Excision (Cuts 1–7). Doc JASP-NEO-001 · supersedes
+> `architecture-refactor-plan.md` and `comms-protocol-spec.md`, which are merged here.
+> **Part I** is the architecture (the *why* and the *shape*); **Part II** is the normative
+> wire protocol (the *exactly what*). Where they disagree, Part II wins.
+>
+> **Implementation status map** (2026-09-02) — where the implemented truth lives:
+>
+> | Subsystem | Status | Authoritative doc |
+> |---|---|---|
+> | Orchestrator broker/router, registration, PAIR channels | done + green | `orchestrator-router-design.md` |
+> | Dataset manager / `kind:"data"` open pipeline | done, live | `dataset-manager-as-implemented.md`, `HANDOVER-dataplane-done.md` |
+> | CSV→Arrow lane (sniffing, typing, levels) | done, measured | `HANDOVER-csvlane.md` |
+> | Data edit rail (ops, inverses, undo, edit chain) | done, live | `data-edit-design.md` (rev 4, D1–D11 frozen), `HANDOVER-dataedit.md` |
+> | Data view (chunks, sliding mode, render spec) | done (3 increments) | `data-view-design.md`, `data-view-format.md`, `HANDOVER-dataview-inc3.md` |
+> | Frontend post-excision (schema-only, providers) | done | `HANDOVER-post-excisions.md`, `HANDOVER-excision.md` |
+> | Multi-dataset fold / merge | landed | `merge-multidataset.md`, `HANDOVER-multidataset-fold.md` |
+> | Provisioner | **not yet implemented** | `orchestrator-provisioner-design.md` |
+> | `.jasp` save/open (§4.8/§8.4) | **not yet implemented** (frontend surfaces a clear NEO message) | — |
+> | Computed columns / filters as work kinds (§21.3) | **not yet implemented** (return as derivations) | `HANDOVER-excision.md` §return-designs |
+>
+> This spec remains the constitution; the "As implemented" notes (marked **[as built]**
+> throughout Part II) record where the shipped wire has settled. Unmarked entries are the
+> design target for the not-yet-built parts.
 
 ## Abstract
 
@@ -516,6 +536,14 @@ caller fills in the envelope's `work_id`; analyses use their stable instance id
   predicate and the `desiredPerformTypeFromAnalysisStatus()` status→command mapper. Work is triggered
   by an **explicit `submit`** from `Analysis::run()` — never by setting a status and waiting for a
   poller. Image save/edit/rewrite are deferred (logged stubs).
+
+> **[as built — post-excision]** The frontend has since been gutted of its entire legacy data
+> route (Cuts 1–7): `DataSet` holds **only the wire schema** (a table of contents), the grid
+> reads cells as `data_view` chunks, every edit is an op + stored inverse, and analysis forms
+> are served metadata by **injected schema providers** (`Workspace::formProvider()` —
+> ColumnsModel in the desktop app, DataSetProvider in test/engine worlds) rather than any
+> Filter/table-model machinery. The frontend architecture map is
+> `refactor_design/HANDOVER-post-excisions.md`.
 
 ### 5.2 Orchestrator
 
@@ -1756,6 +1784,15 @@ HTTP→NNG gateway. Don't invest further in extending the Qt RPC server as the w
 
 ## 12. Migration path (how to not die)
 
+> **[as built, 2026-09-02]** Phases 1–5 are **done**: the protocol is this spec (v1 on the
+> wire), `jaspRunner` runs real jaspBase analyses, the Rust orchestrator routes work + data
+> (router, dataset manager, two-lane data plane, edit rail, view chunks), and the Qt frontend
+> runs exclusively on `JaspClient` — `EngineSync`/`EngineRepresentation`/`IPCChannel` are gone
+> from the build. Phase 6 (jaspBase cleanup) is partial (the rbridge seam is bypassed; deep
+> untangling continues under GUT_TODO). The old `Engine/` and `R-Interface/` trees are out of
+> the build and scheduled for deletion; the legacy C++ data route that coexisted with the
+> lane during the migration has since been **deleted outright** (§13).
+
 This is a big refactor. Don't do it all at once. Suggested phases:
 
 ### Phase 1: Define the protocol spec
@@ -1799,6 +1836,18 @@ This is a big refactor. Don't do it all at once. Suggested phases:
 
 ## 13. What dies
 
+> **[as built, 2026-09-02 — the Great Excision]** Everything in this table is now dead in the
+> build, and the entire **legacy frontend data route that had silently accreted beside the
+> lane was deleted outright** (Cuts 1–7, ~25k lines, see `HANDOVER-excision.md`):
+> `DatabaseInterface` (sqlite persistence — Cut 3), the `Column`/`Label` mirror and
+> `DataSetTableModel` (Cut 5), the importers/exporters (Cut 2), `DataSetSyncer` (Cut 1), the
+> legacy undo command family (Cut 4), the Filter's per-row mask + `FilteredData` +
+> `VarInfoModelProxy` (Cut 6), and the label-editor/computed-column QML (Cut 7). The frontend
+> now holds **only the wire schema** — `DataSet` is a table of contents, forms are served by
+> injected schema providers (`Workspace::formProvider`, see `HANDOVER-post-excisions.md`),
+> and every cell value lives in the lane. Dependencies dropped with them: SQLite,
+> ReadStat/librdata/freexl, boost, gmp/mpfr, brotli.
+
 | Component | Replacement |
 |---|---|
 | `Engine/` (entire directory) | `jaspRunner` R package |
@@ -1818,7 +1867,9 @@ This is a big refactor. Don't do it all at once. Suggested phases:
 | Component | Why |
 |---|---|
 | `Common/` (minus enginedefinitions) | Logging, dirs, version — still useful |
-| `QMLComponents/` | Frontend UI. Doesn't need to change (much). |
+| `CommonData/` — **much slimmer post-excision** | `DataSet` (schema-only), `Workspace`, `Filter` (expression metadata), `UndoStack`/`DataEditCommand`, `VariableInfo` provider contract |
+| `QMLComponents/` | Frontend UI + forms; also the test/engine world's provider home (DataSetProvider) |
+| `Desktop/data/` models | GridModel (view chunks), ColumnsModel (the form provider), ColumnModel (variables editor), ExpandDataProxyModel (write path) |
 | `jaspBase` | Analysis framework. Stays, gets cleaned up later. |
 | Module analysis code | The actual statistics. Untouched. |
 | `Desktop/rpc/` | Maybe folded into orchestrator. Decide later. |
@@ -2109,18 +2160,19 @@ A minimal control message:
 A message with a binary payload (note `format`):
 
 ```json
-{ "v": 1, "type": "data_edit", "id": "9a41…77",
-  "dataset_id": "d1e2…", "op": "replace_column", "column": "score",
-  "format": "arrow_ipc/stream" }
+{ "v": 1, "type": "work", "id": "9a41…77",
+  "work_id": "w12", "kind": "data", "revision": 7, "dataset_ids": ["d1e2…"],
+  "payload": { "op": "data_edit", "edit": { "op": "insert_block", "row": 12, "col": 3 } } }
 ```
 
-…followed by the binary bytes (an Arrow IPC stream) in the same NNG message.
+…followed by the binary tail (the §1.2 escaped-TSV edit cells) in the same NNG message.
 
 ### 18.3 Binary payload formats (`format`)
 
 | `format` | Payload is | Used for |
 |---|---|---|
-| `arrow_ipc/stream` | An [Arrow IPC **stream**](https://arrow.apache.org/docs/format/Columnar.html) (one or more record batches), **LZ4-compressed** | Bulk column / block data (data edits, computed columns) |
+| `arrow_ipc/stream` | An [Arrow IPC **stream**](https://arrow.apache.org/docs/format/Columnar.html) (one or more record batches), **LZ4-compressed** | Bulk column / block data (future computed columns; `data_update` columns) |
+| `jasp/tsv-esc` *(as built, informal)* | The **§1.2 escaped-TSV** cell block of `data-view-format.md` — TAB-separated cells, `\\`-escapes, `\N` whole-cell null, locale-decimal numbers as text | The `data_view` chunk tail, the `insert_block`/`apply_inverse` edit tails, and the inverse bytes on edit results |
 | `arrow_ipc/file` | An Arrow IPC **file** (== Feather V2) | Rare; when a self-describing random-access buffer is wanted |
 | `raw/float64` | Tightly-packed IEEE-754 doubles, little-endian | A single numeric vector with no schema overhead |
 | `raw/int32` | Tightly-packed 32-bit ints, little-endian | A single integer/index vector |
@@ -2298,46 +2350,70 @@ Release a cached dataset.
 | `dataset_id` | string | ✓ | Which cache entry to free. |
 
 #### `data_edit`
-Apply an edit to a cached dataset. Small edits are JSON-only; bulk edits carry a binary
-payload (§18). The orchestrator bumps the dataset `revision` and **routes the edit as
-`kind:"data"` work to the Rust data-runner** (§5.4), which owns all cache writes and applies
-the edit to the Arrow file on disk; the orchestrator then broadcasts `data_changed` (§19.2)
-to all connected frontends. The orchestrator never touches the bytes — it owns the dataset
-index and `revision`, not the I/O.
+Apply an edit to a cached dataset. **[as built]** Edits ride the work pipeline like
+views/opens: `JaspClient::submitDataEdit` sends a `kind:"data"` `work` whose `payload`
+wraps the edit — `{op:"data_edit", source:"", cache_path:"", format:"", ingest:{…},
+row_offset:0, row_limit:null, columns:null, max_bytes:0, render:null, edit:{…}}` (the same
+envelope shape as `data_view`, one home for C++ data work; `source`/`cache_path` are empty
+and injected by the orchestrator at dispatch). The inner `edit` object is the
+adjacently-tagged edit op. The work's `revision` is the **D11 echo**: the frontend reads
+`DataSet::laneRevision()` at submit time; the orchestrator checks it against the dataset
+entry — a stale echo is a visible `validation_error` and nothing is applied (this is how the
+per-dataset edit chain stays ordered: one edit in flight, extras FIFO'd). The edit's cells
+(authored text) ride the frame's **binary tail** as §1.2 escaped TSV, never through JSON.
+The Rust data-runner is the sole writer; the orchestrator then broadcasts `data_changed`
+(§19.2) to all connected frontends.
 
 | Field | Type | Req | Description |
 |---|---|---|---|
-| `dataset_id` | string | ✓ | Target dataset. |
-| `op` | string | ✓ | One of the edit ops below. |
+| `dataset_id` | string | ✓ | Target dataset (on the `work`'s `dataset_ids`). |
+| `edit.op` | string | ✓ | One of the edit ops below. |
 | `format` | string | ◑ | Required when a binary payload is present. |
 | (op-specific) | – | – | See the op table. |
 
-Edit operations:
+Edit operations **[as built — `data-edit-design.md` §3, D1–D11]**:
 
-| `op` | JSON-only? | Op-specific fields | Binary payload |
-|---|---|---|---|
-| `set_cell` | ✓ | `row`, `column`, `value` | – |
-| `rename_column` | ✓ | `column`, `new_name` | – |
-| `delete_columns` | ✓ | `columns[]` | – |
-| `delete_rows` | ✓ | `rows[]` (or `start`,`count`) | – |
-| `replace_column` | ✗ | `column`, `n` | Arrow IPC stream: the new column (1 field) |
-| `add_columns` | ✗ | `names[]`, `n` | Arrow IPC stream: the new columns |
-| `insert_rows` | ✗ | `at`, `n` | Arrow IPC stream: the new rows |
-| `set_factor_levels` | ✓ | `column`, `levels[]` (ordered `{value, label}`) | – |
+| `edit.op` | Op-specific fields | Binary tail |
+|---|---|---|
+| `insert_block` | `row`, `col` (the anchor; absent `target_schema` = the lane recomputes — absorption/promotion, D4/D5 inference) | §1.2 escaped TSV cells |
+| `schema_change` | `target_schema`: an entry per column of the **post-edit** schema, matched by current `name`; only touched entries carry `type` (retype, coerce-or-error) or `display_name` (rename — P4: the lane derives + uniquifies the field name, P6) | – (JSON-only) |
+| `insert_cols` | `at`, `columns:[{name, type?}]` (declared spec; type absent → lane infers) | – |
+| `apply_inverse` | `inverse` (a previously returned inverse blob, **verbatim** — D10) | the stored inverse IPC bytes |
+| `delete_rows` / `delete_cols` | row/column selectors (served with their undo programs; see `data-edit-design.md` for the selector shape) | – |
 
-`set_factor_levels` carries the **full ordered level list** (`{value, label}` pairs); the
-array order *is* the ordinal ranking. The frontend editor sends the whole list on every
-change (no diffing). The orchestrator routes the edit to the **data-runner**, which rebuilds
-the dictionary of values in the new order (`ordered=1` for ordinals) and the `jasp:labels`
-overlay (§8.3), then rewrites the cache. Reordering rewrites the dictionary + indices, but
-the **values stay stable** and `jasp:labels` is value-keyed (no realignment), so `as scale`
-reads are invariant under reorder.
+Every completed edit's terminal `result` carries **undo material** in its payload:
+`inverse` (`{format, base_revision, ops}` — meta) whose IPC bytes ride the result frame's
+binary tail; the frontend stores and resubmits both **verbatim** (`apply_inverse`) and never
+interprets them. Undo is the re-application of stored inverses, not a rollback protocol.
+
+> The spec's *original* op sketch (`set_cell`, `rename_column`, `replace_column`,
+> `add_columns`, `insert_rows`, `set_factor_levels`, …) was superseded by the implemented
+> family above: one paste-shaped primitive (`insert_block`) + a declarative
+> whole-schema gesture (`schema_change`) + column birth (`insert_cols`) + the inverse
+> mechanism — instead of a zoo of per-gesture ops. `set_factor_levels` specifically is
+> **deferred to the labels era** (the B2 `jasp:labels` overlay; the editor died in Cut 7).
 
 ```json
-{ "v":1, "type":"data_edit", "id":"…", "dataset_id":"d1e2…",
-  "op":"set_factor_levels", "column":"condition",
-  "levels":[{"value":"3","label":"high"},{"value":"2","label":"medium"},{"value":"1","label":"low"}] }
+{ "v":1, "type":"work", "id":"…", "work_id":"w12", "kind":"data", "revision":7,
+  "dataset_ids":["d1e2…"],
+  "payload":{ "op":"data_edit", "source":"", "cache_path":"", "format":"",
+    "ingest":{"decimal_sep":","}, "row_offset":0, "row_limit":null, "columns":null,
+    "max_bytes":0, "render":null,
+    "edit":{ "op":"schema_change", "target_schema":[{"name":"age"}, {"name":"score","type":"ordinal"}] } } }
 ```
+
+#### `data_view` **[as built — `data-view-design.md` §4.1, `data-view-format.md`]**
+Fetch a chunk of cell values for a viewport. Also a `kind:"data"` `work` (the grid's
+`ViewFiller` builds it): the `payload` carries `{op:"data_view", row_offset, row_limit,
+columns (null = all, schema order — v1), max_bytes, render:{decimal, thousands, precision},
+ingest:{}}` (again `source`/`cache_path`/`format` empty/injected). The terminal `result`
+carries chunk metadata — `dataset_revision` (stale-chunk guard), `row_offset`, `row_count`,
+`truncated` — plus the **escaped-TSV cell bytes in the frame's binary tail** (never JSON).
+The lane is the only float→string converter: the frontend's locale separators ride every
+request (`render`), so display strings are computed where the data lives, once. Viewport
+moves re-request (`data-view-N` work ids are process-global); a `data_changed` restarts the
+buffer at the new revision (v1 whole-buffer semantics — range-aware invalidation is the
+pinned future slot).
 
 #### `ping`
 Liveness / capability probe. Answered by `pong`. No extra fields.
@@ -2410,8 +2486,16 @@ notification IS this terminal result.
 |---|---|---|---|
 | `dataset_id` | string | orchestrator | The minted identity the frontend references in later work (`dataset_ids`). |
 | `rows` | int | runner (lane) | Row count. |
-| `schema` | object[] | runner (lane) | The frontend's column view: `[{name, display_name, type, levels?, all_integer?}]` (§24). |
+| `schema` | object[] | runner (lane) | The frontend's column view — the column-info JSON of §24.6 **[as built]** (`{name, display_name, type, levels?, distinct_count?, numeric_levels?, value_count?, all_integer?}`). |
 | `error_message` | string | runner (lane) | Present when `status` is a failure. |
+
+> **[as built]** The same `kind:"data"` result also serves the **view** and **edit** ops
+> (they ride the identical work envelope, distinguished by `payload.op`):
+> - **`data_view`** results add `dataset_revision` (stale-chunk guard), `row_offset`,
+>   `row_count`, `truncated` — plus the escaped-TSV cell bytes on the frame's **binary tail**.
+> - **`data_edit`** results add the undo material: `inverse` meta (`{format, base_revision,
+>   ops}`) with its IPC bytes on the binary tail — stored + resubmitted verbatim by the
+>   frontend's undo command (`apply_inverse`, D10); the client never interprets either.
 
 > The dataset registry (index entry: id → current path, state, revision) does **not** cache
 > the schema. Schema is content, not routing metadata: it flows lane → frontend on the Data
@@ -2466,39 +2550,43 @@ The dataset is cached and ready to analyze.
 ```json
 { "v":1, "type":"dataset_ready", "id":"…", "reply_to":"…",
   "dataset_id":"d1e2…", "rows":50000,
-  "schema":[{"name":"age","display_name":"Age (years)","type":"int"},
-            {"name":"score","display_name":"Score","type":"double"},
-            {"name":"group","display_name":"Group","type":"factor","levels":["A","B"]}] }
+  "schema":[{"name":"age","display_name":"Age (years)","type":"scale","distinct_count":49871},
+            {"name":"score","display_name":"Score","type":"scale"},
+            {"name":"group","display_name":"Group","type":"nominal","levels":["A","B"]}] }
 ```
 
 #### `data_changed`
-Pushed whenever the cached dataset is mutated — by a frontend `data_edit` (§19.1) or a
-runner `data_update` (§19.4). Broadcast to **all** connected frontends (no `reply_to`). The
-frontend uses it to decide which work units to re-submit; the orchestrator does **not**
-auto-rerun or track work↔column dependencies.
+Pushed whenever a cached dataset is mutated — by a frontend edit, a view-consistent
+re-conversion, or (later) a runner `data_update`. Broadcast to **all** connected frontends
+(no `reply_to`, no `work_id` — consumers route by `dataset_id`: `Workspace` →
+`DataSet::applyRevision`). **[as built — `data-edit-design.md` §6, Increment 4]** one uniform
+buffer-invalidation push for **every** revision bump, whatever caused it. The frontend does
+**not** auto-rerun analyses off it (that relayer is not built); the grid restarts its view
+buffer at the new revision.
 
 | Field | Type | Req | Description |
 |---|---|---|---|
 | `dataset_id` | string | ✓ | Which dataset changed. |
-| `revision` | int | ✓ | Monotonic dataset revision (bumped on every mutation). |
-| `columns_added` | string[] | – | Canonical names of newly added columns. |
-| `columns_updated` | string[] | – | Canonical names of columns whose values changed. |
-| `columns_removed` | string[] | – | Canonical names of removed columns. |
-| `rows_changed` | bool | – | `true` if rows were added, removed, or reordered. |
-| `schema` | object | – | Full updated schema (same shape as `dataset_ready.schema`), present when columns were added or removed. |
+| `dataset_revision` | int | ✓ | Monotonic dataset revision (bumped on every mutation; the push's ordering key — a stale/replayed push is dropped by `applyRevision`'s `revision ≤ current` guard). |
+| `rows` | int | ◑ | Row count post-apply ("always" in practice — the lane knows the total; Option on the wire). |
+| `schema` | object[] | ◑ | Full updated schema, **present iff it changed** (the lane decides). Same per-column shape as the open payload (§24.6). |
+| `invalidation` | object | ✓ | The invalidation descriptor (always an object; v1 frontend semantics are whole-buffer — accepted, not range-applied; range-aware invalidation is the pinned future slot). |
+| `cause` | string | ◑ | **Diagnostics-only** (rides the envelope for `JASP_CLIENT_LOG`; never API): `edit` today; `derived` and `external` are reserved for the computed-column and backend-sync eras (`ChangeKind`). |
 
 ```json
 { "v":1, "type":"data_changed", "id":"…",
-  "dataset_id":"d1e2…", "revision":7,
-  "columns_added":["computed_z"], "columns_updated":[], "columns_removed":[],
-  "rows_changed":false,
-  "schema":[{"name":"age","display_name":"Age (years)","type":"int"}, …] }
+  "dataset_id":"d1e2…", "dataset_revision":7, "rows":50000,
+  "cause":"edit",
+  "schema":[{"name":"age","display_name":"Age (years)","type":"scale","distinct_count":49871}, …],
+  "invalidation":{} }
 ```
 
-> Runners are stateless — there is no sync/ack back to the runner. The orchestrator is the
-> sole cache writer; `data_changed` is the only mutation notification. The frontend is
-> responsible for re-submitting affected work units (it knows which work units reference
-> which columns).
+> The spec's original column-delta fields (`columns_added`/`columns_updated`/
+> `columns_removed`/`rows_changed`) were superseded by the implemented **schema-iff-changed +
+> invalidation descriptor** shape — one uniform push instead of a per-column diff the
+> frontend would have to reconcile. Runners are stateless — there is no sync/ack back.
+> The orchestrator remains the sole cache writer; `data_changed` is the only mutation
+> notification.
 
 #### `modules`
 The available modules — the analysis menu. Sent as the response to `list_modules`, and also
@@ -2666,7 +2754,7 @@ here; the orchestrator bumps the `revision` and **routes the write to the Rust d
 ```json
 { "v":1, "type":"data_update", "id":"…",
   "dataset_id":"d1e2…", "work_id":"a17",
-  "columns":[{"name":"computed_z","display_name":"Z-score","type":"double"}] }
+  "columns":[{"name":"computed_z","display_name":"Z-score","type":"scale"}] }
 ```
 
 > The runner is **stateless**: it sends the column and forgets. No ack, no sync. The **Rust
@@ -2894,22 +2982,27 @@ sequenceDiagram
     OR->>FE: result {…forwarded…}
 ```
 
-### 21.2 Bulk data edit (multipart)
+### 21.2 Bulk data edit **[as built]**
 
 ```mermaid
 sequenceDiagram
     participant FE as Frontend
     participant OR as Orchestrator
+    participant RU as Rust data-runner
     participant CA as Arrow cache
 
-    Note over FE: user pastes a 50k-row column
-    FE->>OR: data_edit {op:"replace_column", column, n, format:"arrow_ipc/stream"}<br/>+ [binary: Arrow IPC stream]
-    OR->>CA: splice the record batch into the cached table
-    OR->>FE: data_changed {dataset_id, revision, columns_updated}
-    Note over FE: frontend decides which work units<br/>to re-submit (orchestrator does not track this)
+    Note over FE: user pastes a block at (row, col)
+    FE->>OR: work {kind:"data", revision: laneRevision (D11 echo),<br/>payload:{op:"data_edit", edit:{op:"insert_block", row, col}}}<br/>+ [binary tail: §1.2 escaped TSV cells]
+    OR->>OR: check the revision echo against the dataset entry<br/>(stale → visible validation_error, nothing applied)
+    OR->>RU: work {payload, cache_path injected}
+    RU->>CA: apply the edit, write the next revision's cache file
+    RU-->>OR: result {status, inverse:{format, base_revision, ops}} + [inverse IPC bytes]<br/>(the frontend stores both verbatim — undo resubmits them)
+    OR->>FE: result {…forwarded…}
+    OR->>FE: data_changed {dataset_id, dataset_revision, rows,<br/>schema (iff changed), invalidation, cause:"edit"}
+    Note over FE: grid restarts its view buffer at the new revision;<br/>analyses re-run when their relayer is built
 ```
 
-### 21.3 Computed column (runner → cache → frontends)
+### 21.3 Computed column (runner → cache → frontends) — **future flow** (returns as a derivation; see `HANDOVER-excision.md`)
 
 ```mermaid
 sequenceDiagram
@@ -2923,7 +3016,7 @@ sequenceDiagram
     RU->>RU: compute the column
     RU->>OR: data_update {dataset_id, work_id, columns, [Arrow IPC stream]}
     OR->>CA: add/replace the column (canonical name + display map)
-    OR->>FE: data_changed {dataset_id, columns_added:[…]}
+    OR->>FE: data_changed {dataset_id, dataset_revision, rows, schema (iff changed), invalidation, cause:"derived"}
     RU->>OR: result {work_id, status:"complete"}
     OR->>FE: result {work_id, status:"complete"}
     Note over RU: stateless — sent the column and forgot it
@@ -3089,6 +3182,27 @@ labels*; ordinal ranking is the dictionary sequence order. Field-metadata keys:
 The per-cell `intsId` surrogate is dropped (Arrow's dictionary indices replace it).
 (**Validated**: the `ordered` flag round-trips through Feather V2 + LZ4 on R `arrow` 25.0.0 —
 see `refactor_design/poc/ordered_flag_roundtrip.R`.)
+
+> **[as built] The wire schema (column-info JSON) as the frontend consumes it**
+> (`data-model-design.md` §2/§3.4, `HANDOVER-csvlane.md`). Every schema the wire carries —
+> the open payload, `data_changed.schema` — is an array of:
+>
+> | Key | Type | Meaning |
+> |---|---|---|
+> | `name` | string | Canonical (R-syntactic) field name — identity |
+> | `display_name` | string | The user's real name (defaults to `name`) |
+> | `type` | string | **`"scale"` / `"ordinal"` / `"nominal"`** (the wire vocabulary; `nominalText` rides as nominal; there is no int/double/factor vocabulary on this wire) |
+> | `levels` | string[] | The categorical's dictionary (UI prefix, **capped** — `WIRE_LEVELS_CAP` = 10,000; the Arrow dictionary itself is never truncated) |
+> | `distinct_count` | uint | **Exact** distinct count — the single source of truth for level/numeric threshold checks (scale “levels” ≡ distinct count) |
+> | `numeric_levels` | int | Distinct **numeric** level count for categoricals (locale-aware, lane-computed) — gates min-numeric-levels form checks |
+> | `value_count` | uint | Non-empty count |
+> | `all_integer` | bool | Display hint (render with 0 decimals) |
+> | `description` | string | Column description (lands with the labels era) |
+>
+> Post-excision, this JSON array is **the frontend's entire data model**: `DataSet` stores it
+> verbatim (`ColumnInfo` per entry), every model/provider/grid header serves from it, and
+> **nothing in the frontend ever counts distinct values itself** — the lane's stats answer
+> every form threshold (the `distinct_count`-not-`levels.size()` rule).
 
 ## 25. Lifecycle & timing
 
