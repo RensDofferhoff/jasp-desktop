@@ -14,3 +14,9 @@ nng = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 dirs = { workspace = true }
+
+# The views e2e (tests/views_e2e.rs) opens the built blob with Arrow and checks the
+# §8.3 coercions — test-only (the router itself never touches Arrow).
+[dev-dependencies]
+arrow = { workspace = true }
+arrow-ipc = { workspace = true }

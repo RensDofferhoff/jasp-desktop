@@ -28,6 +28,7 @@
 //!
 //! Run: `JASP_ORCH_URL=tcp://127.0.0.1:9555 cargo run --bin jasp-data-runner`
 
+mod analysisview;
 mod arrowview;
 mod csv2arrow;
 mod dataedit;
@@ -151,6 +152,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     op: DataOp::Edit,
                     formats: None,
                 },
+                // The ANALYSIS-view build function (orchestrator-v2 §8 / AV4): a typed
+                // Arrow projection builder — NOT the grid's data_view (the naming hazard,
+                // analysis-views §11). Advertised so the v2 router knows this worker can
+                // execute `cache_fill` orders; classic ignores the capability (it never
+                // orders builds).
+                Capability::Data {
+                    op: DataOp::ViewBuild,
+                    formats: None,
+                },
             ],
             priority: 0,
             // The credit window (v2-era wire field, default 1): this worker runs one job
@@ -221,6 +231,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         // The edit family's tail (forward §1.2 cells / inverse IPC bytes); empty elsewhere.
         let tail = tail.to_vec();
+        // ── cache_fill: the implied-build order (orchestrator-v2 §8). NOT work — no
+        // credit, no result envelope; the confirm rides `cache_filled` (internal, never
+        // forwarded anywhere). A deterministic build failure reports `error` on the same
+        // message; the router fails the waiting works with it.
+        if let Message::CacheFill(fill) = &env.body {
+            println!(
+                "[data] cache_fill view_id={} ({} column(s)) '{}' -> '{}'",
+                fill.view_id,
+                fill.spec.columns.as_ref().map(|c| c.len()).unwrap_or(0),
+                fill.source,
+                fill.target
+            );
+            let outcome = analysisview::build(fill);
+            let reply = match &outcome {
+                Ok(bytes) => {
+                    println!("[data] view {} ready ({} bytes)", fill.view_id, bytes);
+                    messages::CacheFilled {
+                        view_id: fill.view_id.clone(),
+                        bytes: Some(*bytes),
+                        error: None,
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[data] view {} build failed: {e}", fill.view_id);
+                    messages::CacheFilled {
+                        view_id: fill.view_id.clone(),
+                        bytes: None,
+                        error: Some(e.clone()),
+                    }
+                }
+            };
+            let confirm = Envelope {
+                v: 1,
+                id: format!("view-filled-{}", fill.view_id),
+                reply_to: None,
+                session_id: env.session_id.clone(),
+                format: None,
+                ts: None,
+                body: Message::CacheFilled(reply),
+            };
+            if let Err(e) = ch
+                .send(frame_envelope(&confirm).as_slice())
+                .map_err(|(_, e)| e)
+            {
+                eprintln!("[data] cache_filled send failed: {e} — exiting");
+                return Ok(());
+            }
+            continue;
+        }
         let Message::Work(w) = env.body else {
             println!("[data] ignoring non-work message {:?}", env.body);
             continue;

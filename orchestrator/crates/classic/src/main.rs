@@ -3100,6 +3100,7 @@ mod tests {
             revision,
             base_revision,
             dataset_ids: Vec::new(),
+            views: None,
             payload: WorkPayload::AnalysisRClassicJaspbase(AnalysisWork {
                 module: module.to_string(),
                 module_version: "0.1".to_string(),
@@ -4363,6 +4364,7 @@ mod tests {
             revision: 0,
             base_revision: None,
             dataset_ids: Vec::new(),
+            views: None,
             payload: WorkPayload::Data(messages::DataWork {
                 op: DataOp::Open,
                 source: path.to_string(),
@@ -4525,6 +4527,7 @@ mod tests {
             revision: 0,
             base_revision: None,
             dataset_ids: vec![dataset_id.clone()],
+            views: None,
             payload: WorkPayload::AnalysisRClassicJaspbase(AnalysisWork {
                 module: "jaspTTests".to_string(),
                 module_version: "0.1".to_string(),
@@ -4577,6 +4580,7 @@ mod tests {
             revision: 0,
             base_revision: None,
             dataset_ids: vec!["ds-nope".to_string()],
+            views: None,
             payload: WorkPayload::AnalysisRClassicJaspbase(AnalysisWork {
                 module: "jaspTTests".to_string(),
                 module_version: "0.1".to_string(),
@@ -4757,6 +4761,7 @@ mod tests {
             revision: 0,
             base_revision: None,
             dataset_ids: vec![dataset_id.to_string()],
+            views: None,
             payload: WorkPayload::Data(messages::DataWork {
                 op: DataOp::View,
                 source: String::new(),
@@ -5003,6 +5008,7 @@ mod tests {
             revision: base_revision,
             base_revision: None,
             dataset_ids: vec![dataset_id.to_string()],
+            views: None,
             payload: WorkPayload::Data(messages::DataWork {
                 op: DataOp::Edit,
                 source: String::new(), // orchestrator injects the pre-edit cache to READ

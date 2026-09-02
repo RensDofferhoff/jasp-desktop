@@ -1,7 +1,12 @@
 # Analysis Views — materialized per-dataset projections for runners
 
 **Status:** design converged 2026-09-02 (a long planning session; **nothing is implemented**).
-This document is normative-for-when-we-build. It sits in the family of:
+**Amended later that day:** AV6, AV7, AV9, AV11 are **superseded** by
+`orchestrator-v2-design.md` (pull/credit scheduling; views became a transparent
+cache with implied builds — no view_build/view_ready/view_release protocol).
+AV1–AV5 stand; AV8 stands with `FORMAT_VERSION` added to the hash input; AV10 and
+AV12 stand. Read that doc's §8 for the exact disposition table before building.
+This document is normative-for-when-we-build otherwise. It sits in the family of:
 `data-model-design.md` (the wire schema), `data-edit-design.md` (the edit rail — D1–D11),
 `data-view-design.md` (**the grid's chunked `data_view` op — a different artifact**, see §11),
 `HANDOVER-post-excisions.md` (the frontend as it stands), `neo-jasp.md` §8 (the cache).

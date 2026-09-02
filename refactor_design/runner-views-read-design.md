@@ -1,0 +1,218 @@
+# Runner view-read seam — the plan (analysis-views §7, migration step 3)
+
+**Status:** design converged 2026-09-02 (planning session three); **slice A (the coercion-parity
+gate) is DONE and GREEN** — `refactor_design/tests/view_parity.R`, 144/144 checks over the real
+binaries: full matrix x {debug.csv, encoding_torture.csv, a generated numeric-torture CSV} at
+two revisions each (label overlay + level remap via schema_change), the system level-string
+format, NaN/null trichotomy, and the slice-B field→alias rename via the real codec.
+Slice A also REVISED the contract (see D9/D10): coercion semantics are SYSTEM law (the worker's,
+averaged to sane system-native behavior — `%.15g` grouping), not R's `as.character` folklore —
+the R fallback (`jaspRunner/R/data.R`) CONFORMS (a one-`sprintf` `jasp_level_string` mirror +
+matrix fixes) and dies at slice D with the rest of the R data engine. Locale is display-time
+only (D10).
+This is the runner half of the views phase — the router/worker half is DONE (see
+`orchestrator-v2-design.md` §8 + its §13 post-views addendum, and
+`HANDOVER-orchestrator-v2.md`). It sits in the family of:
+
+- `analysis-views-design.md` — the concept; **§7 (the R side's remaining duties) is this
+  doc's brief**; AV2/AV4/AV5/AV6 pin the constraints;
+- `neo-jasp.md` §8.2 (the encoding contract — frontend language-agnostic, runner
+  translates) and §8.3 (the coercion matrix — now the WORKER's, see below);
+- `HANDOVER-runner-data-pruning.md` — built the current runner pipeline (§3.2 the walk,
+  §2.2 the alias codec); this doc retires its DATA half;
+- `jaspbase-plugin.md` — the jaspBase bridge contract (natives §4.1 — unchanged here).
+
+## 1. Thesis
+
+> **The view IS the pruned, aliased, coerced frame.** Today the runner builds that
+> frame in R (schema footer → options walk → cache reads → coercion → alias assembly).
+> After this plan the runner *reads* it (`read_feather` + rename) and the whole
+> data-correctness half of `runner_jaspbase.R` retires: `load_cols`, `read_jasp_data`
+> dependency, `coerce_col` (eventually), the dual-role source-vector assembly, the
+> lazy-`col_select` natives, and the schema-footer performance machinery.
+
+What survives is exactly the language boundary (§8.2/AV5): the options walk +
+rewrite (aliases are R-family policy), `rewrite_syntax`, and the results decode.
+**Module-visible behavior does not change at all** — modules still see alias colnames
+and alias-valued options; only WHO materialized the frame changes.
+
+The simplification, quantified (of `runner_jaspbase.R`'s ~670 data-pipeline lines):
+
+| Piece | Lines (≈) | Fate |
+|---|---|---|
+| options walk + meta rewrite (`walk_and_rewrite_options` L578-833) | 255 | **stays** (language boundary) |
+| `rewrite_syntax` (L549-577) | 30 | **stays** |
+| alias codec encode/decode + lax tree (L390-548) | 160 | **stays** (decode is the results authority) |
+| `coerce_col` + `load_cols` (L834-870) | 40 | **dies** (slice D; `coerce_col` lingers as the migration ladder's last rung) |
+| schema footer machinery (L316-360, lazy idx/type caches, the two wide-file perf fixes) | 45 | **dies** except pass-through naming |
+| natives: decode→load→coerce dance (L875-956) | 140 | **shrinks to ~50** (frame-first select) |
+| frame assembly for preload (run_analysis L1176-…) | ~25 | **dies** (the view frame IS it) |
+
+## 2. The boundary decision (settled here, do not relitigate without new evidence)
+
+**Option A — the frontend encodes options (legacy's shape): REJECTED.** It would shrink
+the runner further (the walk moves to C++ where `Common/columnencoder.cpp` still lives),
+but it breaks §8.2/AV5's rule that the frontend is language-agnostic: the alias is "a
+property of the `analysis_r_classic_jaspbase` runner family" (pruning §2.1) — a future
+Julia/Python runner mints its own symbols, and the frontend cannot know which family
+will consume the work. The spec (`{name, as}` pairs) is the neutral vocabulary; the
+symbol is not. The walk stays in R, once, where it is already survivorship-proven
+(58/58 fixtures, `tests/walk_test.R`).
+
+**Consequence:** the runner's walk keeps needing schema types as fallback — served from
+the in-memory view frame's own fields (`<real>__<type>` splits), or the base footer for
+pass-through. The schema machinery shrinks but does not vanish in the pass-through case.
+
+## 3. The seam — what the runner does per work (slice B)
+
+`run_analysis` today (L1129-…): schema footer → walk → (preload) `load_cols` + assemble.
+After slice B, with `view_refs` present on the work envelope (v2 injects it at dispatch;
+**classic never does — its absence is the migration bridge**):
+
+1. **Read** each ref's blob once: `read_feather(path)` (the AV5 artifact — factors and
+   the `ordered` flag fall out natively; validated in the v2 e2e). Multi-dataset works:
+   one ref per dataset input, ordered like `dataset_ids` (AV1); single-dataset keeps the
+   scalar `dataset` argument (the scalar-vs-list decision stays parked, AV §13).
+2. **Rename** fields to aliases: split at the LAST `__` → `(real name, type)` →
+   `alias_encode(name, type)` (the stateless `jasp_enc_hex_<hex>_<type>` codec — hex is
+   *derived*, identical to the codec's own; the metadata `token_map` is cross-checked
+   and a mismatch is LOUD — it would mean a non-deterministic build, which AV8 forbids).
+   `__base_row` is dropped from the module frame (analyses that report per-row results
+   get it later, when a consumer is real).
+3. **Pass-through refs** (`view_id: null`, path = the base cache): no eager read. Keep
+   today's lazy path against the base (the footer schema machinery + `load_cols` serve
+   it) — reading the whole base into R eagerly would regress memory exactly where
+   pruning won it (terror_tall: 6 GB → 0.6 GB must not become 6 GB again).
+4. **Natives go frame-first**:
+   - `.readDatasetToEndNative(...)`: for each requested symbol `s` — if `s` is a frame
+     column → serve it (the requested type is already materialized; the `as.*` args
+     become no-ops for it). Miss ladder: (a) a sibling field of the same name coerced
+     (`coerce_col(frame[[<name__othertype>]], as)` — covers "bound nominal, read
+     numeric" = the values-parse semantics), (b) during migration only, the base-cache
+     lazy path (today's code, whole). Post-migration (slice D) a miss is a LOUD error —
+     it means the spec derivation missed a column, and silent coercion would hide a
+     frontend bug (the audit's superset guarantee is what makes this safe to harden).
+   - `all.columns=TRUE` → the pass-through frame (schema-typed aliases — today's
+     behavior, now sourced from the pass-through ref's base, or the base path directly).
+   - `.readDataSetRequestedNative` (preload=true) → the (renamed) view frame — the
+     assembly loop dies.
+   - `.readDataSetHeaderNative` → names/types split from the frame fields; zero callers
+     today (audited), stays completeness-only.
+5. **The walk runs BEFORE all of this, unchanged** — options arrive raw (frontend is
+   language-agnostic); its schema-type fallback consults the frame fields first.
+6. **Results decode** (schema-gated lax tree): unchanged.
+
+`.meta` keeps riding the wire (the walk needs `shouldEncode`/`isRCode`).
+
+## 4. The slices (each leaves the tree green; classic keeps running)
+
+### Slice A — the coercion-parity gate (gate 2) — DONE, GREEN, contract revised (D9)
+
+`refactor_design/tests/view_parity.R`: spawn v2 + worker (fake analysis-runner socket —
+the dispatched work hands back `view_refs` + `dataset_paths` directly), open
+`test_data/debug.csv` + `test_data/encoding_torture.csv` + a generated numeric-torture
+CSV (nulls override so a literal NaN cell parses as a real f64 NaN), staple a battery of
+specs (the full §8.3 matrix × the torture columns: dict→scale/nominal/ordinal, f64→all
+three, label overlay + level remap via edit-lane schema_change, nulls, NaN, dual-role
+two-types-one-column), let the fill build the blob, then compare
+`read_jasp_data(base, spec)` (the migration-era R fallback, now CONFORMING per D9)
+against `read_feather(blob)` + rename: `identical()` frames — types, values, NAs,
+factor levels AND level order. Plus a dedicated level-string table (boundary
+magnitudes, round-trip pins: `1e14`→`"1e+14"`, `1234567890123456` exact, `2^60` →
+shortest-round-trip padded, `0.1+0.2` honest, `1/3`, …) judged against the R mirror
+`jasp_level_string` (see D9 —
+the contract is now the SYSTEM level-string format, not R's `as.character`; the
+migration-era fallback conforms via the mirror and dies at slice D). **This gate
+blocked three real divergences before going green (ordered-leak on nominal casts,
+NaN-as-level, the as.character escalation rabbit-hole) — those motivated D9.**
+It blocks slice B's flip and is a permanent regression test.
+
+### Slice B — the runner seam (this doc's §3)
+
+Runner-only; production frontend unchanged (nothing staples yet — e2e drivers staple by
+hand). The `view_refs`-present path is validated by extending the e2e driver family:
+a real-jaspBase t-test on debug.csv with the dual-role `score` column (scale +
+coerced-nominal grouping), run twice — once with hand-stapled typed specs, once
+without (the fallback path) — **results must be identical**. ANOVA with an interaction
+for the walk's array shape. NOTE (D9): the miss ladder's sibling-coerce rung (scale→
+nominal of an already-materialized column) must build levels with `jasp_level_string`,
+never `factor()` — the two engines' agreement is the gate's whole claim.
+
+### Slice C — the frontend derives and staples specs (AV2; the memory win)
+
+1. Revive the C++ options walk as the spec deriver: `ColumnEncoder::
+   encodeColumnNamesinOptions` **already returns `colsPlusTypes`** — the walk's return
+   value IS the spec. Do NOT encode (that stays runner-side, §2); just collect, dedupe,
+   and staple in `createWorkJson` (`work["views"] = [{dataset_id, columns: [...]}]`).
+   The engine-side heuristic (any option string equal to a schema column name becomes
+   wanted, `columnencoder.cpp:882-893`) rides along — it is the superset guarantee.
+2. AV3 `fullDataset` flag in `Description.qml` (next to `preloadData`, the 22-module
+   precedent): `true` → staple `{all: true}` (pass-through) instead of derived pairs.
+   Registry lint (fail `all.columns=TRUE`/`.allColumnNamesDataset()` without the flag)
+   follows the audit's 3 offender modules (jaspSem conditional, jaspMetaAnalysis ×2,
+   jaspBain ×2 — 5 sites).
+3. Keep stapling **supersets** (over-inclusive specs are safe — AV §12); tighten later.
+4. Gate: the terror_tall memory story re-measured through the real GUI lane (the §8.6
+   recipes of the pruning handover, re-run against views).
+
+### Slice D — retirement (after soak + the classic freeze, §12 step 7)
+
+Delete the fallback rung: `load_cols`, the `read_jasp_data` dependency — the runner
+stops sourcing `jaspRunner/R/data.R` (L52) entirely; the engine lives on in the parity
+harness — `coerce_col` (unless the sibling-coerce rung stays — decide by soak
+evidence), the schema-footer caches, `.state$cols`. A view miss becomes the loud
+error. Estimated runner data-pipeline: ~670 → ~500 lines, with the survivors all
+language-boundary (walk/codec/decode) rather than data-correctness. The R coercion
+engine — §8.3's benchmarked semantics — then exists in exactly ONE place (the worker),
+which was AV4's whole point.
+
+## 5. Decisions (this doc pins them)
+
+| # | Decision | Why |
+|---|---|---|
+| D1 | Runner reads views; encoding stays runner-side | §8.2/AV5 law; multi-runtime symbol spaces (§2 above) |
+| D2 | Field→alias rename derives hex (stateless codec), cross-checks `token_map`, mismatch is loud | The codec is the protocol (pruning §2.1); the map is a determinism tripwire |
+| D3 | Pass-through refs never eager-read | the terror_tall memory regression; the lazy base path already exists |
+| D4 | Natives are frame-first with a miss ladder; the ladder's last rung retires in slice D | correctness during migration, loudness after (a miss = a derivation bug) |
+| D5 | `preloadData` true/false keeps its jaspBase meaning but unifies on ONE frame | the view is already in RAM; the flag only chooses whether `dataset` is passed |
+| D6 | The walk's type-fallback consults frame fields before the schema footer | kills the footer read for typed views; footer remains for pass-through only |
+| D7 | Spec derivation = the revived C++ walk's `colsPlusTypes`, superset-tolerant | AV2's "formalizing the preload pipeline that already exists"; one catalog, ported back where it started |
+| D8 | `__base_row` dropped from module frames for now | no consumer yet; revisit with per-row-result analyses (outliers/influence) |
+| D9 | **Coercion semantics are SYSTEM law, not R's** — the worker's matrix is the contract: nominal is always unordered, non-finite is null (never a "NaN" category), and f64→nominal level strings use the system `level_string` = plain **`%.15g`** (15 significant digits, trailing zeros trimmed, the C `%g` range rule: scientific iff exponent < −4 or ≥ 15). The grouping is deliberately lossy at the fringe — values agreeing at 15 significant digits are ONE category (cast code dedupes on the rendered string; R/classic have always grouped this way). The migration-era R fallback (`read_jasp_data`) CONFORMS via the `jasp_level_string` mirror (one `sprintf`) + matrix fixes, and dies at slice D | Multi-runtime law (§8.2/AV5): a future Julia/Python runner must not inherit R cosmetics; legacy JASP cast in C++ anyway (the R engine was itself an interim approximation, so R-exactness was never the real contract); chasing bit-exact round-trip labels (`0.30000000000000004`) buys nothing real — fringe collisions are invisible at display precision and arguably the correct grouping semantics. The parity gate (slice A) pins worker vs fallback, not worker vs `as.character` |
+| D10 | **Locale is a display-time concern, never baked into data.** Level strings (and every identity key) stay canonical ASCII `.`-form in blobs/results/syntax; localization happens at render time for the *viewer*. The grid already does this (frontend re-requests TSV with its own `ViewRender` params). If results-table label localization is ever wanted: the cheap mechanism is a canonical-string check at render (parse → re-render at %.15g → equal? then localize); the proper one is a format hint on jaspResults columns. Neither built; noted for the future | Baked locale freezes the *runner's* locale into shared data (wrong for every other viewer); it would enter the view_id hash (locale flip → full cache invalidation) and break cross-locale string identity (saved filters, generated R syntax). Precision is semantics (which values group); separators are cosmetics (how a value is drawn) — semantics live in data, cosmetics in the viewer |
+
+## 6. Considered and rejected (do not relitigate)
+
+| Idea | Why it died |
+|---|---|
+| Frontend encodes options (Option A, legacy shape) | breaks frontend language-agnosticity (§8.2); symbols are runner-family property; a second runtime would strand it |
+| Runner eagerly reads pass-through views | regresses the pruning memory win exactly where it was won |
+| Keep silent coercion on view miss forever | hides spec-derivation bugs; the superset guarantee makes loudness safe |
+| Move `rewrite_syntax`/encodeRScript to the frontend | same family as Option A — it is language work, and the R engine is built and pinned |
+| Rename via the metadata map as authority (not the codec) | makes the runner depend on blob provenance for a pure function; the map's job is the tripwire + results decode |
+| Views replace the `dataset_paths` bridge now | classic never injects `view_refs`; the bridge dies with classic (slice D) |
+
+## 7. File map (where each change lands)
+
+| What | Where |
+|---|---|
+| Parity harness (slice A — DONE) | `refactor_design/tests/view_parity.R` (new; sources the conforming fallback from `jaspRunner/R/data.R`) |
+| System level-string + matrix conformance (slice A, D9) | `orchestrator/crates/data_runner/src/analysisview.rs` (`level_string`, CatF64/CatDict), `jaspRunner/R/data.R` (`jasp_level_string` mirror, nominal-unordered, non-finite→NA) |
+| Seam: read+rename+frame-first natives (slice B) | `refactor_design/runner_jaspbase.R` L316-360 shrink, L834-956 rewrite, run_analysis L1129+ reorder |
+| e2e drivers with hand-stapled specs | `refactor_design/frontend_*.R` pattern + a `test_v2_views_ttest_e2e.R` (new) |
+| Spec derivation + staple + fullDataset flag (slice C) | `Common/columnencoder.cpp` (revive walk return), `Desktop/analysis/analysis.cpp` `createWorkJson` (~L339), `QMLComponents/modules/analysisentry.*` (flag), modules' `Description.qml` (3 offenders) |
+| Retirement (slice D) | runner deletions (§4 slice D list) |
+
+## 8. Validation ladder (cumulative)
+
+1. `Rscript refactor_design/tests/view_parity.R` — the gate (slice A, blocks B). **GREEN:
+   144/144 (2026-09-02), after the D9 contract revision.**
+2. `walk_test.R` 58/58 still green (the walk is untouched). **GREEN.**
+3. `test_v2_views_ttest_e2e.R`: dual-role t-test, views vs fallback, identical
+   jaspResults JSON (slice B).
+4. Full orchestrator suite (166) + clippy clean, every slice.
+5. GUI lane (slice C): the pruning handover's §8.6 recipes re-run — terror_tall RSS,
+   preload pair, jaspSem `all.columns`, the special-character dual-role dataset,
+   revision re-run hygiene.
+
+*The frame was always the analysis's; now it arrives that way.* 📐

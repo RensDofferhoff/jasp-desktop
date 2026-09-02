@@ -14,10 +14,12 @@
 //! | edit arrives | append to the dataset's chain (revision-gated); head dispatches to a free worker |
 //! | result arrives | return credit (keyed by the executor's inflight record); discard if stale by revision; else forward; edit terminals drain the chain |
 //! | pipe close | evict: fail outstanding (op-aware), drain/refuse chains, respawn via provisioner, release path refs |
-//! | tick | hang scan (recycle wedged via the provisioner), park timeouts |
+//! | cache_filled | mark the view Ready/Failed; un-park waiters; offer the builder the next fill |
+//! | tick | hang scan (recycle wedged via the provisioner), park timeouts, view LRU sweep (unheld Ready only) |
 //!
-//! THE ONE HOLD RULE (views phase, §8): a view referenced by a parked or dispatched
-//! work is never reclaimed. Not yet exercised — the view cache lands with views.
+//! THE ONE HOLD RULE (views phase, §8): a view referenced by a dispatched work is
+//! never reclaimed. Everything else Ready is LRU food; the dispatch-time staple
+//! guard re-parks a work whose hit became a miss (a cache is always safe to drop).
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -103,6 +105,10 @@ pub(crate) struct DispatchRecord {
     pub kind: WorkKind,
     pub dataset_paths: Vec<PathBuf>,
     pub data: Option<DataWorkEntry>,
+    /// **Views-era:** the view ids this dispatch holds (the hold rule of §4: these are
+    /// never LRU food while the dispatch lives). Fills are NOT dispatches — they hold
+    /// no credit and no view hold; their source ref rides the book entry.
+    pub view_ids: Vec<String>,
 }
 
 /// The *desired* state of one work id (what the submitter most recently wants).
@@ -145,13 +151,18 @@ pub(crate) enum Awaiting {
         module: String,
         version: String,
     },
-    /// `op` is the routing key alongside the lane kind: `data_open` additionally
-    /// matches on the source `format`; view/edit are format-agnostic.
     Lane {
         lane: LaneKind,
         op: DataOp,
         format: String,
     },
+    /// **Views-era:** the work's stapled specs are not all in the view book yet — an
+    /// implied build was ordered (or awaits a free builder). NOT an executor wait:
+    /// registering any executor never un-parks it (only `cache_filled` / a re-staple
+    /// can). Deliberately carries NO view ids — the missing set is re-derived from the
+    /// work's CURRENT stapled spec at every check, so an in-place supersession (new
+    /// revision, different spec) can never wait on stale ids.
+    ViewBuild,
 }
 
 /// A work unit parked while awaiting an executor that does not exist yet (§9.3):
@@ -206,6 +217,64 @@ pub(crate) struct DataWorkEntry {
     pub dataset_id: String,
     pub op: DataOp,
     pub revision: u64,
+}
+
+// ── The view book (v2 §4: hash → state) ─────────────────────────────────────
+
+/// A stapled spec resolved to its fetch ref at dispatch (AV10: local = path, v1).
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedView {
+    pub dataset_id: String,
+    /// `None` = pass-through (the ref IS the base cache file — zero copy).
+    pub view_id: Option<String>,
+    pub path: PathBuf,
+}
+
+/// The staple check's outcome (see `Router::staple`).
+#[derive(Debug)]
+pub(crate) enum Staple {
+    Ready(Vec<ResolvedView>),
+    Park,
+    Refused,
+}
+
+/// One content-addressed view blob the router tracks. Identity only — the router
+/// never stats the filesystem (P1); `bytes` is the worker's report from its
+/// `cache_filled` confirm.
+#[derive(Debug)]
+pub(crate) struct ViewEntry {
+    /// The stapled spec this view materializes (kept for re-ordering fills).
+    pub spec: wire::ViewSpec,
+    /// Owning session — the blob lives under its workspace; the book entry dies with it.
+    pub session: String,
+    /// The base dataset (its CURRENT path is the fill's `source`; staleness is
+    /// unreachable-by-hash — an edit bumps the revision ⇒ a new view_id).
+    pub dataset_id: String,
+    /// The base revision the `view_id` was hashed against.
+    pub base_revision: u64,
+    /// Router-minted blob path (`<session>/views/<hash>.arrow`).
+    pub target: PathBuf,
+    pub state: ViewState,
+    /// LRU clock — stamped on Ready and on every dispatch-time hit.
+    pub touch_ms: u64,
+    /// The fill's source path ref (acquired at order; released at confirm/reset).
+    pub source: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub(crate) enum ViewState {
+    /// No builder has been sent the order yet (no free capable worker, or a reset
+    /// after worker death — the re-order story of §8: "waiters were never dispatched,
+    /// so worker death just re-orders").
+    Wanted,
+    /// The fill was ordered to this executor; the confirm (or its death) resolves it.
+    Ordered(String),
+    /// The blob exists (worker-confirmed); LRU food unless held by a dispatch.
+    Ready { bytes: u64 },
+    /// A deterministic build failure (unknown column, filter, bad stored type…).
+    /// Retrying an unbuildable spec can never succeed — stapling works fail visibly
+    /// with this reason forever (terminal memory, not an error loop).
+    Failed(String),
 }
 
 /// The lane's view-consistency fields captured off a terminal edit result (D6).
@@ -267,6 +336,11 @@ pub(crate) enum RouterMsg {
     /// Test-only: the ready-queue as `(session, work_id, revision)` in FIFO order.
     #[allow(dead_code)]
     QueryReady(Reply<Vec<(String, String, u64)>>),
+    /// Test-only: the view book as `(view_id, state, bytes, held)` — state as a string
+    /// ("wanted" | "ordered" | "ready" | "failed"), bytes 0 unless ready, held = a
+    /// live dispatch references it (the hold rule).
+    #[allow(dead_code)]
+    QueryViews(Reply<Vec<(String, String, u64, bool)>>),
 }
 
 // ─── The router (single-threaded owner of all state) ─────────────────────────
@@ -285,6 +359,10 @@ pub(crate) struct Router {
     /// THE EDIT CHAINS: queued edits per dataset.
     pub queued_edits: HashMap<String, VecDeque<QueuedEdit>>,
     pub datasets: HashMap<String, DatasetEntry>,
+    /// **Views-era — THE VIEW BOOK** (§4): `view_id → entry`. Books-only lookups at
+    /// staple/dispatch time (the router never stats the FS, P1); the worker confirms
+    /// existence; the tick's LRU sweep reclaims (janitor executes).
+    pub views: HashMap<String, ViewEntry>,
     /// Outstanding dispatch references per cache file (acquire at dispatch, release
     /// at the dispatch's terminal). Decision state only — the janitor deletes.
     pub path_refs: HashMap<PathBuf, usize>,
@@ -342,6 +420,7 @@ impl Router {
                 RouterMsg::Tick => {
                     self.scan_hung();
                     self.scan_parked();
+                    self.scan_views();
                 }
                 RouterMsg::KeepAlive { key, aio } => {
                     self.aios.insert(key, aio);
@@ -394,6 +473,28 @@ impl Router {
                                 rw.work.work_id.clone(),
                                 rw.work.revision,
                             )
+                        })
+                        .collect();
+                    let _ = reply.send(snap);
+                }
+                RouterMsg::QueryViews(reply) => {
+                    let mut held: Vec<String> = Vec::new();
+                    for exec in self.executors.values() {
+                        for rec in exec.inflight.values() {
+                            held.extend(rec.view_ids.iter().cloned());
+                        }
+                    }
+                    let snap: Vec<(String, String, u64, bool)> = self
+                        .views
+                        .iter()
+                        .map(|(id, e)| {
+                            let (state, bytes) = match &e.state {
+                                ViewState::Wanted => ("wanted".to_string(), 0),
+                                ViewState::Ordered(_) => ("ordered".to_string(), 0),
+                                ViewState::Ready { bytes } => ("ready".to_string(), *bytes),
+                                ViewState::Failed(_) => ("failed".to_string(), 0),
+                            };
+                            (id.clone(), state, bytes, held.contains(id))
                         })
                         .collect();
                     let _ = reply.send(snap);
@@ -481,6 +582,9 @@ impl Router {
         }
         self.unpark_matching(&reg.capabilities);
         self.recompute_catalog();
+        // A ViewBuild-capable worker may have just arrived — Wanted fills get their
+        // builder (fills never un-park on register; they aren't executor waits).
+        self.order_fills();
         self.pump();
         register_ack(
             true,
@@ -612,6 +716,8 @@ impl Router {
             // A ready signal: the runner's loop reached loop-top (it is idle). Never
             // credit accounting — the books compute availability (P3).
             Message::Activity(_) => self.pump(),
+            // The implied build's confirm (internal — never forwarded, never credited).
+            Message::CacheFilled(c) => self.handle_cache_filled(&handle.runner_id, c),
             other => println!("[v2] executor {} -> {other:?}", handle.runner_id),
         }
     }
@@ -768,6 +874,9 @@ impl Router {
                 let dataset_id = rec.data.as_ref().unwrap().dataset_id.clone();
                 self.drain_queued_edit(&dataset_id);
             }
+            // A builder just freed (fills are worked one at a time like any job) —
+            // offer it the next Wanted fill.
+            self.order_fills();
             self.pump();
         }
     }
@@ -977,6 +1086,13 @@ impl Router {
             pw.tail = tail;
             let marker = running_result(&w.work_id, w.revision, &fe.session_id, kind);
             let _ = fe.send(marker);
+            // The superseding revision's views may already all be Ready (or the wait
+            // was for a spec nobody needs anymore) — re-staple every view waiter now.
+            if kind == WorkKind::Data {
+                // (data work never staples views; nothing to do)
+            } else {
+                self.try_unpark_view_waiters();
+            }
             return;
         }
         if self.parked.contains_key(&key) {
@@ -989,10 +1105,326 @@ impl Router {
         self.admit(fe, env, w, tail);
     }
 
+    // ── Views: the staple check + the implied build (§8) ─────────────────────
+
+    /// Resolve a work's stapled specs against the view book (books-only — the router
+    /// never stats the filesystem, P1). Every outcome:
+    ///
+    /// * `Ready(resolved)` — all specs hit (Ready blobs + pass-throughs); touch stamped.
+    /// * `Park` — ≥ 1 miss: the missing entries are `Wanted` in the book and a fill is
+    ///   ordered (`order_fills` — free capable builder only, no credit).
+    /// * `Refused` — a visible error was already sent (filter present / dataset not
+    ///   ready / the view is poisoned `Failed`); nothing is queued.
+    ///
+    /// Also the dispatch-time guard: called again at dispatch, a `Park` there means a
+    /// hit became a miss after queueing (LRU eviction race) — the caller re-parks. A
+    /// cache is always safe to drop; correctness never depends on the book (P3).
+    fn staple(&mut self, fe: &FrontendRuntime, w: &wire::Work) -> Staple {
+        let Some(specs) = w.views.as_ref() else {
+            return Staple::Ready(Vec::new());
+        };
+        let mut resolved: Vec<ResolvedView> = Vec::with_capacity(specs.len());
+        let mut missing = false;
+        for spec in specs {
+            if spec.filter.is_some() {
+                self.send_bad_request(
+                    fe,
+                    w,
+                    "view filters are not supported yet (awaiting the derived-columns design)",
+                );
+                return Staple::Refused;
+            }
+            let Some(ds) = self.datasets.get(&spec.dataset_id) else {
+                self.send_dataset_not_ready(fe, w, &spec.dataset_id);
+                return Staple::Refused;
+            };
+            if ds.state != DatasetState::Ready {
+                self.send_dataset_not_ready(fe, w, &spec.dataset_id);
+                return Staple::Refused;
+            }
+            // Pass-through (§8): all/no-columns + unfiltered IS the base file — zero
+            // copy, zero build, never enters the book.
+            if spec.is_pass_through() {
+                resolved.push(ResolvedView {
+                    dataset_id: spec.dataset_id.clone(),
+                    view_id: None,
+                    path: ds.current_path.clone(),
+                });
+                continue;
+            }
+            let id = wire::view_id(spec, ds.revision);
+            match self.views.get(&id).map(|e| &e.state) {
+                Some(ViewState::Ready { .. }) => {
+                    if let Some(e) = self.views.get_mut(&id) {
+                        e.touch_ms = now_ms();
+                    }
+                    let path = self.views.get(&id).map(|e| e.target.clone()).unwrap();
+                    resolved.push(ResolvedView {
+                        dataset_id: spec.dataset_id.clone(),
+                        view_id: Some(id),
+                        path,
+                    });
+                }
+                Some(ViewState::Failed(reason)) => {
+                    // Poisoned: a deterministic build failure never gets better. Fail
+                    // this work NOW with the builder's own reason.
+                    let err = no_executor_result(
+                        &w.work_id,
+                        w.revision,
+                        &fe.session_id,
+                        &format!("the view could not be built: {reason}"),
+                        w.payload.kind(),
+                    );
+                    let _ = fe.send(err);
+                    return Staple::Refused;
+                }
+                Some(ViewState::Wanted) | Some(ViewState::Ordered(_)) | None => {
+                    if !self.views.contains_key(&id) {
+                        self.views.insert(
+                            id.clone(),
+                            ViewEntry {
+                                spec: spec.clone(),
+                                session: fe.session_id.clone(),
+                                dataset_id: spec.dataset_id.clone(),
+                                base_revision: ds.revision,
+                                target: self.config.view_cache_path(&fe.session_id, &id),
+                                state: ViewState::Wanted,
+                                touch_ms: now_ms(),
+                                source: None,
+                            },
+                        );
+                    }
+                    missing = true;
+                }
+            }
+        }
+        if missing {
+            self.order_fills();
+            Staple::Park
+        } else {
+            Staple::Ready(resolved)
+        }
+    }
+
+    /// Park a work whose stapled views are not all ready yet — the implied-build wait.
+    /// Same shape as `park_work` (running marker + parked entry) but NO provisioner
+    /// ask: the fill ordering is the router's own `order_fills`, not a spawn request.
+    fn park_awaiting_view(
+        &mut self,
+        fe: Arc<FrontendRuntime>,
+        env: Envelope,
+        w: &wire::Work,
+        tail: Vec<u8>,
+    ) {
+        let key = (fe.session_id.clone(), w.work_id.clone());
+        if let Err(e) = fe.send(running_result(
+            &w.work_id,
+            w.revision,
+            &fe.session_id,
+            w.payload.kind(),
+        )) {
+            eprintln!(
+                "[v2] running-marker to frontend {} failed: {e}",
+                fe.session_id
+            );
+        }
+        println!(
+            "[v2] parking work_id={} revision={} (session {}) — awaiting view build",
+            w.work_id, w.revision, fe.session_id
+        );
+        let _ = key; // (the parked map is keyed by the work; awaiting carries nothing)
+        self.parked.insert(
+            key,
+            ParkedWork {
+                awaiting: Awaiting::ViewBuild,
+                frontend: fe,
+                env,
+                work: w.clone(),
+                tail,
+                parked_ms: now_ms(),
+            },
+        );
+    }
+
+    /// Order `Wanted` fills to free ViewBuild-capable workers (pull discipline for
+    /// fills: no credit, but only a free builder takes one — a busy worker's socket
+    /// holds at most aborts and ignorable hints). Called on: staple miss, register,
+    /// every terminal (a builder freed), and after executor eviction (re-order).
+    /// Fills are idempotent (deterministic rebuild) — a lost or duplicated order is
+    /// harmless, which is exactly why this needs no protocol weight (§8).
+    fn order_fills(&mut self) {
+        let ids: Vec<String> = self
+            .views
+            .iter()
+            .filter(|(_, e)| matches!(e.state, ViewState::Wanted))
+            .map(|(id, _)| id.clone())
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        for id in ids {
+            let Some(exec_id) = select_view_builder(&self.executors) else {
+                break; // no free builder; re-tried on the next terminal/register
+            };
+            let Some(entry) = self.views.get_mut(&id) else {
+                continue;
+            };
+            let Some(ds) = self.datasets.get(&entry.dataset_id) else {
+                // The base dataset is gone (session dropped / open died) — the view is
+                // unreachable; drop it (waiters fail at their own re-staple).
+                self.views.remove(&id);
+                continue;
+            };
+            let source = ds.current_path.clone();
+            *self.path_refs.entry(source.clone()).or_insert(0) += 1;
+            entry.source = Some(source.clone());
+            entry.state = ViewState::Ordered(exec_id.clone());
+            entry.touch_ms = now_ms();
+            let fill = wire::CacheFill {
+                view_id: id.clone(),
+                spec: entry.spec.clone(),
+                source: source.to_string_lossy().into_owned(),
+                target: entry.target.to_string_lossy().into_owned(),
+                base_revision: entry.base_revision,
+            };
+            let ncols = fill.spec.columns.as_ref().map(|c| c.len()).unwrap_or(0);
+            let env = Envelope {
+                v: 1,
+                id: format!("v2-fill-{id}"),
+                reply_to: None,
+                session_id: Some(entry.session.clone()),
+                format: None,
+                ts: Some(now_ms()),
+                body: Message::CacheFill(fill),
+            };
+            println!("[v2] view fill {id} ordered to {exec_id} ({ncols} column(s))");
+            let send = self
+                .executors
+                .get(&exec_id)
+                .map(|e| e.handle.send(&frame_envelope(&env)));
+            match send {
+                Some(Ok(())) => {}
+                Some(Err(e)) => {
+                    eprintln!("[v2] fill send to {exec_id} failed: {e}; evicting");
+                    self.reset_ordered_fills(&exec_id);
+                    self.evict_executor(&exec_id);
+                }
+                None => {
+                    // Raced away between select and send — reset and let the next
+                    // order_fills pass retry.
+                    self.reset_ordered_fills(&exec_id);
+                }
+            }
+        }
+    }
+
+    /// Reset fills ordered to a dead/dying executor back to `Wanted` (releasing
+    /// their source refs) — the §8 re-order story: waiters were never dispatched, so
+    /// worker death only re-orders.
+    fn reset_ordered_fills(&mut self, exec_id: &str) {
+        let mut release: Vec<PathBuf> = Vec::new();
+        for entry in self.views.values_mut() {
+            if let ViewState::Ordered(to) = &entry.state
+                && to == exec_id
+                && let Some(src) = entry.source.take()
+            {
+                release.push(src);
+                entry.state = ViewState::Wanted;
+            }
+        }
+        self.release_paths(&release);
+    }
+
+    /// The `cache_filled` confirm: mark Ready (or poison on error), release the fill's
+    /// source ref, un-park whatever can now run, and offer the freed builder the next
+    /// fill. Unknown ids (LRU-evicted then filled, long-dead) are logged and dropped —
+    /// a cache fill has no frontend-visible identity to fail (§8).
+    fn handle_cache_filled(&mut self, runner_id: &str, c: &wire::CacheFilled) {
+        let Some(entry) = self.views.get_mut(&c.view_id) else {
+            println!(
+                "[v2] cache_filled for unknown view {} (evicted/gone) — ignored",
+                c.view_id
+            );
+            return;
+        };
+        // Only the executor we ordered accepts — a late duplicate from anyone else
+        // still means the blob exists; take it (idempotent, deterministic bytes).
+        let src = entry.source.take();
+        match (&c.bytes, &c.error) {
+            (Some(bytes), None) => {
+                entry.state = ViewState::Ready { bytes: *bytes };
+                entry.touch_ms = now_ms();
+                println!(
+                    "[v2] view {} ready on {runner_id} ({} bytes)",
+                    c.view_id, bytes
+                );
+            }
+            _ => {
+                let reason = c.error.clone().unwrap_or_else(|| {
+                    "the worker confirmed neither bytes nor an error".to_string()
+                });
+                eprintln!(
+                    "[v2] view {} build failed on {runner_id}: {reason}",
+                    c.view_id
+                );
+                entry.state = ViewState::Failed(reason);
+            }
+        }
+        if let Some(src) = src {
+            self.release_paths(&[src]);
+        }
+        self.try_unpark_view_waiters();
+        self.order_fills();
+        self.pump();
+    }
+
+    /// Scan parked implied-build waiters: any whose CURRENT stapled spec now resolves
+    /// fully (re-derived — never stale ids) re-enters admission. Called on every
+    /// `cache_filled` and after an in-place supersession of a parked work.
+    fn try_unpark_view_waiters(&mut self) {
+        if self.parked.is_empty() {
+            return;
+        }
+        let keys: Vec<(String, String)> = self
+            .parked
+            .iter()
+            .filter(|(_, pw)| matches!(pw.awaiting, Awaiting::ViewBuild))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in keys {
+            let Some(pw) = self.parked.remove(&key) else {
+                continue;
+            };
+            match self.staple(&pw.frontend, &pw.work) {
+                Staple::Ready(_) => {
+                    println!("[v2] un-parking work_id={} (views ready)", pw.work.work_id);
+                    self.admit(pw.frontend, pw.env, &pw.work, pw.tail);
+                }
+                // Still missing (or refused — the error went out with the staple):
+                // re-park. A Refused work must NOT linger in the book-less limbo.
+                Staple::Park | Staple::Refused => {
+                    self.parked.insert(key, pw);
+                }
+            }
+        }
+    }
+
     /// Admission: a capable executor EXISTS (busy or free) → ready-queue + works
     /// entry; none exists → the miss path (park via provisioner, or fail visibly).
+    /// **Views-era:** stapled specs are checked FIRST (books-only — hit ⇒ continue,
+    /// miss ⇒ park as an implied build + order the fill, §8).
     fn admit(&mut self, fe: Arc<FrontendRuntime>, env: Envelope, w: &wire::Work, tail: Vec<u8>) {
         let key = (fe.session_id.clone(), w.work_id.clone());
+        if w.views.is_some() {
+            match self.staple(&fe, w) {
+                Staple::Ready(_) => { /* all views hit — continue into capability admission */ }
+                Staple::Park => {
+                    self.park_awaiting_view(fe, env, w, tail);
+                    return;
+                }
+                Staple::Refused => return, // error already sent; nothing queued
+            }
+        }
         if capable_executor_exists(&self.executors, &w.payload).is_none() {
             self.miss_work(fe, env, w, tail);
             return;
@@ -1152,6 +1584,8 @@ impl Router {
                 op: DataOp::View, ..
             } => "data lane for views".to_string(),
             Awaiting::Lane { format, .. } => format!("data lane for '{format}'"),
+            // (ViewBuild works park via `park_awaiting_view` — no provisioner ask.)
+            Awaiting::ViewBuild => unreachable!("ViewBuild parks carry no provisioner ask"),
         };
         println!(
             "[v2] parking work_id={} revision={} ({what}) awaiting an executor",
@@ -1169,6 +1603,9 @@ impl Router {
             Awaiting::Lane { lane, .. } => {
                 let _ = prov.send(ProvReq::EnsureLane { lane: *lane });
             }
+            // View waits order fills via `order_fills` (their own discipline — no
+            // credit, no spawn); this path is never reached for them.
+            Awaiting::ViewBuild => {}
         }
         self.parked.insert(
             key,
@@ -1205,6 +1642,9 @@ impl Router {
                                     .as_ref()
                                     .is_some_and(|fs| fs.iter().any(|f| f == format))))
                 }),
+                // A view wait is not an executor wait — registration never un-parks
+                // it (only cache_filled / a supersession-triggered re-staple can).
+                Awaiting::ViewBuild => false,
             }
             })
             .map(|(k, _)| k.clone())
@@ -1369,6 +1809,50 @@ impl Router {
         if let Some(base) = w.base_revision {
             let base_dir = self.config.revision_dir(&fe.session_id, &w.work_id, base);
             value["base_results_dir"] = serde_json::json!(base_dir.to_string_lossy());
+        }
+
+        // ── Views-era: resolve the stapled specs against the book (the guard — a hit
+        // may have become a miss after queueing, e.g. LRU eviction; a cache is always
+        // safe to drop, correctness never depends on it, P3). A miss re-parks the
+        // work through the implied-build path; a refusal already told the frontend.
+        let mut view_ids: Vec<String> = Vec::new();
+        if w.views.is_some() {
+            match self.staple(&fe, &w) {
+                Staple::Ready(resolved) => {
+                    // Stamp fetch refs (AV10) as an INJECTED envelope field — the exact
+                    // precedent of `dataset_paths` (identity the router adds at dispatch,
+                    // not a typed `Work` field). The stapled `views` specs ride along
+                    // untouched; runners that don't speak views ignore `view_refs` and
+                    // keep `dataset_paths` (the migration bridge).
+                    let stamped: Vec<serde_json::Value> = resolved
+                        .iter()
+                        .map(|r| {
+                            serde_json::json!({
+                                "dataset_id": r.dataset_id,
+                                "view_id": r.view_id,
+                                "path": r.path.to_string_lossy(),
+                            })
+                        })
+                        .collect();
+                    view_ids = resolved.iter().filter_map(|r| r.view_id.clone()).collect();
+                    value["view_refs"] = serde_json::Value::Array(stamped);
+                }
+                Staple::Park => {
+                    let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
+                    self.release_paths(&acquired);
+                    println!(
+                        "[v2] work {} rev {} dispatch-time view miss — re-parking (implied build)",
+                        w.work_id, w.revision
+                    );
+                    self.park_awaiting_view(fe, env, &w, tail.to_vec());
+                    return;
+                }
+                Staple::Refused => {
+                    let acquired: Vec<PathBuf> = resolved.iter().map(|(_, p)| p.clone()).collect();
+                    self.release_paths(&acquired);
+                    return;
+                }
+            }
         }
 
         // Op-specific identity, one arm per data op. `data_entry` is the op
@@ -1547,6 +2031,7 @@ impl Router {
                     kind: w.payload.kind(),
                     dataset_paths: resolved.into_iter().map(|(_, p)| p).collect(),
                     data: data_entry,
+                    view_ids,
                 },
             );
             (exec.outstanding, exec.slots)
@@ -1732,6 +2217,10 @@ impl Router {
                     // Drop any queued successor of this work id too (it can never run).
                     self.ready.retain(|rw| rw.key() != key);
                 }
+                // A parked (implied-build / lane / module) instance of exactly this
+                // revision is consumed forever as well — never a zombie waiter.
+                self.parked
+                    .retain(|k, pw| !(k == &key && pw.work.revision == rev));
                 let dir = self.config.revision_dir(&fe.session_id, &work_id, rev);
                 if !self.config.keep_workspaces {
                     let _ = self.janitor.send(Reclaim::Dir(dir));
@@ -1746,6 +2235,7 @@ impl Router {
                     self.abort_if_running(&entry, &fe.session_id, &work_id);
                 }
                 self.ready.retain(|rw| rw.key() != key);
+                self.parked.remove(&key);
                 let dir = self.config.work_workspace(&fe.session_id, &work_id);
                 if !self.config.keep_workspaces {
                     let _ = self.janitor.send(Reclaim::Dir(dir));
@@ -1820,6 +2310,11 @@ impl Router {
         self.aios.remove(runner_id);
         let Some(exec) = removed else { return };
 
+        // Views-era: fills ordered to this executor reset to Wanted (their source
+        // refs released) — waiters were never dispatched, so worker death only
+        // re-orders (§8). Re-ordering happens after the teardown below.
+        self.reset_ordered_fills(runner_id);
+
         // Tell the provisioner the runner is gone (modules may be re-provisioned on a
         // later Provision; lanes are pinned and re-spawned immediately).
         let (modules, lanes) = advertised(&exec.capabilities);
@@ -1892,6 +2387,8 @@ impl Router {
         // Queue rescue: ready work no remaining executor can EVER serve must not sit
         // queued forever — park it (provisioner) or fail it visibly (no-silent-loss).
         self.rescue_orphaned_ready_work();
+        // A builder died — its fills reset; another (or the respawn) takes them.
+        self.order_fills();
         self.pump();
     }
 
@@ -1954,6 +2451,26 @@ impl Router {
         for path in cache_paths {
             self.path_refs.remove(&path);
         }
+        // Views-era: drop the session's view book entries — the blobs live under the
+        // session workspace (wiped above by the janitor); Ordered entries release
+        // their source refs. Held-by-inflight is moot: those dispatches' terminals
+        // find their works swept already.
+        let mut release: Vec<PathBuf> = Vec::new();
+        let dead_views: Vec<String> = self
+            .views
+            .iter()
+            .filter(|(_, e)| e.session == session_id)
+            .map(|(id, e)| {
+                if let Some(src) = &e.source {
+                    release.push(src.clone());
+                }
+                id.clone()
+            })
+            .collect();
+        for id in dead_views {
+            self.views.remove(&id);
+        }
+        self.release_paths(&release);
         if !self.config.keep_workspaces {
             let _ = self
                 .janitor
@@ -2032,6 +2549,7 @@ impl Router {
                         op: DataOp::View, ..
                     } => "data lane for views".to_string(),
                     Awaiting::Lane { format, .. } => format!("data lane for '{format}'"),
+                    Awaiting::ViewBuild => "view build".to_string(),
                 };
                 eprintln!(
                     "[v2] parked work_id={} timed out after {}ms waiting for a {what}",
@@ -2046,6 +2564,64 @@ impl Router {
                 );
                 let _ = pw.frontend.send(err);
             }
+        }
+    }
+
+    /// The LRU sweep over the view book (the tick's cache half) — AV9 as amended:
+    /// content-addressed files, LRU + disk budget, **the one hold rule**: a view
+    /// referenced by a live dispatch is never reclaimed; everything else Ready is
+    /// food. Nothing is evicted while under budget (no churn). Reclamation executes
+    /// on the janitor (P1 — the router never touches the filesystem). Failed/Wanted/
+    /// Ordered entries carry no bytes and are never swept; wanted-but-unwaited fills
+    /// are harmless (a warm blob is LRU food, not a leak).
+    fn scan_views(&mut self) {
+        if self.views.is_empty() {
+            return;
+        }
+        let held: std::collections::HashSet<&String> = self
+            .executors
+            .values()
+            .flat_map(|e| e.inflight.values())
+            .flat_map(|rec| rec.view_ids.iter())
+            .collect();
+        let total: u64 = self
+            .views
+            .values()
+            .filter_map(|e| match e.state {
+                ViewState::Ready { bytes } => Some(bytes),
+                _ => None,
+            })
+            .sum();
+        if total <= self.config.view_budget_bytes {
+            return;
+        }
+        // Oldest touch first; held views skip the menu entirely.
+        let mut food: Vec<(String, u64, u64)> = self
+            .views
+            .iter()
+            .filter_map(|(id, e)| match e.state {
+                ViewState::Ready { bytes } if !held.contains(id) => {
+                    Some((id.clone(), e.touch_ms, bytes))
+                }
+                _ => None,
+            })
+            .collect();
+        food.sort_by_key(|(_, touch, _)| *touch);
+        let mut budget = total;
+        for (id, touch, bytes) in food {
+            if budget <= self.config.view_budget_bytes {
+                break;
+            }
+            let Some(entry) = self.views.remove(&id) else {
+                continue;
+            };
+            budget -= bytes;
+            println!(
+                "[v2] LRU: view {id} reclaimed ({} bytes, touched {}ms ago; {budget} bytes cached)",
+                bytes,
+                now_ms().saturating_sub(touch)
+            );
+            let _ = self.janitor.send(Reclaim::File(entry.target));
         }
     }
 
@@ -2323,6 +2899,28 @@ fn capable_executor_exists(
     executors
         .values()
         .filter(|e| can_serve(&e.capabilities, payload))
+        .max_by_key(|e| (e.priority, e.seq))
+        .map(|e| e.handle.runner_id.clone())
+}
+
+/// A FREE executor advertising the analysis-view build (`data_view_build`) — the
+/// fill-order target (pull discipline for fills: no credit, free builders only —
+/// a busy worker's socket holds at most aborts and ignorable hints).
+fn select_view_builder(executors: &HashMap<String, Executor>) -> Option<String> {
+    executors
+        .values()
+        .filter(|e| {
+            e.outstanding < e.slots
+                && e.capabilities.iter().any(|c| {
+                    matches!(
+                        c,
+                        Capability::Data {
+                            op: DataOp::ViewBuild,
+                            ..
+                        }
+                    )
+                })
+        })
         .max_by_key(|e| (e.priority, e.seq))
         .map(|e| e.handle.runner_id.clone())
 }
@@ -2689,6 +3287,7 @@ impl Broker {
             parked: HashMap::new(),
             queued_edits: HashMap::new(),
             datasets: HashMap::new(),
+            views: HashMap::new(),
             path_refs: HashMap::new(),
             aios: HashMap::new(),
             counter: 0,
@@ -2808,6 +3407,8 @@ mod tests {
             max_inline_payload: wire::MAX_INLINE_PAYLOAD,
             provisioner: None,
             lane_specs: Vec::new(),
+            // Generous by default; the LRU test shrinks it per-broker.
+            view_budget_bytes: 64 * 1024 * 1024,
         }
     }
 
@@ -2842,6 +3443,7 @@ mod tests {
             revision,
             base_revision: None,
             dataset_ids: Vec::new(),
+            views: None,
             payload: WorkPayload::AnalysisRClassicJaspbase(AnalysisWork {
                 module: module.to_string(),
                 module_version: "0.1".to_string(),
@@ -3001,6 +3603,22 @@ mod tests {
         match deframe(&raw[..]).expect("valid envelope").body {
             Message::Work(w) => w,
             other => panic!("expected work, got {other:?}"),
+        }
+    }
+
+    /// Recv a result envelope on a frontend channel, skipping non-terminal
+    /// `running` markers (park acks, re-acks) — the terminal is what tests assert on.
+    fn recv_terminal(fe: &Socket) -> ResultMsg {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(Instant::now() < deadline, "no terminal arrived");
+            let raw = fe.recv().expect("a result frame");
+            if let Some(env) = deframe(&raw[..])
+                && let Message::Result(r) = env.body
+                && r.status != Status::Running
+            {
+                return r;
+            }
         }
     }
 
@@ -3378,6 +3996,7 @@ mod tests {
             revision: 0,
             base_revision: None,
             dataset_ids: vec![],
+            views: None,
             payload: WorkPayload::Data(wire::DataWork {
                 op: DataOp::Open,
                 source: "/nonexistent/e2e.csv".into(),
@@ -3433,6 +4052,7 @@ mod tests {
             revision: 0,
             base_revision: None,
             dataset_ids: vec![],
+            views: None,
             payload: WorkPayload::Data(wire::DataWork {
                 op: DataOp::Open,
                 source: "/nonexistent/e2e.csv".into(),
@@ -3518,6 +4138,7 @@ mod tests {
             revision: 0,
             base_revision: None,
             dataset_ids: vec![ds.clone()],
+            views: None,
             payload: WorkPayload::Data(wire::DataWork {
                 op: DataOp::View,
                 source: String::new(),
@@ -3578,6 +4199,7 @@ mod tests {
             revision: 7,
             base_revision: None,
             dataset_ids: vec![ds.clone()],
+            views: None,
             payload: WorkPayload::Data(wire::DataWork {
                 op: DataOp::Edit,
                 source: String::new(),
@@ -3612,5 +4234,440 @@ mod tests {
             other => panic!("expected data payload, got {other:?}"),
         }
         assert_silent(&lane, "nothing must be dispatched for a stale edit");
+    }
+
+    // ── THE VIEWS PHASE (§12 step 5) ──────────────────────────────────────────
+
+    /// Test-only: the view book as (id, state, bytes, held).
+    fn views_snapshot(broker: &Broker) -> Vec<(String, String, u64, bool)> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        broker
+            .tx
+            .send(RouterMsg::QueryViews(tx))
+            .expect("query views");
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("views snapshot")
+    }
+
+    /// Recv a raw frame on an executor channel and parse the JSON part as a Value —
+    /// how the tests see INJECTED envelope fields (`dataset_paths`, `view_refs`)
+    /// that the typed `Work` deliberately doesn't carry.
+    fn recv_raw_json(ch: &Socket) -> (serde_json::Value, Message) {
+        let raw = ch.recv().expect("a frame");
+        let len = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
+        let v: serde_json::Value = serde_json::from_slice(&raw[4..4 + len]).unwrap();
+        let env = deframe(&raw[..]).expect("valid envelope");
+        (v, env.body)
+    }
+
+    /// An analysis work with stapled view specs.
+    fn views_work(
+        work_id: &str,
+        revision: u64,
+        module: &str,
+        dataset: &str,
+        views: Vec<wire::ViewSpec>,
+    ) -> Envelope {
+        let mut w = analysis_work(work_id, module, revision);
+        let Message::Work(inner) = &mut w.body else {
+            unreachable!()
+        };
+        inner.dataset_ids = vec![dataset.to_string()];
+        inner.views = Some(views);
+        w
+    }
+
+    fn view_spec(dataset: &str, name: &str, as_type: wire::ViewLevel) -> wire::ViewSpec {
+        wire::ViewSpec {
+            dataset_id: dataset.to_string(),
+            columns: Some(vec![wire::ViewColumn {
+                name: name.to_string(),
+                as_type,
+            }]),
+            filter: None,
+            all: false,
+        }
+    }
+
+    /// The fill-order/confirm pair on a lane channel.
+    fn recv_fill(ch: &Socket) -> wire::CacheFill {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let raw = ch.recv().expect("a fill frame");
+            if let Some(env) = deframe(&raw[..]) {
+                if let Message::CacheFill(f) = env.body {
+                    return f;
+                }
+                // (a work for a lane op — the caller races us; put it back conceptually
+                // by failing loudly: view tests use dedicated lanes)
+                panic!("expected cache_fill, got {:?}", env.body);
+            }
+            assert!(Instant::now() < deadline, "no fill arrived");
+        }
+    }
+
+    fn send_cache_filled(ch: &Socket, view_id: &str, bytes: Option<u64>, error: Option<String>) {
+        let env = Envelope {
+            v: 1,
+            id: format!("filled-{view_id}"),
+            reply_to: None,
+            session_id: None,
+            format: None,
+            ts: None,
+            body: Message::CacheFilled(wire::CacheFilled {
+                view_id: view_id.to_string(),
+                bytes,
+                error,
+            }),
+        };
+        ch.send(frame_envelope(&env).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+    }
+
+    /// A lane advertising the full data + view-build capability set.
+    fn register_view_lane(url: &str) -> (Socket, String) {
+        register_executor_full(
+            url,
+            "unused-module",
+            0,
+            1,
+            Some(vec![
+                Capability::Data {
+                    op: DataOp::Open,
+                    formats: Some(vec!["csv".into()]),
+                },
+                Capability::Data {
+                    op: DataOp::ViewBuild,
+                    formats: None,
+                },
+            ]),
+        )
+    }
+
+    /// **The implied build, end to end** (§8): a stapled miss parks the work (never
+    /// dispatched), the router orders ONE fill to the free ViewBuild-capable worker,
+    /// the worker's `cache_filled` un-parks the work — and the dispatch carries the
+    /// RESOLVED `view_refs` (AV10) next to the untouched `dataset_paths` bridge.
+    #[test]
+    fn view_miss_parks_until_cache_filled() {
+        let url = format!("inproc://v2-vmiss-{}", unique());
+        let broker = start_broker(url.clone());
+        let (lane, _lid) = register_view_lane(&url);
+        let (runner, _rid) = register_executor(&url, "jaspTTests");
+        let (fe, session) = hello_frontend(&url);
+        let ds = open_dataset(&url, &lane, &fe, &session);
+
+        let spec = view_spec(&ds, "score", wire::ViewLevel::Scale);
+        let id = wire::view_id(&spec, 0); // fresh dataset, revision 0
+        fe.send(frame_envelope(&views_work("V", 1, "jaspTTests", &ds, vec![spec])).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+
+        // Parked, not dispatched — even though the analysis runner is idle.
+        assert_silent(&runner, "a view miss never dispatches");
+        // The book shows Wanted → Ordered once order_fills ran.
+        let snap = views_snapshot(&broker);
+        assert_eq!(snap.len(), 1, "one view entry: {snap:?}");
+        assert_eq!(snap[0].0, id);
+        assert_eq!(snap[0].1, "ordered");
+
+        // The fill went to the free builder.
+        let fill = recv_fill(&lane);
+        assert_eq!(fill.view_id, id);
+        assert_eq!(fill.spec.dataset_id, ds);
+        assert_eq!(fill.base_revision, 0);
+
+        // Confirm → Ready → un-park → dispatch with resolved refs.
+        send_cache_filled(&lane, &id, Some(1234), None);
+        let (v, body) = recv_raw_json(&runner);
+        assert!(matches!(body, Message::Work(w) if w.work_id == "V"));
+        let refs = v["view_refs"].as_array().expect("view_refs injected");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0]["dataset_id"], ds);
+        assert_eq!(refs[0]["view_id"], id);
+        assert!(
+            refs[0]["path"].as_str().unwrap().contains(&id),
+            "the ref points at the content-addressed blob: {}",
+            refs[0]["path"]
+        );
+        // The migration bridge rides along untouched.
+        assert!(
+            v["dataset_paths"][&ds].is_string(),
+            "dataset_paths still injected"
+        );
+        let snap = views_snapshot(&broker);
+        assert_eq!(snap[0].1, "ready");
+        assert_eq!(snap[0].2, 1234);
+        assert!(snap[0].3, "held by the live dispatch");
+    }
+
+    /// **Cache-hit fast path**: a second work stapling the SAME spec dispatches
+    /// immediately (no fill, no park) and the hold rule tracks the new dispatch.
+    #[test]
+    fn view_hit_dispatches_without_a_build() {
+        let url = format!("inproc://v2-vhit-{}", unique());
+        let broker = start_broker(url.clone());
+        let (lane, _lid) = register_view_lane(&url);
+        let (runner, _rid) = register_executor(&url, "jaspTTests");
+        let (fe, session) = hello_frontend(&url);
+        let ds = open_dataset(&url, &lane, &fe, &session);
+
+        let spec = view_spec(&ds, "score", wire::ViewLevel::Scale);
+        let id = wire::view_id(&spec, 0);
+        fe.send(
+            frame_envelope(&views_work("V1", 1, "jaspTTests", &ds, vec![spec.clone()])).as_slice(),
+        )
+        .map_err(|(_, e)| e)
+        .unwrap();
+        let fill = recv_fill(&lane);
+        assert_eq!(fill.view_id, id);
+        send_cache_filled(&lane, &id, Some(100), None);
+        let _w1 = recv_work(&runner);
+        send_result(&runner, &session, "V1", 1);
+        let _r = recv_result(&fe);
+
+        // Same spec again: instant dispatch, nothing to the lane.
+        fe.send(frame_envelope(&views_work("V2", 1, "jaspTTests", &ds, vec![spec])).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let w2 = recv_work(&runner);
+        assert_eq!(w2.work_id, "V2");
+        assert_silent(&lane, "a hit must not re-order a fill");
+        assert!(views_snapshot(&broker)[0].3, "held by V2's dispatch");
+        send_result(&runner, &session, "V2", 1);
+        let _ = recv_result(&fe);
+    }
+
+    /// **Pass-through** (§8): `all: true` unfiltered IS the base file — dispatch is
+    /// immediate, the ref names the BASE cache path, no view book entry ever exists.
+    #[test]
+    fn passthrough_hits_the_base_file() {
+        let url = format!("inproc://v2-vpass-{}", unique());
+        let broker = start_broker(url.clone());
+        let (lane, _lid) = register_view_lane(&url);
+        let (runner, _rid) = register_executor(&url, "jaspTTests");
+        let (fe, session) = hello_frontend(&url);
+        let ds = open_dataset(&url, &lane, &fe, &session);
+
+        let spec = wire::ViewSpec {
+            dataset_id: ds.clone(),
+            columns: None,
+            filter: None,
+            all: true,
+        };
+        fe.send(frame_envelope(&views_work("P", 1, "jaspTTests", &ds, vec![spec])).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let (v, body) = recv_raw_json(&runner);
+        assert!(matches!(body, Message::Work(w) if w.work_id == "P"));
+        let refs = v["view_refs"].as_array().unwrap();
+        assert_eq!(refs.len(), 1);
+        assert!(refs[0]["view_id"].is_null(), "pass-through has no blob id");
+        assert_eq!(
+            refs[0]["path"], v["dataset_paths"][&ds],
+            "the ref IS the base cache file — zero copy"
+        );
+        assert!(
+            views_snapshot(&broker).is_empty(),
+            "no book entry for a pass-through"
+        );
+        send_result(&runner, &session, "P", 1);
+        let _ = recv_result(&fe);
+    }
+
+    /// **Filters are refused visibly** (the derived-columns gate): no dispatch, no
+    /// fill, a `bad_request` error naming the work — never a silent ignore.
+    #[test]
+    fn filter_specs_are_refused() {
+        let url = format!("inproc://v2-vfilt-{}", unique());
+        let broker = start_broker(url.clone());
+        let (lane, _lid) = register_view_lane(&url);
+        let (runner, _rid) = register_executor(&url, "jaspTTests");
+        let (fe, session) = hello_frontend(&url);
+        let ds = open_dataset(&url, &lane, &fe, &session);
+
+        let spec = wire::ViewSpec {
+            filter: Some("some_mask".into()),
+            ..view_spec(&ds, "score", wire::ViewLevel::Scale)
+        };
+        fe.send(frame_envelope(&views_work("F", 1, "jaspTTests", &ds, vec![spec])).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let raw = fe.recv().expect("the refusal");
+        let env = deframe(&raw[..]).unwrap();
+        match env.body {
+            Message::Error(e) => {
+                assert_eq!(e.code, "bad_request");
+                assert!(e.message.contains("filters are not supported"));
+                assert_eq!(e.work_id.as_deref(), Some("F"));
+            }
+            other => panic!("expected an error, got {other:?}"),
+        }
+        assert_silent(&runner, "a refused work never dispatches");
+        assert_silent(&lane, "a refused work never orders a fill");
+        assert!(views_snapshot(&broker).is_empty());
+    }
+
+    /// **Deterministic build failures poison the view** and fail waiters visibly —
+    /// retrying an unbuildable spec can never succeed, so it is never retried.
+    #[test]
+    fn build_failure_fails_waiters_and_poisons() {
+        let url = format!("inproc://v2-vfail-{}", unique());
+        let broker = start_broker(url.clone());
+        let (lane, _lid) = register_view_lane(&url);
+        let (runner, _rid) = register_executor(&url, "jaspTTests");
+        let (fe, session) = hello_frontend(&url);
+        let ds = open_dataset(&url, &lane, &fe, &session);
+
+        let spec = view_spec(&ds, "score", wire::ViewLevel::Scale);
+        let id = wire::view_id(&spec, 0);
+        fe.send(
+            frame_envelope(&views_work("W1", 1, "jaspTTests", &ds, vec![spec.clone()])).as_slice(),
+        )
+        .map_err(|(_, e)| e)
+        .unwrap();
+        assert_eq!(recv_fill(&lane).view_id, id);
+        send_cache_filled(&lane, &id, None, Some("unknown column 'score'".into()));
+
+        // The waiter fails visibly with the builder's own reason (after its park
+        // running-marker — recv_terminal skips markers).
+        let r = recv_terminal(&fe);
+        assert_eq!(r.work_id, "W1");
+        assert!(matches!(r.status, Status::FatalError));
+        match r.payload {
+            ResultPayload::AnalysisRClassicJaspbase(_) => {} // error rides the message
+            other => panic!("expected analysis payload, got {other:?}"),
+        }
+
+        // A second work with the SAME spec is refused at staple time (poisoned).
+        fe.send(frame_envelope(&views_work("W2", 1, "jaspTTests", &ds, vec![spec])).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let r2 = recv_terminal(&fe);
+        assert_eq!(r2.work_id, "W2");
+        assert!(matches!(r2.status, Status::FatalError));
+        let snap = views_snapshot(&broker);
+        assert_eq!(snap[0].1, "failed", "the view is poisoned: {snap:?}");
+        assert_silent(&runner, "poisoned specs never dispatch");
+    }
+
+    /// **The one hold rule** (§4): under budget pressure only UNHELD ready views are
+    /// LRU food — a view referenced by a live dispatch is never reclaimed. The tick
+    /// is driven directly (deterministic — no hang-detector cadence in the test).
+    #[test]
+    fn hold_rule_lru_reclaims_only_unheld_views() {
+        let url = format!("inproc://v2-vhold-{}", unique());
+        // Two 50 MiB views against a 64 MiB budget: pressure only when one is unheld.
+        let config = Config {
+            view_budget_bytes: 64 * 1024 * 1024,
+            ..test_config(url.clone())
+        };
+        let (tx, rx) = mpsc::channel();
+        let broker = Broker::start_inner(config, tx, rx, None);
+        let control = Socket::new(Protocol::Rep0).unwrap();
+        wire::transport::listen_control(&control, &url).unwrap();
+        Broker::arm_control(&broker, Arc::new(control)).unwrap();
+        let tick = |broker: &Broker| {
+            broker.tx.send(RouterMsg::Tick).unwrap();
+            // The tick is synchronous on the router thread; QueryViews shares the
+            // mailbox, so its reply proves the Tick ran (a fence).
+            let (qtx, qrx) = std::sync::mpsc::channel();
+            broker.tx.send(RouterMsg::QueryViews(qtx)).unwrap();
+            qrx.recv_timeout(Duration::from_secs(5)).unwrap()
+        };
+
+        let (lane, _lid) = register_view_lane(&url);
+        // slots=2: HA and HB dispatch CONCURRENTLY — each holds its view at the same
+        // time (the whole point: pressure while both are held).
+        let (runner, _rid) = register_executor_full(&url, "jaspTTests", 0, 2, None);
+        let (fe, session) = hello_frontend(&url);
+        let ds = open_dataset(&url, &lane, &fe, &session);
+
+        // Two views, both Ready; two dispatches holding one each.
+        let spec_a = view_spec(&ds, "a", wire::ViewLevel::Scale);
+        let id_a = wire::view_id(&spec_a, 0);
+        let spec_b = view_spec(&ds, "b", wire::ViewLevel::Scale);
+        let id_b = wire::view_id(&spec_b, 0);
+        fe.send(frame_envelope(&views_work("HA", 1, "jaspTTests", &ds, vec![spec_a])).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        assert_eq!(recv_fill(&lane).view_id, id_a);
+        send_cache_filled(&lane, &id_a, Some(50 * 1024 * 1024), None);
+        let _wa = recv_work(&runner); // HA dispatched — holds id_a
+
+        fe.send(frame_envelope(&views_work("HB", 1, "jaspTTests", &ds, vec![spec_b])).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        assert_eq!(recv_fill(&lane).view_id, id_b);
+        send_cache_filled(&lane, &id_b, Some(50 * 1024 * 1024), None);
+        let _wb = recv_work(&runner); // HB dispatched — holds id_b
+
+        // Both held, 100 MiB > 64 MiB budget: the sweep must reclaim NOTHING.
+        let snap = tick(&broker);
+        assert_eq!(snap.len(), 2, "held views are never reclaimed: {snap:?}");
+        assert!(snap.iter().all(|s| s.3), "both held");
+
+        // Terminal HB: id_b unheld → the next tick reclaims it (LRU); id_a stays
+        // (still held by HA). (recv_terminal — the park marker must not satisfy us.)
+        send_result(&runner, &session, "HB", 1);
+        let r = recv_terminal(&fe);
+        assert_eq!(r.work_id, "HB");
+        let snap = tick(&broker);
+        assert_eq!(snap.len(), 1, "the unheld view was reclaimed: {snap:?}");
+        assert_eq!(snap[0].0, id_a, "the held one survives");
+
+        send_result(&runner, &session, "HA", 1);
+        let _ = recv_terminal(&fe);
+    }
+
+    /// **Worker death mid-build just re-orders** (§8): the waiters were never
+    /// dispatched, so nothing frontend-visible fails — the fill resets to Wanted and
+    /// the next capable worker takes it; the work then flows exactly as on a hit.
+    #[test]
+    fn worker_death_reorders_the_fill() {
+        let url = format!("inproc://v2-vreorder-{}", unique());
+        let broker = start_broker(url.clone());
+        // One lane first — it serves the open (deterministic: the only Open).
+        let (lane1, _lid1) = register_view_lane(&url);
+        let (runner, _rid) = register_executor(&url, "jaspTTests");
+        let (fe, session) = hello_frontend(&url);
+        let ds = open_dataset(&url, &lane1, &fe, &session);
+        // A second builder joins: higher seq ⇒ it wins the fill order.
+        let (lane2, lid2) = register_view_lane(&url);
+
+        let spec = view_spec(&ds, "score", wire::ViewLevel::Scale);
+        let id = wire::view_id(&spec, 0);
+        fe.send(frame_envelope(&views_work("R", 1, "jaspTTests", &ds, vec![spec])).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        let fill = recv_fill(&lane2);
+        assert_eq!(fill.view_id, id);
+        assert_silent(&runner, "still parked — nothing dispatches");
+
+        // lane2 dies with the fill outstanding: eviction resets the fill to Wanted,
+        // and the re-order hands it to lane1 — the work never fails, never re-submits.
+        drop(lane2);
+        let deadline = Instant::now() + Duration::from_millis(2_000);
+        loop {
+            if !broker.runners_snapshot().contains(&lid2) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "dead builder never evicted");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let fill2 = recv_fill(&lane1);
+        assert_eq!(
+            fill2.view_id, id,
+            "the SAME fill re-ordered to the survivor"
+        );
+
+        // Confirm on lane1 → dispatch as if nothing happened.
+        send_cache_filled(&lane1, &id, Some(64), None);
+        let w = recv_work(&runner);
+        assert_eq!(w.work_id, "R");
+        send_result(&runner, &session, "R", 1);
+        let r = recv_terminal(&fe);
+        assert_eq!(r.status, Status::Complete);
     }
 }

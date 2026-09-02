@@ -57,6 +57,14 @@ pub const RECV_MAX_SIZE: usize = MAX_INLINE_PAYLOAD + RECV_MARGIN;
 /// (`JASP_VIEW_CHUNK_BYTES`, format doc §1.1). Many chunks, never one big message.
 pub const VIEW_CHUNK_BYTES: u64 = 20_000_000;
 
+/// **Views-era (additive):** the writer/codec generation folded into every `view_id`
+/// hash input (AV8 as amended by orchestrator-v2 §3). A change to how views are
+/// *materialized* (field naming, dictionary construction, metadata layout, IPC writer
+/// options…) bumps this constant — and therefore every `view_id` — so a new writer can
+/// never false-hit against a blob written by an old one. It is NOT a wire-protocol
+/// version (that stays `v = 1`).
+pub const VIEW_FORMAT_VERSION: &str = "av1";
+
 fn default_view_chunk_bytes() -> u64 {
     VIEW_CHUNK_BYTES
 }
@@ -108,6 +116,17 @@ pub enum Message {
     Modules(ModulesMsg),
     /// Unsolicited dataset-revision push on the data channel (data-edit-design §6).
     DataChanged(DataChanged),
+    /// **Views-era (additive, internal):** the router orders a data worker to materialize
+    /// one analysis view (orchestrator-v2 §8 implied build — "router orders, worker
+    /// executes", the same split as `data_open`). NOT a work unit (the rejected-ideas table
+    /// killed that: no result-forwarding, no correlation, no credit) — it costs no credit
+    /// and is never forwarded anywhere. Classic never sends it; a worker that doesn't
+    /// advertise `data_view_build` never receives it.
+    CacheFill(CacheFill),
+    /// **Views-era (additive, internal):** the worker's confirmation that a view blob
+    /// exists (or could not be built). Un-parks waiters router-side; **never forwarded to
+    /// the frontend** — a cache fill has no frontend-visible identity to fail.
+    CacheFilled(CacheFilled),
     // The remaining catalog messages are added the same way: one variant + one struct each.
 }
 
@@ -123,6 +142,15 @@ pub struct Work {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_revision: Option<u64>,
     pub dataset_ids: Vec<String>,
+    /// **Views-era (additive):** stapled view specs, one per dataset input this work reads
+    /// (order-preserving vs `dataset_ids`; a spec names its own `dataset_id` — analysis-views
+    /// §4). The ROUTER computes each `view_id = hash(VIEW_FORMAT_VERSION, spec,
+    /// base_revision)` at staple time (µs of CPU — P1), checks its books, and — on a miss —
+    /// parks the work and orders the implied build (orchestrator-v2 §8). At dispatch the
+    /// specs are resolved to fetch refs (`{dataset_id, view_id, path}`) on the envelope.
+    /// Absent = no views (the pre-views shape; runners keep receiving `dataset_paths`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub views: Option<Vec<ViewSpec>>,
     /// `kind` + `payload`, flattened so they sit at the work level (adjacently tagged).
     #[serde(flatten)]
     pub payload: WorkPayload,
@@ -315,6 +343,126 @@ impl Default for ViewRender {
             precision: Self::default_precision(),
         }
     }
+}
+
+/// One column of a stapled view spec (analysis-views §4): the column's DISPLAY name plus
+/// the measurement level the analysis wants it materialized at. `as` is a keyword, hence
+/// the field rename. Multiplicity is structural — the same column at two types is two
+/// entries; the type is a closed structured vocabulary, never a string convention.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ViewColumn {
+    pub name: String,
+    #[serde(rename = "as")]
+    pub as_type: ViewLevel,
+}
+
+/// The measurement-level vocabulary of view casts (the wire schema's own — system-native,
+/// so casts keyed by it carry no language lore). Matches the cache's Arrow encodings of
+/// neo-jasp §8.3: scale = `float64`, ordinal = ordered dictionary, nominal = plain
+/// dictionary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewLevel {
+    Scale,
+    Ordinal,
+    Nominal,
+}
+
+impl ViewLevel {
+    /// The `__`-suffix vocabulary of view field names (AV6: `<real name>__<type>`; the
+    /// type part never contains `__`, so parsing anchors at the LAST `__`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ViewLevel::Scale => "scale",
+            ViewLevel::Ordinal => "ordinal",
+            ViewLevel::Nominal => "nominal",
+        }
+    }
+}
+
+/// A stapled view spec (analysis-views §4, orchestrator-v2 §3) — the desired projection of
+/// ONE dataset input, carried on the work unit. The router hashes it (with the dataset's
+/// base revision) into a `view_id`; the worker materializes it deterministically (AV4: the
+/// worker owns all casts/relabeling; AV8: same hash ⇒ byte-identical rebuild).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ViewSpec {
+    /// The dataset this projection reads (must be one of the work's `dataset_ids`).
+    pub dataset_id: String,
+    /// The wanted columns (display names). `None` + `all: true` = every column in schema
+    /// order — and, unfiltered, the pass-through shape (resolves to a reference to the base
+    /// file — zero copy, orchestrator-v2 §8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub columns: Option<Vec<ViewColumn>>,
+    /// A derived boolean column reference to apply as the row mask (analysis-views §9).
+    /// **Blocked until the derived-columns design lands** — a filter must BE data; there is
+    /// no R-expression evaluator in Rust (rejected, analysis-views §14). Specs carrying a
+    /// filter are refused visibly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    /// True = the analysis declared `fullDataset` (AV3): read-set not derivable, wants
+    /// everything.
+    #[serde(default)]
+    pub all: bool,
+}
+
+impl ViewSpec {
+    /// The pass-through shape (orchestrator-v2 §8): wants every column, unfiltered — the
+    /// view IS the base file, so the router resolves it to a reference to the base cache
+    /// (zero copy, zero build, never enters the view book).
+    pub fn is_pass_through(&self) -> bool {
+        self.filter.is_none() && (self.all || self.columns.is_none())
+    }
+
+    /// Canonical byte form for hashing: struct-field order is fixed by serde, `Option`
+    /// skips are deterministic — `serde_json::to_vec` of this struct is a canonical form.
+    fn canonical(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("view spec serializes")
+    }
+}
+
+/// `view_id = hash(VIEW_FORMAT_VERSION, spec, base_revision)` (orchestrator-v2 §3,
+/// AV8 amended). Computed by the ROUTER at staple time; folded into every view file name
+/// and the content-addressed book. Determinism is load-bearing: same id ⇒ same bytes.
+pub fn view_id(spec: &ViewSpec, base_revision: u64) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(VIEW_FORMAT_VERSION.as_bytes());
+    h.update([0u8]); // separator — the version tag can't bleed into the spec bytes
+    h.update(spec.canonical());
+    h.update(base_revision.to_le_bytes());
+    let d = h.finalize();
+    d.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The router's order to a data worker: materialize one view blob (orchestrator-v2 §8).
+/// The router mints identity (`view_id` + `target` path — same split as `data_open`'s
+/// `cache_path`); the worker reads `source` (the base cache at the revision the id was
+/// hashed against) and writes `target`. Deterministic: a repeated order rebuilds the same
+/// bytes (AV8) — fills are idempotent, so a lost or duplicated order is harmless.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CacheFill {
+    pub view_id: String,
+    pub spec: ViewSpec,
+    /// The base dataset cache file to read (injected — the worker is stateless, P2).
+    pub source: String,
+    /// The view blob to write (router-minted, content-addressed: `<session>/views/<hash>.arrow`).
+    pub target: String,
+    /// The base dataset revision the `view_id` was hashed against (rides the view's schema
+    /// metadata; staleness is unreachable-by-hash, not checked).
+    pub base_revision: u64,
+}
+
+/// The worker's confirmation of a [`CacheFill`] (internal; never forwarded): either the
+/// blob now exists (`bytes` = its size on disk) or it could not be built (`error` — a
+/// deterministic spec failure like an unknown column; waiters are failed visibly, since
+/// retrying an unbuildable spec can never succeed).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CacheFilled {
+    pub view_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -756,6 +904,15 @@ pub enum DataOp {
     /// Feather and renders the window as escaped TSV in the frame's binary part.
     #[serde(rename = "data_view")]
     View,
+    /// **Views-era (additive):** the ANALYSIS-view build function (orchestrator-v2 §8 /
+    /// analysis-views AV4) — materializing stapled-spec typed-Arrow projections. A
+    /// different artifact from [`DataOp::View`] (the GRID's chunked TSV reads — the naming
+    /// hazard of analysis-views §11): `view_build` is never a frontend-visible work op; it
+    /// is only the capability key a data worker advertises so the v2 router knows who can
+    /// execute a `cache_fill` order. Classic ignores the capability (it never orders
+    /// builds); the op value deserializes everywhere because the enum is shared.
+    #[serde(rename = "view_build")]
+    ViewBuild,
 }
 
 /// Orchestrator → Runner: registration response (§19.5).
@@ -973,6 +1130,7 @@ mod tests {
                 revision: 6,
                 base_revision: None,
                 dataset_ids: vec!["ds-4".into()],
+                views: None,
                 payload: WorkPayload::Data(DataWork {
                     op: DataOp::Edit,
                     source: String::new(),
@@ -1119,5 +1277,124 @@ mod tests {
             }) => assert_eq!(d.inverse.unwrap().base_revision, 6),
             other => panic!("expected result, got {other:?}"),
         }
+    }
+
+    /// The views-era additions keep the frozen wire shape (orchestrator-v2 §3): `views`
+    /// rides `work` absent-when-none; the spec's `as` is the structured type vocabulary;
+    /// `cache_fill`/`cache_filled` are internally tagged like every other message; and
+    /// `view_id` is a pure function of (FORMAT_VERSION, spec, base_revision) — stable
+    /// across calls and sensitive to each input (AV8's determinism is load-bearing).
+    #[test]
+    fn view_specs_and_ids_round_trip() {
+        let spec = ViewSpec {
+            dataset_id: "ds-4".into(),
+            columns: Some(vec![
+                ViewColumn {
+                    name: "Age (years)".into(),
+                    as_type: ViewLevel::Scale,
+                },
+                ViewColumn {
+                    name: "group".into(),
+                    as_type: ViewLevel::Nominal,
+                },
+                ViewColumn {
+                    name: "group".into(),
+                    as_type: ViewLevel::Scale, // multiplicity is structural
+                },
+            ]),
+            filter: None,
+            all: false,
+        };
+        let env = Envelope {
+            v: 1,
+            id: "w-9".into(),
+            reply_to: None,
+            session_id: None,
+            format: None,
+            ts: None,
+            body: Message::Work(Work {
+                work_id: "w-9".into(),
+                revision: 1,
+                base_revision: None,
+                dataset_ids: vec!["ds-4".into()],
+                views: Some(vec![spec.clone()]),
+                payload: WorkPayload::Rcode(RcodeWork {
+                    code: String::new(),
+                    env: serde_json::Value::Null,
+                }),
+            }),
+        };
+        let v: serde_json::Value = serde_json::to_value(&env).unwrap();
+        assert_eq!(v["views"][0]["columns"][0]["as"], "scale");
+        assert_eq!(v["views"][0]["columns"][1]["as"], "nominal");
+        let back: Envelope = serde_json::from_value(v).unwrap();
+        match back.body {
+            Message::Work(w) => assert_eq!(w.views, Some(vec![spec.clone()])),
+            other => panic!("expected work, got {other:?}"),
+        }
+
+        // No views → no `views` key (the pre-views shape is byte-identical).
+        let bare = serde_json::to_value(Work {
+            work_id: "w-1".into(),
+            revision: 1,
+            base_revision: None,
+            dataset_ids: vec![],
+            views: None,
+            payload: WorkPayload::Rcode(RcodeWork {
+                code: String::new(),
+                env: serde_json::Value::Null,
+            }),
+        })
+        .unwrap();
+        assert!(bare.get("views").is_none());
+
+        // Content addressing: pure, stable, input-sensitive.
+        let id = view_id(&spec, 3);
+        assert_eq!(id.len(), 64);
+        assert_eq!(view_id(&spec, 3), id);
+        assert_ne!(view_id(&spec, 4), id); // base revision is a hash input
+        let mut other = spec.clone();
+        other.all = true;
+        assert_ne!(view_id(&other, 3), id); // the spec is a hash input
+
+        // The fill/confirm pair is internally tagged like every other message.
+        let fill = Message::CacheFill(CacheFill {
+            view_id: id.clone(),
+            spec,
+            source: "/base.arrow".into(),
+            target: "/views/abc.arrow".into(),
+            base_revision: 3,
+        });
+        let v: serde_json::Value = serde_json::to_value(&fill).unwrap();
+        assert_eq!(v["type"], "cache_fill");
+        assert_eq!(v["base_revision"], 3);
+        let filled = Message::CacheFilled(CacheFilled {
+            view_id: id,
+            bytes: Some(4096),
+            error: None,
+        });
+        let v: serde_json::Value = serde_json::to_value(&filled).unwrap();
+        assert_eq!(v["type"], "cache_filled");
+        assert_eq!(v["bytes"], 4096);
+
+        // Pass-through detection (§8): all-or-no-columns AND unfiltered.
+        assert!(
+            ViewSpec {
+                dataset_id: "d".into(),
+                columns: None,
+                filter: None,
+                all: true,
+            }
+            .is_pass_through()
+        );
+        assert!(
+            !ViewSpec {
+                dataset_id: "d".into(),
+                columns: None,
+                filter: Some("mask".into()),
+                all: true,
+            }
+            .is_pass_through()
+        );
     }
 }

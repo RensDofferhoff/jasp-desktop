@@ -97,6 +97,16 @@
             "work"
           ]
         },
+        "views": {
+          "description": "**Views-era (additive):** stapled view specs, one per dataset input this work reads (order-preserving vs `dataset_ids`; a spec names its own `dataset_id` — analysis-views §4). The ROUTER computes each `view_id = hash(VIEW_FORMAT_VERSION, spec, base_revision)` at staple time (µs of CPU — P1), checks its books, and — on a miss — parks the work and orders the implied build (orchestrator-v2 §8). At dispatch the specs are resolved to fetch refs (`{dataset_id, view_id, path}`) on the envelope. Absent = no views (the pre-views shape; runners keep receiving `dataset_paths`).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/ViewSpec"
+          }
+        },
         "work_id": {
           "type": "string"
         }
@@ -589,6 +599,79 @@
           ]
         }
       }
+    },
+    {
+      "description": "**Views-era (additive, internal):** the router orders a data worker to materialize one analysis view (orchestrator-v2 §8 implied build — \"router orders, worker executes\", the same split as `data_open`). NOT a work unit (the rejected-ideas table killed that: no result-forwarding, no correlation, no credit) — it costs no credit and is never forwarded anywhere. Classic never sends it; a worker that doesn't advertise `data_view_build` never receives it.",
+      "type": "object",
+      "required": [
+        "base_revision",
+        "source",
+        "spec",
+        "target",
+        "type",
+        "view_id"
+      ],
+      "properties": {
+        "base_revision": {
+          "description": "The base dataset revision the `view_id` was hashed against (rides the view's schema metadata; staleness is unreachable-by-hash, not checked).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "source": {
+          "description": "The base dataset cache file to read (injected — the worker is stateless, P2).",
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/definitions/ViewSpec"
+        },
+        "target": {
+          "description": "The view blob to write (router-minted, content-addressed: `<session>/views/<hash>.arrow`).",
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "cache_fill"
+          ]
+        },
+        "view_id": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "**Views-era (additive, internal):** the worker's confirmation that a view blob exists (or could not be built). Un-parks waiters router-side; **never forwarded to the frontend** — a cache fill has no frontend-visible identity to fail.",
+      "type": "object",
+      "required": [
+        "type",
+        "view_id"
+      ],
+      "properties": {
+        "bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "cache_filled"
+          ]
+        },
+        "view_id": {
+          "type": "string"
+        }
+      }
     }
   ],
   "required": [
@@ -840,6 +923,13 @@
           "type": "string",
           "enum": [
             "data_view"
+          ]
+        },
+        {
+          "description": "**Views-era (additive):** the ANALYSIS-view build function (orchestrator-v2 §8 / analysis-views AV4) — materializing stapled-spec typed-Arrow projections. A different artifact from [`DataOp::View`] (the GRID's chunked TSV reads — the naming hazard of analysis-views §11): `view_build` is never a frontend-visible work op; it is only the capability key a data worker advertises so the v2 router knows who can execute a `cache_fill` order. Classic ignores the capability (it never orders builds); the op value deserializes everywhere because the enum is shared.",
+          "type": "string",
+          "enum": [
+            "view_build"
           ]
         }
       ]
@@ -1481,6 +1571,31 @@
         }
       }
     },
+    "ViewColumn": {
+      "description": "One column of a stapled view spec (analysis-views §4): the column's DISPLAY name plus the measurement level the analysis wants it materialized at. `as` is a keyword, hence the field rename. Multiplicity is structural — the same column at two types is two entries; the type is a closed structured vocabulary, never a string convention.",
+      "type": "object",
+      "required": [
+        "as",
+        "name"
+      ],
+      "properties": {
+        "as": {
+          "$ref": "#/definitions/ViewLevel"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "ViewLevel": {
+      "description": "The measurement-level vocabulary of view casts (the wire schema's own — system-native, so casts keyed by it carry no language lore). Matches the cache's Arrow encodings of neo-jasp §8.3: scale = `float64`, ordinal = ordered dictionary, nominal = plain dictionary.",
+      "type": "string",
+      "enum": [
+        "scale",
+        "ordinal",
+        "nominal"
+      ]
+    },
     "ViewRender": {
       "description": "Locale rendering spec for `data_view` requests (data-view-format.md §1.2): explicit separator **characters**, not a locale id — the frontend's `QLocale` is the authority and the lane stays dependency-free. A locale/separator change is a drop-and-refill on the frontend (the buffer's strings are locale-baked).",
       "type": "object",
@@ -1501,6 +1616,41 @@
           "description": "Grouping (thousands) separator; `\"\"` = no grouping.",
           "default": "",
           "type": "string"
+        }
+      }
+    },
+    "ViewSpec": {
+      "description": "A stapled view spec (analysis-views §4, orchestrator-v2 §3) — the desired projection of ONE dataset input, carried on the work unit. The router hashes it (with the dataset's base revision) into a `view_id`; the worker materializes it deterministically (AV4: the worker owns all casts/relabeling; AV8: same hash ⇒ byte-identical rebuild).",
+      "type": "object",
+      "required": [
+        "dataset_id"
+      ],
+      "properties": {
+        "all": {
+          "description": "True = the analysis declared `fullDataset` (AV3): read-set not derivable, wants everything.",
+          "default": false,
+          "type": "boolean"
+        },
+        "columns": {
+          "description": "The wanted columns (display names). `None` + `all: true` = every column in schema order — and, unfiltered, the pass-through shape (resolves to a reference to the base file — zero copy, orchestrator-v2 §8).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/ViewColumn"
+          }
+        },
+        "dataset_id": {
+          "description": "The dataset this projection reads (must be one of the work's `dataset_ids`).",
+          "type": "string"
+        },
+        "filter": {
+          "description": "A derived boolean column reference to apply as the row mask (analysis-views §9). **Blocked until the derived-columns design lands** — a filter must BE data; there is no R-expression evaluator in Rust (rejected, analysis-views §14). Specs carrying a filter are refused visibly.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

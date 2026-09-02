@@ -64,6 +64,9 @@ struct Config {
     provisioner: Option<ProvisionerConfig>,
     /// Data-plane workers the provisioner keeps alive (pinned, auto-restarted).
     lane_specs: Vec<LaneSpec>,
+    /// View-cache disk budget (bytes) — the LRU sweep's ceiling (AV9: LRU + budget;
+    /// the one hold rule of v2 §4 bounds what stays). `JASP_ORCH_VIEW_BUDGET_MB`, default 2 GiB.
+    view_budget_bytes: u64,
 }
 
 /// Resolve the data-runner binary for the CSV lane: `JASP_ORCH_DATA_RUNNER` override
@@ -165,6 +168,7 @@ impl Config {
                     }]
                 })
                 .unwrap_or_default(),
+            view_budget_bytes: parse("JASP_ORCH_VIEW_BUDGET_MB", 2048) * 1024 * 1024,
         }
     }
 
@@ -207,6 +211,15 @@ impl Config {
         self.session_workspace(session_id)
             .join("datasets")
             .join(format!("{dataset_id}_{revision}.arrow"))
+    }
+
+    /// A view blob's content-addressed path (AV8): `<root>/<session>/views/<hash>.arrow`.
+    /// Router-minted identity (the hash IS the name); the data worker writes the bytes.
+    /// Dies with the session workspace (teardown wipe) — no per-view lifecycle on close.
+    fn view_cache_path(&self, session_id: &str, view_id: &str) -> PathBuf {
+        self.session_workspace(session_id)
+            .join("views")
+            .join(format!("{view_id}.arrow"))
     }
 }
 

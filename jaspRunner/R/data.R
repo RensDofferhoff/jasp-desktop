@@ -28,8 +28,27 @@ label_or_value <- function(values, labels) {
   }, character(1))
 }
 
+#' The system level-string format (mirrors the worker's `level_string`,
+#' crates/data_runner/src/analysisview.rs — AV4: the WORKER owns casts and their
+#' formatting; this R mirror exists ONLY so the migration-era fallback path
+#' produces frames identical to the views path, and dies with it at slice D).
+#'
+#' Contract: plain C %.15g — 15 significant digits, trailing zeros trimmed,
+#' scientific iff the decimal exponent is < -4 or >= 15. Values agreeing at 15
+#' significant digits render identically and are ONE category (deliberate,
+#' documented grouping semantics; callers dedupe on the string). Locale-free by
+#' design: level strings are data identity keys, not presentation (locale is a
+#' display-time concern — design doc D10). Pinned against the worker by
+#' tests/view_parity.R.
+jasp_level_string <- function(v) {
+  if (v == 0) return("0")
+  sprintf("%.15g", v)
+}
+
 #' Load the requested columns from a Feather (Arrow IPC + LZ4) cache file, each as its requested
-#' type, with display labels applied and ordinals ordered.
+#' type, with display labels applied and ordinals ordered. Conforms to the system
+#' coercion matrix (the worker's, analysisview.rs) — the migration-era twin of the
+#' views builder; its formatting/typing quirks die with this file at slice D.
 #'
 #' @param path         Path to the dataset's Feather cache file (orchestrator-owned; read-only).
 #' @param columns_spec list of `list(name = <canonical name>, as = "scale"|"nominal"|"ordinal")`.
@@ -86,15 +105,31 @@ read_jasp_data <- function(path, columns_spec, filters = NULL) {
         labels <- labels_for(s$name)
         if (!is.null(labels) && length(labels) > 0L)
           levels(vals) <- label_or_value(levels(vals), labels)
+        # System matrix: nominal is UNORDERED, always (the worker emits plain
+        # dictionaries for nominal casts — an ordered-stored base does not leak).
+        if (s$as == "nominal" && is.ordered(vals))
+          class(vals) <- "factor"
         if (s$as == "ordinal" && !is.ordered(vals))
-          class(vals) <- c("ordered", "factor")              # O(1): Arrow `ordered` flag => ordinal
+          class(vals) <- c("ordered", "factor")              # O(1): flag flip only
         out[[s$name]] <- vals
       }
     } else {                                                # scale (float64) column
-      out[[s$name]] <- switch(s$as,
-        scale   = vals,                                      # already numeric — no factor round-trip
-        nominal = factor(vals),                              # R sorts numeric levels numerically
-        ordinal = ordered(factor(vals)))
+      if (s$as == "scale") {
+        out[[s$name]] <- vals                                # already numeric — no factor round-trip
+      } else {
+        # System matrix: non-finite is MISSING, never a category; levels = the
+        # distinct values sorted NUMERICALLY, rendered with the system
+        # jasp_level_string and DEDUPED ON THE STRING (values agreeing at 15
+        # significant digits are one category — the %.15g grouping rule).
+        vals[!is.finite(vals)] <- NA
+        u <- sort(unique(vals[!is.na(vals)]))
+        labs <- vapply(u, jasp_level_string, character(1))
+        labs <- labs[!duplicated(labs)]      # first occurrence in numeric order wins
+        row_lab <- vapply(vals, function(x)
+          if (is.na(x)) NA_character_ else jasp_level_string(x), character(1))
+        out[[s$name]] <- factor(match(row_lab, labs), levels = seq_along(labs),
+                                labels = labs, ordered = (s$as == "ordinal"))
+      }
     }
   }
   out <- out[sel]                                            # drop filter cols, keep requested order

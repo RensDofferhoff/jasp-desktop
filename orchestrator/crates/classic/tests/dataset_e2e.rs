@@ -230,6 +230,7 @@ fn open_dataset(fe: &Socket, path: &str, work_id: &str) -> (Status, DataResult) 
             revision: 0,
             base_revision: None,
             dataset_ids: Vec::new(),
+            views: None,
             payload: WorkPayload::Data(messages::DataWork {
                 op: messages::DataOp::Open,
                 source: path.to_string(),
@@ -339,6 +340,7 @@ fn csv_open_work_and_feather_read() {
             revision: 0,
             base_revision: None,
             dataset_ids: vec![dataset_id.clone()],
+            views: None,
             payload: WorkPayload::AnalysisRClassicJaspbase(AnalysisWork {
                 module: "jaspE2E".into(),
                 module_version: "0.1".into(),
@@ -533,6 +535,7 @@ fn view_dataset(
             revision: 0,
             base_revision: None,
             dataset_ids: vec![dataset_id.to_string()],
+            views: None,
             payload: WorkPayload::Data(messages::DataWork {
                 op: messages::DataOp::View,
                 source: String::new(),
@@ -723,6 +726,7 @@ fn view_of_unknown_dataset_errors() {
             revision: 0,
             base_revision: None,
             dataset_ids: vec!["ds-nope".to_string()],
+            views: None,
             payload: WorkPayload::Data(messages::DataWork {
                 op: messages::DataOp::View,
                 source: String::new(),
@@ -775,6 +779,7 @@ fn edit_dataset(
             revision: base_revision, // D11: the CURRENT dataset revision (echo-only)
             base_revision: None,
             dataset_ids: vec![dataset_id.to_string()],
+            views: None,
             payload: WorkPayload::Data(messages::DataWork {
                 op: messages::DataOp::Edit,
                 source: String::new(), // the orchestrator injects the pre-edit cache

@@ -12,3 +12,7 @@ schemars = { workspace = true }
 # design §11 rule 1: the hard-won NNG traps live in exactly one place, and both
 # orchestrators use it).
 nng = { workspace = true }
+# view_id content addressing (orchestrator-v2 §3): SHA-256 over (VIEW_FORMAT_VERSION,
+# spec, base_revision). Cross-process stable (unlike std's SipHash) — the id is the
+# content-addressed contract, session-scoped today, federation-scoped later.
+sha2 = "0.10"

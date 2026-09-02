@@ -1,218 +1,208 @@
-# HANDOVER — orchestrator v2: scheduler LANDED → the views phase is next
+# HANDOVER — orchestrator v2: views LANDED (router+worker) → the runner read seam is next
 
-**Date:** 2026-09-02 (evening) · **Status:** §12 steps 1–4 + runner-side abort are
-**implemented, tested, e2e-verified**; views phase (steps 5–8) not started ·
-**Constitution:** `refactor_design/orchestrator-v2-design.md` (its status block is
-updated to say exactly this)
+**Date:** 2026-09-02 (late evening, session two) · **Status:** §12 steps 1–5 + runner-side
+abort are **implemented, tested, e2e-verified**; the runner-side view READ seam,
+coercion parity (gate 2), the differential flip (step 7), and prefetch (step 8) are
+not started · **Constitution:** `refactor_design/orchestrator-v2-design.md` (its status
+block + §13 addendum say exactly this)
 
 ## Where this lives in git
 
-Landed as ONE atomic commit on `development` ("orchestrator v2 phase 1: the
-scheduler + workspace + runner abort plane" — `git log --oneline -3` finds it):
-the split, the v2 crate, and the runner plane cross-reference, and every
-intermediate state was only ever validated as a whole. Deliberately NOT in that
-commit (pre-existing, still uncommitted — decide their fate separately):
-`AGENTS.md` local mods, `analysis-views-design.md` local mods, the other untracked
-`HANDOVER-*.md` files, and the numbered junk dirs at repo root (crash dumps).
-`orchestrator/messages.schema.json` is regenerated and committed (now contains
-`slots` + `aborted`).
+Steps 1–4 + abort landed as the atomic commit `4f7c61dea` on `development`. **This
+session's views work is UNCOMMITTED** — review/commit as one slice (the wire additions,
+the worker builder, the router book, the tests, the schema regen, the doc updates).
+Still deliberately uncommitted from before (decide their fate separately): `AGENTS.md`
+local mods, `analysis-views-design.md` local mods, other untracked `HANDOVER-*.md`,
+the numbered junk dirs at repo root. `orchestrator/messages.schema.json` is
+regenerated (now carries `views`, `cache_fill`, `cache_filled`, `view_build`, the
+`ViewSpec` family).
 
 ## Read first, in this order
 
-1. `orchestrator-v2-design.md` — THE design (§0 TL;DR → all of it). The
-   rejected-ideas tables (§15 + §8's view graveyard) and `analysis-views-design.md`
-   §14 are **law** — doubted into the ground; don't relitigate without new evidence.
-2. This file's "What landed" + "Decisions & deviations" sections — the implementation
-   made calls the design doc doesn't record.
-3. `analysis-views-design.md` — the views concept, **amended** (status block):
-   AV6/7/9/11 superseded by v2 §8; AV1–AV5, AV8(+`FORMAT_VERSION`), AV10, AV12 stand.
-4. `orchestrator-design.md` — classic, the as-built spec (pre-extraction paths).
+1. `orchestrator-v2-design.md` §8 (views) + §3 (the views wire rows) — THE design.
+   §13's post-views addendum maps every file. The rejected tables (§15, §8, AV §14)
+   are **law**.
+2. This file's "What landed" + "Decisions & deviations" — the implementation made
+   calls the design doc doesn't record.
+3. `analysis-views-design.md` — the concept, as amended (AV6/7/9/11 superseded by §8;
+   the §5 artifact and §7 R-side duties are the NEXT session's brief).
 
-## What landed (map)
+## What landed this session (the views phase, step ⑤)
 
-`orchestrator/` is now the §11 Cargo workspace — `crates/{wire, classic, v2,
-data_runner}`. Binaries still land in `orchestrator/target/{debug,release}/`
-(`jasp-orchestrator`, `jasp-data-runner`, `jasp-orchestrator-v2`), so every script
-path keeps working. Virtual workspace root ⇒ `cargo run` from `orchestrator/` needs
-`--bin <name>` (only `launch_alpha.sh` needed the one-line fix).
+**Naming hazard (AV §11), still law:** `DataOp::View`/"data_view" = the GRID's chunked
+TSV. Analysis views = the stapled-spec typed-Arrow projections (`view_build`, `cache_fill`).
 
 | Area | File(s) | Notes |
 |---|---|---|
-| Wire crate | `crates/wire/src/{lib,messages,framing,transport,provisioner,janitor}.rs` | messages moved verbatim; framing deduplicated from 3 copies; transport + provisioner + janitor live here too (see deviations #1) |
-| Classic (FROZEN, bugfix-only) | `crates/classic/src/main.rs` (+`tests/dataset_e2e.rs`, `examples/`) | compiled against `wire`; `use wire as messages;` keeps internals readable |
-| Data worker | `crates/data_runner/src/{main,csv2arrow,arrowview,dataedit}.rs` | own crate; advertises `slots: 1`; NO view-build capability yet (deliberate) |
-| v2 scheduler | `crates/v2/src/{main,router}.rs` | books/queues/machinery + all 12 tests in `router.rs`'s tests mod |
-| Runner abort plane | `refactor_design/runner_jaspbase.R` | §7 deltas: arm/drain, `jasp_checkpoint()`, `jaspAbort`, loop-top no-op, `status="aborted"` |
-| R tests | `refactor_design/{test_abort_plane,test_v2_supersede_e2e}.R` | 6/6 unit; e2e over the real jaspBase runner |
-| Docs | v2 design (status + §13 addendum), `ALPHA_RUN.md` | §13 notes the pre/post-extraction path mapping |
+| Wire | `crates/wire/src/messages.rs` | `ViewSpec{dataset_id, columns:[{name, as}], filter, all}` (structured types, multiplicity structural); `Work.views: Option<Vec<ViewSpec>>`; `Message::CacheFill{view_id, spec, source, target, base_revision}` (router→worker order) + `CacheFilled{view_id, bytes?, error?}` (worker→router confirm, never forwarded); `DataOp::ViewBuild` = the capability key ("view_build"); `VIEW_FORMAT_VERSION="av1"` folded into the hash; `view_id()` = SHA-256 — all additive, `v` stays 1 |
+| Worker builder | `crates/data_runner/src/analysisview.rs` (~500 lines + tests) | the §8.3 matrix (see below); AV5 artifact: Feather V2+LZ4 (the caches' writer), `<real>__<type>` fields, `__base_row` (int32, 0-based, last field), `jasp:view` schema metadata {format_version, view_id, base_revision, dataset_id, rows, base_row_column, token_map (name→hex), spec}; tmp+rename atomic publish; one in-memory batch (the spec IS the prune) |
+| Worker wiring | `crates/data_runner/src/main.rs` | advertises `Data{op: view_build}`; serves `cache_fill` (not a work!) → builds → replies `cache_filled{bytes}` or `{error}` |
+| Router book | `crates/v2/src/router.rs` | `views: HashMap<id, ViewEntry>`; states `Wanted / Ordered(exec) / Ready{bytes} / Failed(reason)`; `staple()` at admission AND at dispatch (the guard); `Awaiting::ViewBuild` parks (id-free); `order_fills()` (free builders only, no credit, source `path_refs` held); `handle_cache_filled`; `try_unpark_view_waiters`; `scan_views()` LRU in the tick (budget `JASP_ORCH_VIEW_BUDGET_MB`, default 2 GiB) |
+| Dispatch stamp | `router.rs::dispatch` | injects `view_refs: [{dataset_id, view_id, path}]` per spec as an envelope field (the `dataset_paths` precedent — NOT typed on `Work`); pass-through refs are `view_id: null` + the base path; `dataset_paths` still rides (migration bridge, AV §6) |
+| Config | `crates/v2/src/main.rs` | `view_cache_path()` = `<session>/views/<hash>.arrow` (dies with the session workspace); `view_budget_bytes` |
+| Tests | wire +1 (`view_specs_and_ids_round_trip`); data_runner +5 (determinism gate, coercion matrix, metadata, refusals, r_character); v2 +7 (`view_miss_parks_until_cache_filled`, `view_hit_dispatches_without_a_build`, `passthrough_hits_the_base_file`, `filter_specs_are_refused`, `build_failure_fails_waiters_and_poisons`, `hold_rule_lru_reclaims_only_unheld_views`, `worker_death_reorders_the_fill`); v2 e2e +1 (`stapled_view_fills_builds_and_dispatches_e2e`) |
 
-**Test state (all green, clippy clean):** classic 41 (+1 ignored R cross-lang) ·
-classic e2e 7 · data_runner 88 (+1 ignored) · **v2 12** · wire 4.
+**Test state (all green, clippy clean):** classic 41 (+1i) · classic e2e 7 ·
+data_runner 93 (+1i) · **v2 19** · **v2 views e2e 1** · wire 5 = **166**.
 
-v2's must-pass list, by test name: `never_dispatch_to_a_busy_executor`,
-`slots_window_dispatches_two_then_waits`, `churn_sends_exactly_one_abort`,
-`abort_is_credit_neutral`, `raced_completion_is_a_no_op_router_side`,
-`queued_supersession_replaces_in_place`, `wedge_is_recycled_and_work_fail_fasts`,
-`op_aware_eviction_open_dies_view_survives`,
-`lane_death_fails_the_view_but_keeps_the_dataset`,
-`stale_edit_is_rejected_at_dispatch`, + 2 parity tests.
+**The e2e that proves §8 end to end** (`crates/v2/tests/views_e2e.rs`, real binaries):
+open real `test_data/debug.csv` → stapled work (group@nominal, x@scale, z@nominal) →
+parks → router orders the fill to the provisioner-spawned worker → the real builder
+writes the blob → `cache_filled` un-parks → dispatch carries `view_refs` (paths exist
+on disk) → the test opens the blob with Arrow and checks: `group__nominal` dict A/B
+keys passthrough, `x__scale` verbatim, `z__nominal` levels numerically sorted
+("98"…"203"), `__base_row` dense, metadata view_id == file name, hex token map.
 
-**The e2e that proves the whole §6 story** (`test_v2_supersede_e2e.R`, passing):
-open → dispatch rev1 → supersede rev2 → ONE abort push → runner drains at run
-boundary → `status="aborted"` terminal → router discards it by revision → rev2
-dispatches on the freed credit → frontend sees ONLY `rev=2 complete`.
+## The §8.3 coercion matrix as implemented (the parity target, gate 2)
 
-## Decisions & deviations the design doc doesn't record
+| Stored | Requested | Built |
+|---|---|---|
+| dictionary | scale | k values parsed ONCE, rows index by key; unparseable → null (text-as-scale) |
+| dictionary | nominal | label-or-value overlay (`jasp:labels`, sparse), dictionary ORDER preserved, ordered=0 |
+| dictionary | ordinal | same, ordered=1 (dict order = the ranking) |
+| float64 | scale | verbatim copy, NaN kept (`as.numeric` keeps it) |
+| float64 | nominal/ordinal | distinct numerically-sorted levels; NaN → NA; level strings = `r_character()` |
 
-1. **`wire` is wider than "messages + framing"** — it also carries `transport`
-   (NNG plumbing), `provisioner`, `janitor`. Rationale: §11 rule 1 "extract, don't
-   fork" needs a shared home for the NNG traps; classic and v2 both consume them;
-   the doc's 4-crate diagram is preserved. `wire` therefore depends on `nng`.
-2. **Transport ordering fix (real bug found by v2's tests):** the Aio callback now
-   forwards to the mailbox BEFORE re-arming (unbounded mpsc — never blocks);
-   re-arm-first let completions on different NNG pool threads invert wire order.
-   Classic had the same latent race; its suite stayed green after the fix.
-3. **Wire additions landed (all additive, `v`=1):** `Register.slots` (default 1,
-   classic ignores), `Status::Aborted` (terminal; classic treats it terminal too —
-   its ONE bugfix), `ProvReq::Recycle {modules,lanes}` (wedge-kill; classic never
-   sends), `Status` gained `PartialEq/Eq/Copy`, `WorkKind`+`WorkPayload::kind()`
-   moved into wire (orphan rule forced it).
-4. **v2 book shapes** (in `router.rs`): `works` = *desired state* per work id
-   (`frontend, revision, kind, runner: Option, abort_sent`) — the RUNNING dispatch
-   lives in `Executor.inflight: (session,work_id) → DispatchRecord{revision, kind,
-   dataset_paths, data}`. The record (not `works`) drives credit return, ref release,
-   and op-aware side effects — so stale terminals complete their dataset lifecycle
-   without forwarding, and duplicate terminals no-op. This replaces classic's
-   `data_works` book entirely.
-5. **Supersede replies:** rev < desired → synthetic **Complete** + `message:
-   "superseded…"` (the client drops it by revision, §23 — a terminal shape is safe);
-   rev == desired → `running` re-ack (duplicate submit; no re-dispatch under pull).
-6. **`rescue_orphaned_ready_work`:** on eviction, ready work whose capability lost
-   its last provider re-routes through the miss path (park/fail) — no silent
-   stranded queue.
-7. **v2 `Config` is a deliberate ~150-line duplicate of classic's** (policy, not
-   protocol). Its path methods MUST keep producing identical paths (same runner /
-   frontend on-disk contract) — noted in `v2/src/main.rs`.
-8. **`managed` heuristic:** `Executor.managed = provisioner.is_some()` — there is no
-   runner_id↔pid mapping; `Recycle` kills by advertised modules/lanes, so attached
-   runners simply match no child.
+`r_character` (isolated in ONE function in `analysisview.rs`) reproduces R's
+`as.character` hybrid: 15 significant digits, trailing zeros trimmed, scientific
+forced outside [1e-4, 1e15), otherwise shorter-of-fixed/scientific (why `1e14` →
+`"1e+14"` but `123456789012345` stays fixed), ties → fixed, exponents `1e+20`/`1e-07`.
+**The coercion-parity harness (gate 2, still to build) is the arbiter** — if R
+disagrees anywhere, fix `r_character`/the matrix in that one place.
 
-## Known debts (small, documented — fix opportunistically)
+## Decisions & deviations the design doc doesn't record (this session's calls)
 
-- **Wedge-recycle hole:** provisioner configured + an *attached* wedged runner ⇒
-  `Recycle` kills nothing, the pipe never closes, book-eviction never fires ⇒
-  repeated Recycle ticks, work stuck. Fix idea: `recycle_requested_ms` on
-  `Executor`; still hung one window later ⇒ direct `evict_executor`.
-- **Data-lane false wedge:** the data worker sends no mid-job activity, so a legit
-  >30 s open looks hung (§14 Q5 parked this). Views builds are cheap projections,
-  but opens precede them — consider worker-side activity or an exemption before
-  shipping v2 against big CSVs.
+1. **The fill order is a new internal message, `cache_fill`** — not a work unit (the
+   §8 rejected-table kills that: no result-forwarding, no correlation, no credit) and
+   not `prefetch` (that carries no source/target and stays LAST/unbuilt). It mirrors
+   `cache_filled`; the design's prose ("order the fill") names the action, this is its
+   wire shape. Router mints identity (view_id + target path — the `data_open` split);
+   worker reads `source`, writes `target`.
+2. **Capability spelling: `DataOp::ViewBuild` = "view_build"**, advertised as
+   `Data{op: view_build, formats: none}`. NOT "data_view" (the grid — naming hazard);
+   classic tolerates the value (shared enum; classic's routing never matches it).
+3. **`Failed` is a terminal poison state in the book.** A deterministic build failure
+   (unknown column, filter, bad stored type) fails every waiter with the builder's own
+   reason and refuses future staples of the same id forever — retrying an unbuildable
+   spec can never succeed, so there is no retry loop. (A TRANSIENT failure — worker
+   died — is `Ordered` → `Wanted`, which DOES retry.)
+4. **`Awaiting::ViewBuild` carries no view ids.** The missing set is re-derived from
+   the work's CURRENT stapled spec at every check — so the parked-supersession path
+   (new revision, different spec) can never wait on stale ids, and
+   `try_unpark_view_waiters` (run on every `cache_filled` and after in-place
+   supersession) picks up works whose NEW spec was already cached.
+5. **`view_refs` is an injected envelope field, not a typed `Work` field** — the exact
+   precedent of `dataset_paths` (router-added identity at dispatch). The stapled
+   `views` specs ride untouched; runners that don't speak views ignore `view_refs`.
+6. **Fills prefer FREE builders only** (`select_view_builder`: `outstanding < slots`).
+   If none is free the fill waits for the next terminal/register — a busy worker's
+   socket holds at most aborts and ignorable hints (the §5 discipline extended to
+   fills). Re-ordering triggers: staple miss, register, every terminal, eviction.
+7. **Fills hold a `path_refs` reference on their source** (acquired at order, released
+   at confirm/reset/death) — an edit reclaiming the base file mid-build can't yank it.
+8. **The hold rule reads only live dispatch records** (`DispatchRecord.view_ids`).
+   Parked waiters await non-Ready views by construction (Ready views aren't awaited);
+   a queued-but-undispatched work whose view gets LRU-evicted is caught by the
+   dispatch-time staple guard, which re-parks + re-orders (a cache is always safe to
+   drop — P3 backstop).
+9. **The e2e spawn gotcha:** `cargo test -p v2 --test views_e2e` does NOT rebuild
+   `jasp-data-runner` (the provisioner spawns the sibling binary). Run
+   `cargo build -p data_runner` first or a stale worker silently lacks `view_build`.
+   (Recorded in design §13 addendum + the test header.)
+10. **`close_work` now also drops parked instances of the closed work** (rev-matched
+    when a revision is given) — a pre-existing gap that view-parking would have made
+    loud. One line, clearly classic-close semantics.
+11. **`r_character`'s R-hybrid** (see above) was reverse-engineered from R behavior
+    (`as.character(1e14)` is `"1e+14"`; `1e5` is `"1e+05"`; `0.001` is `"0.001"` —
+    shorter-of-two-forms, ties→fixed, NOT plain %.15g). Gate 2's harness re-judges it.
+
+## Known debts (old, still open — fix opportunistically)
+
+- **Wedge-recycle hole** (unchanged): provisioner + *attached* wedged runner ⇒ Recycle
+  kills nothing ⇒ repeated ticks. Fix idea stands: `recycle_requested_ms` + evict.
+- **Data-lane false wedge** (unchanged): no mid-job activity from the worker; a legit
+  >30 s open looks hung. NOTE: fills are NOT dispatches (no credit) so a long build
+  can't false-wedge — but a long `data_open` still can.
 - `hung_snapshot`/`ready_snapshot`/`is_ever_registered` test helpers unused
-  (`#[allow(dead_code)]`), v2's `superseded`/`running` synthetics share
-  `empty_payload`.
-- Nothing calls `jasp_checkpoint()` yet (see "Runner-side abort, remaining half").
+  (`#[allow(dead_code)]`); `superseded`/`running` synthetics share `empty_payload`.
+- Nothing calls `jasp_checkpoint()` yet (see below).
+- New, small: stale `.tmp.<pid>` siblings under `views/` after a mid-build worker
+  death — die with the session workspace wipe; harmless, noted.
 
-## The views phase (§8 + §12 steps 5–8) — how to slice it
+## What's next (in order)
 
-**Naming hazard first (`analysis-views` §11):** `DataOp::View`/"data_view" = the
-GRID's chunked TSV reads (exists, done). "Analysis views" = the new stapled-spec
-typed-Arrow projections. Same word, different artifacts — never conflate them in
-code or conversation.
+### 1. The runner-side READ seam — slice A DONE+GREEN; next: slice B (the seam)
 
-**Wire (all additive; `v` stays 1; add to `crates/wire/src/messages.rs`):**
-- `Work` gains `views: [spec…]` stapled per dataset input — spec shape = v2 §3 /
-  AV §4: `{dataset_id, columns: [{name, as: scale|nominal|ordinal}], filter, all}`
-  (multiplicity structural; types structured, never string conventions).
-- `cache_filled {view_id}` — data worker → router, **internal, never forwarded**.
-- `prefetch {specs}` — frontend → router → worker hint; ignorable, no credit. LAST.
-- `view_id = hash(FORMAT_VERSION, spec, base_revision)` — computed by the ROUTER at
-  staple time (µs of CPU — honors P1). `FORMAT_VERSION` constant folded into the
-  hash input so a writer/codec change can never false-hit an old blob (AV8 amended).
+Plan: `refactor_design/runner-views-read-design.md` (four slices). **Slice A (the
+coercion-parity gate) is DONE and GREEN** — `tests/view_parity.R`, 144/144 over the real
+binaries, and it REVISED the contract en route (design doc D9/D10): coercion semantics are
+SYSTEM law, not R's — nominal is always unordered, non-finite is null (never a "NaN"
+level), and f64→nominal level strings use the system `level_string` = plain **%.15g**
+(15 significant digits, %g range rule; values agreeing at 15 digits are ONE category,
+dedupe-on-string in the cast; `analysisview.rs`) mirrored in R by `jasp_level_string`
+(`jaspRunner/R/data.R`, one sprintf) for the migration-era fallback — the mirror dies at
+slice D with the fallback. Locale is display-time only (D10): canonical ASCII in data,
+localize at render for the viewer (grid already does via ViewRender; results-label
+localization, if ever, = canonical-string check or jaspResults format hints — noted, not
+built). Legacy-JASP context: classic cast in C++ anyway, so R-exactness was never the real
+contract (that's WHY D9).
 
-**v2 router (`crates/v2/src/router.rs`):** add the view book (§4:
-`hash → {state: building|ready|evictable, waiters, spec, touch, bytes}`); staple
-check at admission (books-only lookup — the router never stats the FS): hit ⇒
-ready-queue, miss ⇒ park with a new `Awaiting::ViewBuild` + order the fill to a
-free capable worker (no credit — it's not frontend work; waiters were never
-dispatched so worker death just re-orders); `RouterMsg::CacheFilled` un-parks;
-**the one hold rule** in the tick's LRU sweep — *a view referenced by a parked or
-dispatched work is never reclaimed; everything else is LRU food; no pins, no
-releases*; reclamation executes on the janitor. Pass-through = hash-hit-on-base
-(`columns: all` + unfiltered resolves to a reference to the base file — zero copy).
+**Slice B is next**: read `view_refs` + rename to aliases + frame-first natives
+(pass-through stays lazy; the walk/codec/decode stay — §8.2/AV5 law; the miss ladder's
+sibling-coerce rung uses `jasp_level_string`, never `factor()`), validated by a
+dual-role t-test e2e (views vs fallback, identical results) + an ANOVA interaction.
+Then (C) the frontend derives + staples specs (the revived C++ walk's `colsPlusTypes`
+IS the spec; AV3 `fullDataset` flag; the memory win), (D) retirement after the classic
+freeze (~670 → ~500 data-pipeline lines; the coercion semantics then live in ONE place
+— the worker — AV4's whole point). Module-visible behavior is unchanged throughout.
+jaspBase itself is untouched — the bridge contract (`jaspbase-plugin.md` §4.1) is the
+stable seam.
 
-**data worker (`crates/data_runner`):** the build function, seeded from the
-`csv2arrow` typing machinery (AV4: worker owns all casts/relabeling —
-dictionary→scale = values parsed once; nominal/ordinal = label-or-value overlay +
-ordered flag; text-as-scale → null), emitting the AV §5 artifact (Feather V2+LZ4,
-`<real name>__<type>` fields, base-row index column, real↔token map + base revision
-+ spec digest in schema metadata). Advertise it as an added capability
-(spelling open — §11.3; classic ignores unknown capabilities either way).
+### 2. jasp_checkpoint() wiring (carried over, anytime)
 
-**Gates before anything user-visible flips:**
-1. **Determinism differential (AV8, the gate):** same `(spec, base_revision)` ⇒
-   byte-identical rebuild.
-2. **Coercion parity:** same spec → old R read (`read_jasp_data`, §8.3) vs worker
-   view ⇒ identical frames — the harness is the arbiter, then the R-side
-   read-coercion engine retires.
-3. **Filters:** a view filter must BE data (derived boolean column) — that design
-   isn't landed; until it is, `filter:` application is blocked. Check its status
-   first; don't invent an R-expression evaluator in Rust (rejected, AV §14).
+jaspBase's check code must call it (wrap pattern above). Serves both orchestrators.
 
-**Then §12 step 7 (differential + e2e):** run BOTH orchestrators over shared
-scenarios (`frontend_*.R` pattern; the e2e scripts from this session are the seed),
-flip the desktop default to v2, freeze classic for real. **Step 8 (prefetch):**
-only if dispatch-time fills show in the numbers.
+### 3. §12 step 7: differential + flip
 
-## Runner-side abort — remaining half (anytime; serves both orchestrators)
+Both orchestrators over the shared `frontend_*.R` scenarios; flip the desktop default
+to v2; freeze classic for real.
 
-The runner-side machinery is DONE and tested: abort plane (arm/drain), the
-`jasp_checkpoint()` hook, `jaspAbort` cooperative unwind, run-boundary drain,
-loop-top raced-completion no-op, `status="aborted"` terminals (v2 e2e exercises the
-boundary path). What's missing: **jaspBase's check code must call
-`jasp_checkpoint()`** so long analyses unwind mid-run instead of at the boundary.
-jaspBase lives OUTSIDE this repo (`JASP_RUNNER_LIBDIR` =
-`/home/sp42/jaspModuleTools/workdir/jaspTTests`). Two options: patch jaspBase
-properly, or wrap it from the runner at boot — `install_state_timers()` in
-`runner_jaspbase.R` is the working `assignInNamespace` wrap pattern to copy. Find
-the check function via `refactor_design/jaspbase-plugin.md` (the bridge contract).
+### 4. Step 8: prefetch — only if dispatch-time fills show in the numbers.
+
+Backlog finding (from slice A): the edit lane's scale→nominal RETYPE renders 'g'-10
+canonical strings (`csv2arrow` P1) — lossy: distinct values beyond 10 significant
+digits merge into one level. Pre-existing, unrelated to views; worth a ticket.
 
 ## Validate everything (from repo root)
 
 ```sh
-cd orchestrator && cargo test          # 152 green across 6 targets (needs UNSANDBOXED — see gotchas)
-cargo clippy --all-targets             # clean — keep it that way
+cd orchestrator && cargo build -p data_runner      # BEFORE the views e2e (gotcha #9)
+cd orchestrator && cargo test                      # 166 green (needs UNSANDBOXED — ipc)
+cargo clippy --all-targets                         # clean — keep it that way
 cargo run --quiet --bin jasp-orchestrator -- --schema | diff - messages.schema.json
-Rscript -e 'parse(file="refactor_design/runner_jaspbase.R")'   # after R edits
-Rscript refactor_design/test_abort_plane.R                     # 6/6, seconds
-Rscript refactor_design/test_v2_supersede_e2e.R                # full §6 story; runner boot is 60–180 s
+Rscript -e 'parse(file="refactor_design/runner_jaspbase.R")'
+Rscript refactor_design/test_abort_plane.R         # 6/6
+Rscript refactor_design/test_v2_supersede_e2e.R    # §6 story; runner boot 60–180 s
 ```
 
-### Environment gotchas (cost me time — don't repeat)
+### Environment gotchas (unchanged + one new)
 
-- **The Zed sandbox blocks AF_UNIX filesystem socket binds** (plain Python
-  `bind()` gets EPERM). `routing_over_ipc` and the e2e (ipc endpoints) FAIL
-  in-sandbox and PASS unsandboxed — run cargo tests unsandboxed, or
+- **NEW: build the worker before the views e2e** (gotcha #9 above).
+- The Zed sandbox blocks AF_UNIX binds — run cargo tests unsandboxed or
   `-- --skip routing_over_ipc`.
-- `JASP_RUNNER_LIBDIR` is `/home/sp42/jaspModuleTools/workdir/jaspTTests` — the
-  MODULE dir (self-contained libpath), NOT the workdir root (that dir has no
-  top-level jaspBase).
-- Runner boot is slow (jaspBase + renv): the e2e polls the runner log for
-  "waiting for work" with a 180 s deadline. Logs: `/tmp/v2-e2e-{orch,runner}.log`;
-  workspaces `/tmp/jasp-v2-e2e-*` (cleaned on exit).
+- `JASP_RUNNER_LIBDIR` is the MODULE dir (self-contained libpath), not the workdir root.
+- Runner boot is slow (60–180 s); e2e polls "waiting for work" with a 180 s deadline.
 - C++ desktop build/test rules: root `AGENTS.md`; `build/` is pre-configured.
 
 ## Rules of engagement (unchanged, still law)
 
 - **P1** single-writer router (plain maps, no locks, never blocks, never FS/process
-  I/O). **P2** dumb executors (register slots, signal, run, report — no queues, no
-  revision logic, no opinions). **P3** correctness never depends on hints —
-  determinism + content addressing backstop everything.
-- Wire additive, `v` stays 1. Classic frozen (bugfix-only); its suite is the spec
-  of record for everything unchanged.
-- *One writer, many caches; a cache is always safe to drop.* A second party holding
-  decision-influencing state is a bug — unless bounded by a credit window and
-  reconciled by revisions.
+  I/O). **P2** dumb executors. **P3** correctness never depends on hints — determinism
+  + content addressing backstop everything.
+- Wire additive, `v` stays 1. Classic frozen (bugfix-only); its suite is the spec of
+  record for everything unchanged.
+- *One writer, many caches; a cache is always safe to drop.*
 - Every step leaves the tree green and classic runnable.
 
-*The scheduler holds; the caches are next. Build the views smaller every time you
-doubt them.* 📐
+*The caches are built; the runners can now drink from them. Make the reader as thin
+as the writer was honest.* 📐

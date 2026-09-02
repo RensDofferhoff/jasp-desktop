@@ -1,17 +1,24 @@
 # Orchestrator v2 — the scheduler (pull dispatch, credit windows, views as cache)
 
 **Status:** design converged 2026-09-02 (a long planning session on top of the
-analysis-views conversation). **Implementation status (later that day): steps 1–4 of
-§12 plus the runner-side abort (§7) have landed** — `orchestrator/` is now the Cargo
+analysis-views conversation). **Implementation status (evening, day two): steps 1–5
+of §12 plus the runner-side abort (§7) have landed.** `orchestrator/` is the Cargo
 workspace of §11 (`wire`, `classic`, `v2`, `data_runner`); classic is frozen
 (bugfix-only: it gained `Status::Aborted` as terminal so the runner-side abort serves
 both orchestrators); v2's scheduling core (pull/credit dispatch, ready-queue
 supersession, one-abort churn, raced-completion discard, wedge→recycle, op-aware
-evictions) is implemented with its must-pass tests, verified end-to-end over the real
-jaspBase runner (see `refactor_design/test_v2_supersede_e2e.R`). The views phase (§8,
-steps 5–8) is NOT started. This document remains normative-for-when-we-build for
-everything not yet implemented. It amends `analysis-views-design.md` (§8 below lists
-exactly what supersedes what) and sits in the family of:
+evictions) and **the views phase (§8: stapled specs, the view book, implied builds,
+`cache_fill`/`cache_filled`, the worker's §8.3 coercion builder, the hold-rule LRU,
+pass-through, the `Failed` poison state, and the determinism differential) are
+implemented, unit-tested, and verified end-to-end over the real binaries** (see
+`crates/v2/tests/views_e2e.rs` — real CSV → real fill → real blob → Arrow-checked
+coercions — and `test_v2_supersede_e2e.R` for the abort story). Not started: the
+runner-side view READ seam (migration step 3 — jaspBase consuming `view_refs`),
+coercion-parity vs the R read path (gate 2), filters (blocked on derived columns),
+§12 steps 6–8 (differential flip + prefetch). This document remains
+normative-for-when-we-build for everything not yet implemented. It amends
+`analysis-views-design.md` (§8 below lists exactly what supersedes what) and sits in
+the family of:
 
 - `orchestrator-design.md` — **classic**, the as-built spec of the current
   `orchestrator/src/main.rs` (stays the reference for everything that survives);
@@ -555,6 +562,38 @@ Each step leaves the tree green and the previous orchestrator runnable.
 ---
 
 ## 13. Repo grounding (what exists today, where)
+
+**Post-views-phase addendum (step ⑤):** the views machinery lives at:
+
+- `crates/wire/src/messages.rs` — `ViewSpec`/`ViewColumn`/`ViewLevel`, `Work.views`,
+  `Message::CacheFill`/`CacheFilled`, `DataOp::ViewBuild` (capability key),
+  `VIEW_FORMAT_VERSION`, and `view_id()` (SHA-256; the ONLY hashing site — router and
+  tests agree by construction).
+- `crates/v2/src/router.rs` — the view book (`views: HashMap<view_id, ViewEntry>`,
+  states `Wanted | Ordered(exec) | Ready{bytes} | Failed(reason)`), `staple()` (the
+  admission check + the dispatch-time guard), `park_awaiting_view` /
+  `Awaiting::ViewBuild` (id-free by design — the missing set re-derives from the work's
+  CURRENT spec, so in-place supersession can never wait on stale ids), `order_fills()`
+  (free-builder-only, no credit, source `path_refs` acquired/released),
+  `handle_cache_filled` (Ready | poison-Fail), `try_unpark_view_waiters`, and
+  `scan_views()` (the tick's LRU sweep — the one hold rule: views referenced by live
+  dispatches never reclaim; reclamation on the janitor).
+- `crates/data_runner/src/analysisview.rs` — the §8.3 coercion matrix in Rust (dict→
+  scale values-parsed-once; dict→nominal/ordinal label-or-value overlay, order kept;
+  f64→scale verbatim incl. NaN; f64→nominal/ordinal numerically-sorted levels with
+  `r_character` — R's `as.character` hybrid %.15g/shorter-form, isolated in ONE
+  function for the parity harness to judge), the AV5 artifact (`<real>__<type>` fields,
+  `__base_row` int32 0-based, `jasp:view` schema metadata = view_id + base_revision +
+  spec + name-derived hex token map), tmp+rename atomic publish, and the determinism
+  differential test (build → delete → rebuild → byte-identical).
+- `crates/v2/tests/views_e2e.rs` — the real-binaries e2e (spawns `jasp-orchestrator-v2`;
+  the worker is auto-provisioned). **Gotcha: run `cargo build -p data_runner` before it
+  — the provisioner spawns the sibling binary, which `cargo test -p v2` does NOT
+  rebuild (a stale worker silently lacks `view_build` and the test times out).**
+- Dispatch stamps `view_refs` (one per spec: `{dataset_id, view_id, path}`) as an
+  INJECTED envelope field next to `dataset_paths` — deliberately NOT typed on `Work`
+  (identity the router adds at dispatch, the `dataset_paths` precedent); pass-through
+  refs carry `view_id: null` and name the base cache file.
 
 **Post-implementation (steps ①–④ + runner-side abort):** the orchestrator is now the
 Cargo workspace of §11 — `orchestrator/crates/{wire,classic,v2,data_runner}`. The
