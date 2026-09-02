@@ -163,6 +163,10 @@ cache; every change is a revision bump with a broadcast.
 4. **Excision-comment sweep** — someday, when the breadcrumbs stop being load-bearing.
 5. **Feature crawl-back** — derived boolean columns (filters) first, then the B2 labels
    overlay (`jasp:labels`), data-entry tables with `data_view`, computed columns/datasets.
+6. **Analysis views** — **designed 2026-09-02, not built** (`analysis-views-design.md`):
+   materialized per-dataset projections (casts+relabels in the worker, `name__type` fields,
+   two-step pins, fetch refs stapled to work). Depends on filters-as-derived-columns and
+   lane coercion parity; the module audit (§12 there) already ran.
 
 ## Environment & ritual (this machine)
 
