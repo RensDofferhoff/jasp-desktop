@@ -118,7 +118,7 @@ QStringList ColumnTypesModel::iconList() const
 		return result;
 
 	for (columnType type : _types)
-		result.push_back(getIconFilename(type, varIconType::InactiveIconType));
+		result.push_back(JaspTheme::currentIconPath() + getIconFilename(type, varIconType::InactiveIconType));	// full theme URL — bare filenames made QML resolve against the caller's own folder (AllowedTypeIcons warnings)
 
 	return result;
 }
