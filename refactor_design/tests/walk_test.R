@@ -19,7 +19,7 @@ runner_file <- normalizePath(file.path(here, "..", "runner_jaspbase.R"))
 want <- c("ALIAS_PREFIX", "ALIAS_TYPES", "alias_encode", "alias_decode",
           "alias_decode_names", "alias_decode_strict", "alias_decode_lax", "lax_decode_tree",
           ".substitute_free_occurrences", "rewrite_syntax", "walk_and_rewrite_options",
-          "coerce_col", ".frame_from_cols")
+          "factor_from_numeric", "coerce_col", ".frame_from_cols")
 exprs <- parse(runner_file)
 for (e in exprs) {
   if (is.call(e) && length(e) >= 3L && as.character(e[[1L]]) %in% c("<-", "=")) {
@@ -28,6 +28,11 @@ for (e in exprs) {
   }
 }
 stopifnot(exists("walk_and_rewrite_options"), exists("alias_encode"))
+# coerce_col's numeric->categorical branch flows through jasp_level_string (the
+# system %.15g level-string format, runner-views-read-design.md D9) — sourced from
+# the engine file, as the runner itself does.
+source(normalizePath(file.path(here, "..", "..", "jaspRunner", "R", "data.R")))
+stopifnot(exists("jasp_level_string"))
 
 nfail <- 0L
 check <- function(label, cond) {

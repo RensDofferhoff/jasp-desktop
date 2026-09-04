@@ -828,6 +828,24 @@ walk_and_rewrite_options <- function(options, schema_types) {
 
 # ── frame assembly + cache (§3.2 steps 3-4) ───────────────────────────────────
 
+# Numeric → categorical cast, system semantics (D9 — identical to the worker's
+# CatF64 plan and data.R's f64→nominal branch): non-finite is MISSING, never a
+# category; levels = distinct values sorted numerically, rendered with the system
+# jasp_level_string (%.15g grouping; values agreeing at 15 significant digits are
+# ONE category — dedupe on the string). The migration sibling-coerce rung and the
+# lazy fallback both flow through here, so every path a module can reach agrees
+# with the views blob (the parity gate's whole claim).
+factor_from_numeric <- function(vals, ordinal) {
+  vals[!is.finite(vals)] <- NA
+  u <- sort(unique(vals[!is.na(vals)]))
+  labs <- vapply(u, jasp_level_string, character(1))
+  labs <- labs[!duplicated(labs)]
+  row_lab <- vapply(vals, function(x)
+    if (is.na(x)) NA_character_ else jasp_level_string(x), character(1))
+  factor(match(row_lab, labs), levels = seq_along(labs), labels = labs,
+         ordered = isTRUE(ordinal))
+}
+
 # Per-column coercion semantics IDENTICAL to jaspRunner/R/data.R:74-99 (labels are already
 # applied at read time; source vectors are schema-typed: factor for Arrow dictionaries,
 # numeric otherwise). Dual-role views (§3.5) are just this applied twice to one source.
@@ -835,14 +853,16 @@ coerce_col <- function(vals, as_type) {
   if (is.factor(vals)) {
     if (as_type == "scale")
       return(as.numeric(levels(vals))[as.integer(vals)])   # VALUES, not codes
+    if (as_type == "nominal" && is.ordered(vals))
+      class(vals) <- "factor"                             # nominal is UNORDERED, always (D9)
     if (as_type == "ordinal" && !is.ordered(vals))
       class(vals) <- c("ordered", "factor")
     return(vals)
   }
   switch(as_type,
     scale   = vals,
-    nominal = factor(vals),                    # R sorts numeric levels numerically
-    ordinal = ordered(factor(vals)),
+    nominal = factor_from_numeric(vals, ordinal = FALSE),
+    ordinal = factor_from_numeric(vals, ordinal = TRUE),
     vals)
 }
 
@@ -869,6 +889,60 @@ load_cols <- function(nms) {
   invisible(NULL)
 }
 
+# ── the view-read seam (slice B; runner-views-read-design.md §3) ─────────────
+#
+# view_refs PRESENT on the work envelope: the frame IS the analysis's — pruned,
+# aliased, coerced by the worker. Read it (read_feather + rename) and serve it
+# frame-first. ABSENT: today's lazy path, completely unchanged (the migration
+# bridge — classic and unstapled v2 works never carry view_refs). Pass-through
+# refs (view_id null, path = the base cache) are NEVER eagerly read — that would
+# regress the terror_tall memory win exactly where pruning won it (D3); the lazy
+# base path serves them.
+
+# Read one materialized view blob into the MODULE frame: fields <real>__<type>
+# (split at the LAST "__" — the type vocabulary never contains it, AV6) renamed to
+# aliases via the stateless codec; __base_row dropped (D8); the blob's token_map
+# cross-checked against the derived hex — a mismatch means a non-deterministic
+# build, which AV8 forbids: LOUD, never papered over (D2). Ordered-ness rides the
+# Arrow conversion faithfully (probe-pinned: dict_is_ordered survives the feather
+# round-trip), so ordinal fields arrive as ordered factors — nothing re-derived.
+view_frame_from_ref <- function(ref) {
+  t0 <- now_s()
+  tbl <- arrow::read_feather(ref$path, as_data_frame = FALSE)
+  meta <- jsonlite::fromJSON(tbl$schema$metadata[["jasp:view"]], simplifyVector = FALSE)
+  df <- as.data.frame(tbl)
+  brc <- meta$base_row_column %||% "__base_row"
+  fields <- setdiff(names(df), brc)
+  stopifnot(length(fields) > 0L)
+  parts <- strsplit(fields, "__", fixed = TRUE)
+  real <- vapply(parts, function(p) paste(p[-length(p)], collapse = "__"), "")
+  ty   <- vapply(parts, function(p) p[length(p)], "")
+  for (i in seq_along(fields)) {
+    if (!ty[i] %in% ALIAS_TYPES)
+      stop(sprintf("view blob '%s': bad type suffix '%s'", fields[i], ty[i]))
+    hex <- paste(sprintf("%02x", as.integer(charToRaw(real[i]))), collapse = "")
+    want <- meta$token_map[[real[i]]]
+    if (length(want) != 1L || !identical(unname(want), hex))
+      stop(sprintf(
+        "view blob token_map mismatch for '%s': blob=%s derived=%s — non-deterministic build (AV8)?",
+        real[i], if (length(want)) want else "<absent>", hex))
+  }
+  out <- list()
+  for (i in seq_along(fields))
+    out[[alias_encode(real[i], ty[i])]] <- df[[fields[i]]]
+  log_step("view read", t0, sprintf("%s (%d rows x %d col(s), %d bytes)",
+            basename(ref$path), nrow(df), length(fields), file.size(ref$path)))
+  list(frame  = .frame_from_cols(out),
+       fields = data.frame(name = unname(real), type = unname(ty), stringsAsFactors = FALSE))
+}
+
+# The primary view for THIS work: the first materialized ref (one per dataset
+# input; the runner is single-dataset today — dataset_ids order decides).
+primary_view_frame <- function() {
+  if (is.null(.state$viewFrames) || !length(.state$viewFrames)) return(NULL)
+  .state$viewFrames[[1L]]
+}
+
 # ── data natives (§3.3; args positional from .fromRCPP, common.R:387) ─────────
 
 # Preload path (runJaspResults, common.R:109-110): the aliased pair frame (preload=true).
@@ -881,6 +955,12 @@ load_cols <- function(nms) {
 # col_select -> coerce per the as.* args. Colnames ECHO what the module asked for (alias
 # or raw), so module indexing by its own option strings always works. exclude.na.listwise
 # is wrapper-side (common.R:388) — untouched.
+#
+# VIEW-FIRST (slice B): with a materialized view, the frame IS the analysis's — serve
+# the exact (name, type) alias directly; on a miss, the sibling field of the same name
+# coerced (the dual-role rung); the migration ladder's last rung is today's lazy base
+# read (post-slice-D: a miss is a LOUD error — it means the spec derivation missed a
+# column; silent coercion would hide a frontend bug).
 .readDatasetToEndNative <- function(columns = NULL, columns.as.numeric = NULL,
                                     columns.as.ordinal = NULL, columns.as.factor = NULL,
                                     all.columns = FALSE) {
@@ -895,6 +975,7 @@ load_cols <- function(nms) {
     }
     return(.frame_from_cols(out))
   }
+  vf <- primary_view_frame()
   out <- list()
   serve <- function(requested, as) {
     if (is.null(requested)) return()
@@ -902,12 +983,9 @@ load_cols <- function(nms) {
       if (is.na(s) || !nzchar(s)) next
       d <- alias_decode(s)
       raw <- if (is.null(d)) s else d$name
-      if (!(raw %in% .state$schemaNames))
-        stop(sprintf(".readDatasetToEndNative: unknown column '%s'", raw))
       ty <- as
       if (is.null(ty)) ty <- schema_type_of(raw) %||% "scale"
-      load_cols(raw)
-      out[[s]] <<- coerce_col(.state$cols[[raw]], ty)
+      out[[s]] <<- serve_column(s, raw, ty, vf)
     }
   }
   serve(columns,              NULL)
@@ -917,15 +995,43 @@ load_cols <- function(nms) {
   .frame_from_cols(out)
 }
 
-# Header path (common.R:405-418): names + types only — schema footer, ZERO rows, aliased
-# (the module lives in alias space). Zero callers today (audited); contract completeness.
+# One requested symbol through the view-first ladder. `vf` = the primary view frame
+# (NULL when absent — pure lazy path, byte-identical with today).
+serve_column <- function(symbol, raw, ty, vf) {
+  if (!is.null(vf)) {
+    hit <- vf[[alias_encode(raw, ty)]]
+    if (!is.null(hit)) return(hit)             # 1. the frame: already coerced by the worker
+    flds <- .state$viewFields[[1L]]
+    sib <- which(flds$name == raw)             # 2. sibling field (dual-role): same name,
+    if (length(sib)) {                         #    other type — coerce (D9 semantics)
+      src <- vf[[alias_encode(raw, flds$type[sib[1L]])]]
+      if (!is.null(src)) return(coerce_col(src, ty))
+    }
+  }
+  if (!(raw %in% .state$schemaNames))          # 3. migration: the lazy base read
+    stop(sprintf(".readDatasetToEndNative: unknown column '%s'", raw))
+  load_cols(raw)
+  coerce_col(.state$cols[[raw]], ty)
+}
+
+# Header path (common.R:405-418): names + types only — ZERO rows, aliased (the
+# module lives in alias space). Zero callers today (audited); contract completeness.
+# With a materialized view: names/types split from the frame's own fields (D6) —
+# dual-role columns appear once per cast, exactly what the spec materialized.
 .readDataSetHeaderNative <- function(columns = NULL, columns.as.numeric = NULL,
                                      columns.as.ordinal = NULL, columns.as.factor = NULL,
                                      all.columns = FALSE) {
   empty_col <- function(ty) switch(ty,
     scale = numeric(0), nominal = factor(character()),
     ordinal = ordered(factor(character())), character(0))
+  flds <- if (length(.state$viewFields %||% list())) .state$viewFields[[1L]] else NULL
   if (isTRUE(all.columns)) {
+    if (!is.null(flds)) {
+      out <- lapply(seq_len(nrow(flds)), function(i) empty_col(flds$type[i]))
+      names(out) <- vapply(seq_len(nrow(flds)),
+                           function(i) alias_encode(flds$name[i], flds$type[i]), "")
+      return(.frame_from_cols(out))
+    }
     nms <- .state$schemaNames
     tys <- schema_all_types()
     out <- lapply(nms, function(nm) empty_col(tys[[nm]]))
@@ -940,8 +1046,10 @@ load_cols <- function(nms) {
     if (is.null(s) || is.na(s) || !nzchar(s)) next
     d <- alias_decode(s)
     raw <- if (is.null(d)) s else d$name
-    if (!(raw %in% .state$schemaNames)) next
     ty <- if (!is.null(d)) d$type else (schema_type_of(raw) %||% "scale")
+    if (!is.null(flds)) {
+      if (!any(flds$name == raw && flds$type == ty)) next
+    } else if (!(raw %in% .state$schemaNames)) next
     out[[s]] <- empty_col(ty)
   }
   .frame_from_cols(out)
@@ -1157,6 +1265,40 @@ run_analysis <- function(work) {
   log_step("schema read", t_schema,
            sprintf("%s (%d cols)", data_path, length(.state$schemaNames)))
 
+  # ── the view-read seam (slice B): view_refs present → the frame IS the analysis's.
+  # Materialized refs are read ONCE here (small by construction — the spec IS the
+  # prune); pass-through refs are never eager-read (D3). Absent → the lazy path
+  # below, byte-identical with today (the migration bridge).
+  .state$viewFrames  <- NULL
+  .state$viewFields  <- NULL
+  view_refs <- work$view_refs
+  if (!is.null(view_refs)) {
+    t_views <- now_s()
+    for (ref in view_refs) {
+      if (is.null(ref$view_id) || !nzchar(ref$view_id)) {
+        cat(sprintf("[runner] view ref %s: pass-through (lazy base path)\n", ref$dataset_id))
+        next
+      }
+      v <- view_frame_from_ref(ref)
+      # Store under the dataset_id order (dataset_ids decides "primary").
+      .state$viewFrames[[length(.state$viewFrames %||% list()) + 1L]] <- v$frame
+      .state$viewFields[[length(.state$viewFields %||% list()) + 1L]] <- v$fields
+    }
+    # D6: the walk's type fallback consults the FRAME FIELDS first — the view's
+    # requested type is what the module expects (a dual-role column's first cast
+    # in spec order wins for untyped slots). Seeding the type cache does exactly
+    # that; the schema footer remains the fallback (and serves pass-through).
+    if (length(.state$viewFields %||% list()))
+      for (i in seq_len(nrow(.state$viewFields[[1L]]))) {
+        f <- .state$viewFields[[1L]][i, ]
+        assign(f$name, f$type, envir = .state$typeCache)
+      }
+    log_step("view seam", t_views,
+             sprintf("%d materialized, %d pass-through",
+                     length(.state$viewFrames %||% list()),
+                     length(view_refs) - length(.state$viewFrames %||% list())))
+  }
+
   t_walk <- now_s()
   raw_options <- payload$options %||% list()
   if (VERBOSE) cat(sprintf("[runner] raw options (pre-walk): %s\n",
@@ -1174,7 +1316,27 @@ run_analysis <- function(work) {
       "[runner]        JASP_RUNNER_VISIBLE=1 and inspect the raw-options dump above the walk.\n"))
 
   t_data <- now_s()
-  if (preloadData && nrow(pairs) > 0L) {
+  vf <- primary_view_frame()
+  if (!is.null(vf) && preloadData) {
+    # The view frame IS the preload frame (D5): already pruned, aliased, coerced.
+    # Migration safety: any walked pair NOT in the frame (a hand-stapled spec that
+    # missed a column) is appended via the lazy path — loud divergence beats a
+    # silently empty column. Post-slice-C the superset guarantee makes this dead.
+    cols <- as.list(vf)
+    for (i in seq_len(nrow(pairs))) {
+      a <- alias_encode(pairs$name[i], pairs$type[i])
+      if (is.null(cols[[a]])) {
+        load_cols(pairs$name[i])
+        cols[[a]] <- coerce_col(.state$cols[[pairs$name[i]]], pairs$type[i])
+        cat(sprintf("[runner] WARN: pair '%s'/%s not in the view spec — lazy-appended\n",
+                    pairs$name[i], pairs$type[i]))
+      }
+    }
+    .state$dataset <- .frame_from_cols(cols)
+    log_step("preload frame (view)", t_data,
+             sprintf("%d rows x %d aliased col(s) (%d pair(s) checked)",
+                     nrow(.state$dataset), ncol(.state$dataset), nrow(pairs)))
+  } else if (preloadData && nrow(pairs) > 0L) {
     load_cols(unique(pairs$name))
     cols <- list()
     for (i in seq_len(nrow(pairs))) {

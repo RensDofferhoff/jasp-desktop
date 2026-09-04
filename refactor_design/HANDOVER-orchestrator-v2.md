@@ -147,12 +147,33 @@ localization, if ever, = canonical-string check or jaspResults format hints — 
 built). Legacy-JASP context: classic cast in C++ anyway, so R-exactness was never the real
 contract (that's WHY D9).
 
-**Slice B is next**: read `view_refs` + rename to aliases + frame-first natives
-(pass-through stays lazy; the walk/codec/decode stay — §8.2/AV5 law; the miss ladder's
-sibling-coerce rung uses `jasp_level_string`, never `factor()`), validated by a
-dual-role t-test e2e (views vs fallback, identical results) + an ANOVA interaction.
-Then (C) the frontend derives + staples specs (the revived C++ walk's `colsPlusTypes`
-IS the spec; AV3 `fullDataset` flag; the memory win), (D) retirement after the classic
+**Slice B is DONE and GREEN too** (2026-09-03): `runner_jaspbase.R` reads `view_refs`
+(`view_frame_from_ref` — codec rename, loud token_map cross-check, `__base_row`
+dropped; pass-through refs stay lazy), preload = the frame, natives frame-first with
+the miss ladder (frame hit → sibling coerce → migration lazy rung), and
+`coerce_col`'s numeric→categorical branch flows through `factor_from_numeric`
+(jasp_level_string — D9). Gate: `test_v2_views_ttest_e2e.R` — a dual-role t-test on
+encoding_torture.csv run FOUR ways (fallback/views x preloadData true/false) over the
+real stack, all byte-identical; the runner log pins the seam served (view read +
+preload frame (view), 0.003 s vs 0.123 s). The libset convention:
+JASP_ORCH_LIBSET=/home/sp42/jaspModuleTools/workdir/lib (its jaspAnova dir is a
+complete library — one runner, every module). Supersede e2e + parity gate + walk
+fixtures + all cargo suites re-run green. NOTE for slice C: a full jaspAnova e2e
+needs the GUI's complete default options object (jaspBase fills no defaults for
+absent keys) — the real frontend's options arrive complete, so it rides with slice C.
+
+**Next: the D11 STORAGE VOCABULARY FLIP** (converged 2026-09-04, recorded as D11 in the
+design doc — the reshaped slice C): the base cache's field names become the encoded
+canonical identity (`jasp_enc_hex_<hex(name)>`, NO type suffix); **`display_name` IS the
+decode** (the wire ColumnInfo + grid/picker plumbing already exist — audit: 40 QML
+bindings are opaque tokens, display flows through displayName, zero UI decode calls);
+the R alias = storage name + `_` + cast type (worker appends); analysis-side everything
+speaks tokens; the runner's walk + rename die after the migration window (classic-shaped
+options still arrive with real names until the frontend binds tokens). Plan the flip as:
+ingest encoder (csv2arrow) → wire schema/lanes render display_name → worker resolve by
+token → runner token-native (walk kept only for real-name options during migration) →
+fixtures/e2e vocabulary update. The parity gate + walk fixtures + both real-runner e2es
+are the safety net — the data plane is at peak test coverage right now., (D) retirement after the classic
 freeze (~670 → ~500 data-pipeline lines; the coercion semantics then live in ONE place
 — the worker — AV4's whole point). Module-visible behavior is unchanged throughout.
 jaspBase itself is untouched — the bridge contract (`jaspbase-plugin.md` §4.1) is the
