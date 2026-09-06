@@ -345,10 +345,13 @@ impl Default for ViewRender {
     }
 }
 
-/// One column of a stapled view spec (analysis-views §4): the column's DISPLAY name plus
-/// the measurement level the analysis wants it materialized at. `as` is a keyword, hence
-/// the field rename. Multiplicity is structural — the same column at two types is two
-/// entries; the type is a closed structured vocabulary, never a string convention.
+/// One column of a stapled view spec (analysis-views §4, D11): the column's STORAGE
+/// TOKEN (the wire `ColumnInfo.name` — the opaque identity the frontend binds) plus the
+/// measurement level the analysis wants it materialized at. Display-named entries still
+/// resolve during the migration window (the worker's bridge), but the token is the
+/// vocabulary. `as` is a keyword, hence the field rename. Multiplicity is structural —
+/// the same column at two types is two entries; the type is a closed structured
+/// vocabulary, never a string convention.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewColumn {
     pub name: String,
@@ -369,8 +372,9 @@ pub enum ViewLevel {
 }
 
 impl ViewLevel {
-    /// The `__`-suffix vocabulary of view field names (AV6: `<real name>__<type>`; the
-    /// type part never contains `__`, so parsing anchors at the LAST `__`).
+    /// The `_`-suffix vocabulary of view field names (D11: `<token>_<type>` — the
+    /// storage token plus the cast type, which IS the R alias; the type part never
+    /// contains `_` beyond the token's own, so parsing anchors at the LAST `_`).
     pub fn as_str(self) -> &'static str {
         match self {
             ViewLevel::Scale => "scale",
@@ -388,8 +392,9 @@ impl ViewLevel {
 pub struct ViewSpec {
     /// The dataset this projection reads (must be one of the work's `dataset_ids`).
     pub dataset_id: String,
-    /// The wanted columns (display names). `None` + `all: true` = every column in schema
-    /// order — and, unfiltered, the pass-through shape (resolves to a reference to the base
+    /// The wanted columns, by storage token (D11 — the wire `name`; display names still
+    /// resolve during migration). `None` + `all: true` = every column in schema order —
+    /// and, unfiltered, the pass-through shape (resolves to a reference to the base
     /// file — zero copy, orchestrator-v2 §8).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub columns: Option<Vec<ViewColumn>>,

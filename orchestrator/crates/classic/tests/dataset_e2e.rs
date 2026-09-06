@@ -38,6 +38,13 @@ use wire::{
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// The D11 storage token of a display name: `jasp_enc_hex_` + lowercase hex of its
+/// UTF-8 bytes — the caches' FIELD-name vocabulary and the wire ColumnInfo `name`.
+fn tok(display: &str) -> String {
+    let hex: String = display.bytes().map(|b| format!("{b:02x}")).collect();
+    format!("jasp_enc_hex_{hex}")
+}
+
 /// A spawned child killed on drop (also on test panic).
 struct Proc {
     child: Option<Child>,
@@ -287,10 +294,18 @@ fn csv_open_work_and_feather_read() {
     let cols = schema.as_array().expect("schema is a column array");
     assert_eq!(cols.len(), 4, "group, x, y, z");
     let col = |name: &str| -> Value {
-        cols.iter()
-            .find(|c| c["name"] == name)
+        let c = cols
+            .iter()
+            .find(|c| c["display_name"] == name)
             .unwrap_or_else(|| panic!("column {name} in schema: {cols:?}"))
-            .clone()
+            .clone();
+        // D11: the wire `name` IS the storage token of the display.
+        assert_eq!(
+            c["name"],
+            json!(crate::tok(name)),
+            "wire name is the display's storage token"
+        );
+        c
     };
     assert_eq!(col("group")["type"], "nominal");
     assert_eq!(col("group")["levels"], json!(["A", "B"]));
@@ -380,20 +395,28 @@ fn csv_open_work_and_feather_read() {
          (R level) and the release-lane GUI validation"
     );
 
-    // 5. The runner reads the converted Feather — it is a real Arrow file.
+    // 5. The runner reads the converted Feather — it is a real Arrow file. D11: the
+    //    FIELD names are the displays' storage tokens; the display rides metadata.
     let file = std::fs::File::open(&cache_path).unwrap();
     let reader = FileReader::try_new(file, None).expect("open Feather");
     let schema = reader.schema();
     assert_eq!(schema.fields().len(), 4);
-    let by_name = |n: &str| {
+    let field_of = |display: &str| {
         schema
-            .field_with_name(n)
-            .unwrap_or_else(|_| panic!("field {n}"))
+            .fields()
+            .iter()
+            .find(|f| f.metadata().get("jasp:display_name").map(String::as_str) == Some(display))
+            .unwrap_or_else(|| panic!("field with display {display}"))
             .clone()
     };
-    assert!(matches!(by_name("x").data_type(), DataType::Float64));
-    assert!(matches!(by_name("y").data_type(), DataType::Float64));
-    let group = by_name("group");
+    assert_eq!(
+        field_of("x").name(),
+        crate::tok("x").as_str(),
+        "field name IS the token"
+    );
+    assert!(matches!(field_of("x").data_type(), DataType::Float64));
+    assert!(matches!(field_of("y").data_type(), DataType::Float64));
+    let group = field_of("group");
     assert!(matches!(
         group.data_type(),
         DataType::Dictionary(k, v) if **k == DataType::Int32 && **v == DataType::Utf8
@@ -406,7 +429,7 @@ fn csv_open_work_and_feather_read() {
             .map(String::as_str),
         Some("true")
     );
-    let z = by_name("z");
+    let z = field_of("z");
     assert_eq!(z.dict_is_ordered(), Some(true), "ordinal is ordered");
     assert_eq!(
         z.metadata().get("jasp:display_name").map(String::as_str),
@@ -899,7 +922,12 @@ fn edit_undo_redo_crown_over_the_real_lane() {
         .expect("schema changed (a column was created)");
     let cols1 = s1.as_array().unwrap();
     assert_eq!(cols1.len(), 5, "Q4 created");
-    let q4 = cols1.iter().find(|c| c["name"] == "Q4").expect("Q4");
+    // D11: a CREATED column's wire name is its declared display's storage token.
+    let q4 = cols1
+        .iter()
+        .find(|c| c["display_name"] == "Q4")
+        .expect("Q4");
+    assert_eq!(q4["name"], json!(tok("Q4")), "wire name is the token");
     assert_eq!(q4["levels"], json!(["P", "Q"]), "declared levels verbatim");
     assert_eq!(
         dc1.invalidation.all,
@@ -913,7 +941,9 @@ fn edit_undo_redo_crown_over_the_real_lane() {
     );
 
     // HOP 2 — schema_change (the d6/d7b bonus hop): rename + relabel `group`. A
-    // Keep-class change — JSON-only inverse, `{}` invalidation.
+    // Keep-class change — JSON-only inverse, `{}` invalidation. (Entries name columns
+    // by DISPLAY — the migration bridge; the post-flip wire vocabulary is the token,
+    // and the lane resolves either.)
     let (status, res, inv2_bytes) = edit_dataset(
         &fe,
         &id,

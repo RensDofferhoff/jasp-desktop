@@ -162,22 +162,23 @@ fixtures + all cargo suites re-run green. NOTE for slice C: a full jaspAnova e2e
 needs the GUI's complete default options object (jaspBase fills no defaults for
 absent keys) — the real frontend's options arrive complete, so it rides with slice C.
 
-**Next: the D11 STORAGE VOCABULARY FLIP** (converged 2026-09-04, recorded as D11 in the
-design doc — the reshaped slice C): the base cache's field names become the encoded
-canonical identity (`jasp_enc_hex_<hex(name)>`, NO type suffix); **`display_name` IS the
-decode** (the wire ColumnInfo + grid/picker plumbing already exist — audit: 40 QML
-bindings are opaque tokens, display flows through displayName, zero UI decode calls);
-the R alias = storage name + `_` + cast type (worker appends); analysis-side everything
-speaks tokens; the runner's walk + rename die after the migration window (classic-shaped
-options still arrive with real names until the frontend binds tokens). Plan the flip as:
-ingest encoder (csv2arrow) → wire schema/lanes render display_name → worker resolve by
-token → runner token-native (walk kept only for real-name options during migration) →
-fixtures/e2e vocabulary update. The parity gate + walk fixtures + both real-runner e2es
-are the safety net — the data plane is at peak test coverage right now., (D) retirement after the classic
-freeze (~670 → ~500 data-pipeline lines; the coercion semantics then live in ONE place
-— the worker — AV4's whole point). Module-visible behavior is unchanged throughout.
-jaspBase itself is untouched — the bridge contract (`jaspbase-plugin.md` §4.1) is the
-stable seam.
+**Next: slice C's C++ half (the D11 flip's data plane is DONE + GREEN, 2026-09-04).** The
+storage vocabulary flip landed as converged (D11, runner-views-read-design.md): the base
+cache's field names ARE the tokens (`jasp_enc_hex_<hex(display)>`, no type suffix), the wire
+`ColumnInfo.name` IS the token (display_name IS the decode), blob fields are `<token>_<type>`
+(= the R alias — the runner's slice-B rename became an identity), the worker/edit-lane/
+`read_jasp_data` all resolve either vocabulary (token first), and the walk is dual-vocabulary
+for the migration window (the t-test e2e's bridge pair pins classic display-named options
+byte-equivalent). All gates re-green: parity 145/145 (over the token vocabulary), walk_test
+(+ §13 token fixtures), the t-test e2e (6 runs), the full cargo suite (classic 41+1i + 7 e2e ·
+data_runner 94+1i · v2 19 · views e2e 1 · wire 5), clippy clean, supersede e2e green. **What
+remains of slice C:** the C++ staple — `createWorkJson` collects+dedupes the BOUND TOKENS the
+options already carry (no deriver heuristic — D11 killed it) into `work["views"]`, the AV3
+`fullDataset` flag for the 5 offender sites, then the GUI-lane memory gate (terror_tall etc.).
+After that: (D) retirement after the classic freeze (~670 → ~500 data-pipeline lines; the
+coercion semantics then live in ONE place — the worker — AV4's whole point). Module-visible
+behavior is unchanged throughout. jaspBase itself is untouched — the bridge contract
+(`jaspbase-plugin.md` §4.1) is the stable seam.
 
 ### 2. jasp_checkpoint() wiring (carried over, anytime)
 

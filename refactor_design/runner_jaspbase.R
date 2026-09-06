@@ -298,14 +298,19 @@ aborted_result <- function(work) {
 .state$dataset     <- NULL          # current work's preloaded aliased frame (preloadData=true)
 .state$outputDir   <- tempdir()     # current work's scratchpad (== work$output_dir)
 .state$tempCounter <- 0L
-# Pruning/encoding state (HANDOVER-runner-data-pruning.md §3.2), reset at every work start:
+# Pruning/encoding state (HANDOVER-runner-data-pruning.md §3.2), reset at every work start.
+# D11: the cache's FIELD names are the storage tokens — schemaNames holds TOKENS (the raw
+# footer, zero extra reads); display names resolve through them statelessly (the token
+# is hex-of-display, so membership either way is one token_of away) and are extracted
+# in full ONLY on the O(k) paths that already pay O(k) (rewrite_syntax, all.columns).
 .state$dataPath    <- NULL                     # absolute Feather path (orchestrator-injected)
 .state$schema      <- NULL                     # arrow Schema object (lazy type source)
-.state$schemaNames <- character(0)             # eager (one vectorized call), full width — names only
-.state$schemaIdx   <- new.env(parent = emptyenv())  # name -> 0-based field index (O(1) type lookup)
-.state$typeCache   <- new.env(parent = emptyenv())  # name -> type, resolved on first use
-.state$aliasCache  <- new.env(parent = emptyenv())  # name -> schema-type alias, on demand
-.state$cols        <- new.env(parent = emptyenv())  # per-work source-vector cache, raw name -> vector
+.state$schemaNames <- character(0)             # eager (one vectorized call) — the FIELD names (tokens)
+.state$schemaIdx   <- new.env(parent = emptyenv())  # token -> 0-based field index (O(1) type lookup)
+.state$typeCache   <- new.env(parent = emptyenv())  # name (either form) -> type, on first use
+.state$aliasCache  <- new.env(parent = emptyenv())  # name (either form) -> schema-type alias
+.state$displayNames <- NULL                    # lazy full display vector (schema_displays, on demand)
+.state$cols        <- new.env(parent = emptyenv())  # per-work source-vector cache, display name -> vector
 
 # Schema-only read — FOOTER ONLY, zero data materialized.
 # NB: arrow::read_feather(path, as_data_frame = FALSE)$schema is a trap: it materializes the
@@ -319,18 +324,38 @@ read_feather_schema <- function(path) {
   arrow::RecordBatchFileReader$create(rf)$schema
 }
 
-# ── lazy schema access (wide-file fix, 2026-08-15) ────────────────────────────
+# ── lazy schema access (wide-file fix, 2026-08-15; D11 dual vocabulary) ──────
 # Types are resolved O(used), not O(all): work start extracts only the NAMES (one
-# vectorized call) plus a name->index map (list2env, C speed). A type is extracted on
+# vectorized call) plus a token->index map (list2env, C speed). A type is extracted on
 # first use via Schema$field(i) — O(1) direct index — and cached. GetFieldByName is
 # NEVER used: it linear-scans the field list per call (O(k) each, O(k^2) over all
 # columns; measured 5.7 s at 10k columns). all.columns/header paths legitimately touch
 # all types but pay O(k) once, not O(k^2).
+#
+# D11: every accessor takes a name in EITHER vocabulary — the storage token (the
+# field's own name) or the display name — because token_of is injective: a display's
+# token is in the idx iff the display is a column, and a token is in the idx directly.
+# The DISPLAY form is the runner's working vocabulary (options, pairs, results decode);
+# tokens are the storage identity.
+schema_display_name <- function(nm) {
+  if (!is.character(nm) || length(nm) != 1L || !nzchar(nm)) return(NULL)
+  if (!is.null(.state$schemaIdx[[token_of(nm)]])) return(nm)   # nm is a DISPLAY
+  if (!is.null(.state$schemaIdx[[nm]])) {                     # nm is a field name
+    d <- token_decode(nm)
+    if (!is.null(d)) return(d)                               # a token -> its display
+    return(nm)                                                # old-vocabulary field name
+  }
+  NULL
+}
+
 schema_type_of <- function(nm) {
   if (!is.character(nm) || length(nm) != 1L || !nzchar(nm)) return(NULL)
   ty <- .state$typeCache[[nm]]
   if (!is.null(ty)) return(ty)
-  i <- .state$schemaIdx[[nm]]
+  # Display-priority (same order as schema_display_name — the torture case must
+  # resolve identically everywhere): a display's token first, then the field itself.
+  i <- .state$schemaIdx[[token_of(nm)]]
+  if (is.null(i)) i <- .state$schemaIdx[[nm]]
   if (is.null(i)) return(NULL)
   typ <- .state$schema$field(i)$type          # 0-based index (verified)
   ty <- if (inherits(typ, "DictionaryType")) {
@@ -340,8 +365,24 @@ schema_type_of <- function(nm) {
   ty
 }
 
+# The full display-name vector — extracted ON DEMAND and cached (the O(k) paths only:
+# rewrite_syntax scans it, all.columns aliases it; work starts stay O(1) in schema reads).
+schema_displays <- function() {
+  d <- .state$displayNames
+  if (!is.null(d)) return(d)
+  toks <- .state$schemaNames
+  d <- vapply(seq_along(toks), function(i) {
+    m <- .state$schema$field(i - 1L)$metadata[["jasp:display_name"]]
+    if (is.null(m) || !nzchar(m)) toks[i] else m
+  }, character(1L), USE.NAMES = FALSE)
+  .state$displayNames <- d
+  d
+}
+
+# All types, DISPLAY-named (the all.columns/header paths — O(k) by nature). Seeds the
+# type cache under the display names (the working vocabulary).
 schema_all_types <- function() {
-  nms <- .state$schemaNames
+  nms <- schema_displays()
   tys <- vapply(seq_along(nms), function(i) {
     typ <- .state$schema$field(i - 1L)$type
     if (inherits(typ, "DictionaryType")) {
@@ -354,14 +395,18 @@ schema_all_types <- function() {
   tys
 }
 
-# Lazy schema-type alias for a name (alias_map of old, but only for names ever asked).
+# Lazy schema-type alias for a name in EITHER vocabulary (alias_map of old, but only
+# for names ever asked). The alias is the display's token + "_" + type — identical
+# string whichever form was asked.
 schema_alias_of <- function(nm) {
   if (!is.character(nm) || length(nm) != 1L || !nzchar(nm)) return(NULL)
   a <- .state$aliasCache[[nm]]
   if (!is.null(a)) return(a)
-  ty <- schema_type_of(nm)
+  d <- schema_display_name(nm)
+  if (is.null(d)) return(NULL)
+  ty <- schema_type_of(d)
   if (is.null(ty)) return(NULL)
-  a <- alias_encode(nm, ty)
+  a <- alias_encode(d, ty)
   assign(nm, a, envir = .state$aliasCache)
   a
 }
@@ -393,6 +438,33 @@ alias_encode <- function(name, type) {
   paste0(ALIAS_PREFIX, paste0(as.character(bytes), collapse = ""), "_", type)
 }
 
+# ── storage tokens (D11 — the base cache's field-name vocabulary) ────────────
+#
+# The cache's FIELD names are the encoded canonical identity jasp_enc_hex_<hex(display)>
+# (no type suffix — types stay schema metadata). The token is the front segment of the
+# alias: alias = token + "_" + cast type, so every alias is its column's token plus the
+# type, and the worker's blob fields (token_type) ARE the aliases — the slice-B rename
+# is an identity. display_name (wire ColumnInfo + jasp:display_name metadata) is the
+# decode; these helpers are the stateless codec mirror of the ingest encoder.
+
+token_of <- function(display) {
+  bytes <- charToRaw(enc2utf8(display))
+  paste0(ALIAS_PREFIX, paste(sprintf("%02x", as.integer(bytes)), collapse = ""))
+}
+
+# Scalar -> the display name, or NULL (not token-shaped / malformed). Never throws.
+token_decode <- function(token) {
+  if (!is.character(token) || length(token) != 1L || is.na(token)) return(NULL)
+  if (!startsWith(token, ALIAS_PREFIX)) return(NULL)
+  hex <- substring(token, nchar(ALIAS_PREFIX) + 1L)
+  if (!grepl("^([0-9a-f]{2})+$", hex)) return(NULL)
+  bytes <- as.raw(strtoi(substring(hex, seq.int(1L, nchar(hex), 2L),
+                                        seq.int(2L, nchar(hex), 2L)), 16L))
+  name <- rawToChar(bytes)
+  Encoding(name) <- "UTF-8"
+  if (!validUTF8(name)) NULL else name
+}
+
 # Scalar -> list(name, type) or NULL. Never throws; malformed -> NULL.
 alias_decode <- function(alias) {
   if (!is.character(alias) || length(alias) != 1L || is.na(alias)) return(NULL)
@@ -418,13 +490,16 @@ alias_decode_names <- function(x) {
   }, character(1L), USE.NAMES = FALSE)
 }
 
-# Strict display decode (§2.2): schema-gated, never throws. `schema` may be a named type
-# vector (fixtures) or a plain names vector (runner).
+# Strict display decode (§2.2): schema-gated, never throws. `schema` may be a named
+# type vector (fixtures), a plain names vector, or a MEMBERSHIP FUNCTION (the runner's
+# D11 gate — display membership via the token index, no eager display extraction).
 alias_decode_strict <- function(x, schema) {
-  schema_names <- if (!is.null(names(schema))) names(schema) else schema
+  gate <- if (is.function(schema)) schema
+          else { schema_names <- if (!is.null(names(schema))) names(schema) else schema
+                function(nm) nm %in% schema_names }
   if (!is.character(x) || length(x) != 1L || is.na(x)) return(x)
   d <- alias_decode(x)
-  if (is.null(d) || !(d$name %in% schema_names)) return(x)
+  if (is.null(d) || !isTRUE(gate(d$name))) return(x)
   d$name
 }
 
@@ -433,8 +508,11 @@ alias_decode_strict <- function(x, schema) {
 # contains "_", so a naive substring scan would match inside longer identifiers):
 # greedy-match identifier chars, trim one char at a time until (decode succeeds AND name
 # is a schema column); substitute; NEVER rescan substituted output (no chaining).
+# `schema` may be a names vector (fixtures) or a MEMBERSHIP FUNCTION (the runner's gate).
 alias_decode_lax <- function(text, schema) {
-  schema_names <- if (!is.null(names(schema))) names(schema) else schema
+  gate <- if (is.function(schema)) schema
+          else { schema_names <- if (!is.null(names(schema))) names(schema) else schema
+                function(nm) nm %in% schema_names }
   if (!is.character(text) || length(text) != 1L || is.na(text)) return(text)
   if (!grepl(ALIAS_PREFIX, text, fixed = TRUE)) return(text)
   is_name_char <- function(ch) grepl("[A-Za-z0-9._]", ch)
@@ -449,7 +527,7 @@ alias_decode_lax <- function(text, schema) {
       replaced <- FALSE
       while (end >= i + plen) {
         d <- alias_decode(substr(text, i, end))
-        if (!is.null(d) && d$name %in% schema_names) {
+        if (!is.null(d) && isTRUE(gate(d$name))) {
           chunks <- c(chunks, d$name)
           i <- end + 1L
           replaced <- TRUE
@@ -466,18 +544,20 @@ alias_decode_lax <- function(text, schema) {
 }
 
 # Successor of the engine's decodeJsonSafeHtml: lax-decode every string (and object KEY,
-# legacy replaceAll renamed keys too) in a parsed JSON tree. .state$schemaNames is the gate.
+# legacy replaceAll renamed keys too) in a parsed JSON tree. .state$schemaGate is the
+# membership predicate (D11: display membership via the token index — no eager display
+# extraction on the per-work results path).
 # NOTE: JSON nulls arrive as R NULLs; `node[[i]] <- NULL` would DELETE the element (shrinking
 # the list mid-iteration -> subscript out of bounds), so NULL members are skipped untouched
 # (jaspBase tables always carry them: footnotes' cols/rows).
 lax_decode_tree <- function(node) {
   if (is.character(node))
-    return(vapply(node, function(s) alias_decode_lax(s, .state$schemaNames),
+    return(vapply(node, function(s) alias_decode_lax(s, .state$schemaGate),
                   character(1L), USE.NAMES = FALSE))
   if (is.list(node)) {
     if (!is.null(names(node)))
       names(node) <- vapply(names(node),
-                            function(s) alias_decode_lax(s, .state$schemaNames),
+                            function(s) alias_decode_lax(s, .state$schemaGate),
                             character(1L), USE.NAMES = FALSE)
     for (i in seq_along(node))
       if (!is.null(node[[i]])) node[[i]] <- lax_decode_tree(node[[i]])
@@ -576,29 +656,55 @@ rewrite_syntax <- function(text, schema_names, alias_of = NULL) {
 #   pairs    — data.frame(name, type), unique, first-appearance order.
 
 walk_and_rewrite_options <- function(options, schema_types) {
-  # schema_types: EAGER named vector name->type (fixtures) OR LAZY accessor
-  # list(names, idx, type_of) (runner). The walk only needs membership, per-name types, and
-  # schema-type aliases — the lazy shape keeps wide-file work starts O(used), not O(all).
+  # schema_types: EAGER named vector display->type (fixtures) OR LAZY accessor
+  # list(idx, type_of, resolve, displays) (runner). The walk only needs membership,
+  # per-name types, and schema-type aliases — the lazy shape keeps wide-file work
+  # starts O(used), not O(all).
+  #
+  # D11 dual vocabulary: an option value may name a column by its DISPLAY name
+  # (classic-shaped options — the migration window) or by its STORAGE TOKEN (the
+  # post-flip frontend binds columnName = the wire name). `resolve` maps either form
+  # to the DISPLAY (the working vocabulary); the alias is the display's token + "_" +
+  # type — the identical string whichever form arrived, so token-shaped options pass
+  # through UNTOUCHED (token-native) and classic-shaped options encode exactly as
+  # before. Display priority: a value that is a known display is ALWAYS the display
+  # (the torture case — a display that literally spells another column's token).
   is_obj <- function(x) is.list(x) && !is.null(names(x))
   if (is.character(schema_types)) {
     nms <- names(schema_types)
     idx <- list2env(as.list(setNames(seq_along(nms), nms)), parent = emptyenv())
-    type_of <- function(nm) {
+    raw_type_of <- function(nm) {
       t <- schema_types[nm]              # [ ] not [[ ]]: missing name -> NA, not an error
       if (length(t) == 1L && !is.na(t)) unname(t) else NULL
     }
+    resolve <- function(nm) {
+      if (!is.character(nm) || length(nm) != 1L || !nzchar(nm)) return(NULL)
+      if (!is.null(idx[[nm]])) return(nm)                 # a display name
+      d <- token_decode(nm)                               # maybe a token
+      if (!is.null(d) && !is.null(idx[[d]])) d else NULL
+    }
+    displays <- function() nms
   } else {
-    nms <- schema_types$names; idx <- schema_types$idx; type_of <- schema_types$type_of
+    idx <- schema_types$idx
+    raw_type_of <- schema_types$type_of
+    resolve <- schema_types$resolve
+    displays <- schema_types$displays
   }
   has_col <- function(nm)
-    is.character(nm) && length(nm) == 1L && nzchar(nm) && !is.null(idx[[nm]])
+    is.character(nm) && length(nm) == 1L && nzchar(nm) && !is.null(resolve(nm))
+  type_of <- function(nm) {              # form-agnostic: resolve, then the raw lookup
+    d <- resolve(nm)
+    if (is.null(d)) NULL else raw_type_of(d)
+  }
   alias_env <- new.env(parent = emptyenv())
   alias_of <- function(nm) {             # alias under the SCHEMA type, resolved on demand
     a <- alias_env[[nm]]
     if (!is.null(a)) return(a)
-    ty <- type_of(nm)
+    d <- resolve(nm)
+    if (is.null(d)) return(NULL)
+    ty <- raw_type_of(d)
     if (is.null(ty)) return(NULL)
-    a <- alias_encode(nm, ty)
+    a <- alias_encode(d, ty)
     assign(nm, a, envir = alias_env)
     a
   }
@@ -606,9 +712,10 @@ walk_and_rewrite_options <- function(options, schema_types) {
   pair_aliases <- character(0)          # aliases are injective -> dedup keys, order kept
   pair_seen <- new.env(parent = emptyenv())
   add_pair <- function(name, type) {
-    if (!is.character(name) || length(name) != 1L || !nzchar(name)) return()
+    d <- resolve(name)                   # pairs record DISPLAY names (the working vocabulary)
+    if (is.null(d)) return()
     if (!(type %in% ALIAS_TYPES)) return()
-    a <- alias_encode(name, type)
+    a <- alias_encode(d, type)
     if (is.null(pair_seen[[a]])) { pair_seen[[a]] <- TRUE; pair_aliases <<- c(pair_aliases, a) }
   }
 
@@ -628,14 +735,16 @@ walk_and_rewrite_options <- function(options, schema_types) {
   }
   rewrite_name <- function(name, t_entry, j) {
     if (!is.character(name) || length(name) != 1L || !nzchar(name)) return(name)
+    d <- resolve(name)
+    if (is.null(d)) return(name)        # not a schema column: passes through (legacy)
     ty <- type_for(t_entry, j)
     if (!nzchar(ty)) {
-      sty <- type_of(name)
+      sty <- raw_type_of(d)
       ty <- if (is.null(sty)) "" else sty
     }
     if (!nzchar(ty)) return(name)       # typeless: passes through (legacy)
-    add_pair(name, ty)
-    alias_encode(name, ty)
+    add_pair(d, ty)
+    alias_encode(d, ty)                 # == token + "_" + ty when `name` was a token
   }
 
   # One {value, types, ...} node -> rewritten node (legacy _convertPreloadingDataOption).
@@ -673,18 +782,21 @@ walk_and_rewrite_options <- function(options, schema_types) {
       new_node[[option_key]] <- new_vals
       # Model-node dispositions (§3.7): model rewritten in place; columns aliased per the
       # parallel types; prefixedColumns aliased by SCHEMA type; modelOriginal untouched.
+      # rewrite_syntax scans DISPLAY names (user-typed R code references them) — the
+      # lazy accessor extracts them only when an R-code option actually exists.
       if (is.character(node[["modelOriginal"]])) {
         if (is.character(new_node[["model"]]) && length(new_node[["model"]]) == 1L)
-          new_node[["model"]] <- rewrite_syntax(new_node[["model"]], nms, alias_of)
+          new_node[["model"]] <- rewrite_syntax(new_node[["model"]], displays(), alias_of)
         cols <- new_node[["columns"]]
         if (is.list(cols)) {
           for (k in seq_along(cols)) {
             cn <- cols[[k]]
             if (is.character(cn) && length(cn) == 1L && has_col(cn)) {
+              cd <- resolve(cn)
               ty <- type_for(if (length(type_list) >= k) type_list[[k]] else NULL, 1L)
-              if (!nzchar(ty)) ty <- type_of(cn)
-              add_pair(cn, ty)
-              cols[[k]] <- alias_encode(cn, ty)
+              if (!nzchar(ty)) ty <- raw_type_of(cd)
+              add_pair(cd, ty)
+              cols[[k]] <- alias_encode(cd, ty)
             }
           }
           new_node[["columns"]] <- cols
@@ -768,7 +880,7 @@ walk_and_rewrite_options <- function(options, schema_types) {
     else x
   }
   rcode_rewrite <- function(x) {
-    if (is.character(x) && length(x) == 1L) return(rewrite_syntax(x, nms, alias_of))
+    if (is.character(x) && length(x) == 1L) return(rewrite_syntax(x, displays(), alias_of))
     if (is_obj(x)) { for (nm in names(x)) x[[nm]] <- rcode_rewrite(x[[nm]]); return(x) }
     if (is.list(x)) return(lapply(x, rcode_rewrite))
     x
@@ -872,12 +984,13 @@ coerce_col <- function(vals, as_type) {
 }
 
 # Cache-backed schema-typed source read: one batched C++ col_select per miss-set
-# (read_jasp_data prunes at the C++ level, jaspRunner/R/data.R:38-103). Unknown names
-# throw (legacy rbridge parity — loud beats silent).
+# (read_jasp_data prunes at the C++ level, jaspRunner/R/data.R). Unknown names throw
+# (legacy rbridge parity — loud beats silent). Names arrive as DISPLAYS (the working
+# vocabulary); read_jasp_data resolves them to storage fields (D11).
 load_cols <- function(nms) {
   nms <- unique(nms[nzchar(nms)])
   if (!length(nms)) return(invisible(NULL))
-  unknown <- setdiff(nms, .state$schemaNames)
+  unknown <- nms[vapply(nms, function(n) is.null(schema_display_name(n)), logical(1L))]
   if (length(unknown))
     stop(sprintf("unknown column(s) requested: %s", paste(unknown, collapse = ", ")))
   missing <- nms[vapply(nms, function(n) is.null(.state$cols[[n]]), logical(1L))]
@@ -899,13 +1012,16 @@ load_cols <- function(nms) {
 # regress the terror_tall memory win exactly where pruning won it (D3); the lazy
 # base path serves them.
 
-# Read one materialized view blob into the MODULE frame: fields <real>__<type>
-# (split at the LAST "__" — the type vocabulary never contains it, AV6) renamed to
-# aliases via the stateless codec; __base_row dropped (D8); the blob's token_map
-# cross-checked against the derived hex — a mismatch means a non-deterministic
-# build, which AV8 forbids: LOUD, never papered over (D2). Ordered-ness rides the
-# Arrow conversion faithfully (probe-pinned: dict_is_ordered survives the feather
-# round-trip), so ordinal fields arrive as ordered factors — nothing re-derived.
+# Read one materialized view blob into the MODULE frame (D11): fields are
+# <token>_<type> — the storage token plus the cast type, which IS the alias the
+# stateless codec would derive (alias_encode(display, type) == the field name), so
+# the slice-B rename is an IDENTITY and the frame arrives pre-aliased. __base_row
+# dropped (D8). The blob's token_map ({token: display_name} — display_name IS the
+# decode) is cross-checked against the codec-derived display: a mismatch means the
+# worker's base metadata disagrees with the stateless derivation — a non-deterministic
+# or corrupt build, which AV8 forbids: LOUD, never papered over (D2). Ordered-ness
+# rides the Arrow conversion faithfully (probe-pinned: dict_is_ordered survives the
+# feather round-trip), so ordinal fields arrive as ordered factors — nothing re-derived.
 view_frame_from_ref <- function(ref) {
   t0 <- now_s()
   tbl <- arrow::read_feather(ref$path, as_data_frame = FALSE)
@@ -914,22 +1030,33 @@ view_frame_from_ref <- function(ref) {
   brc <- meta$base_row_column %||% "__base_row"
   fields <- setdiff(names(df), brc)
   stopifnot(length(fields) > 0L)
-  parts <- strsplit(fields, "__", fixed = TRUE)
-  real <- vapply(parts, function(p) paste(p[-length(p)], collapse = "__"), "")
-  ty   <- vapply(parts, function(p) p[length(p)], "")
+  # Split each field at the LAST "_": the token (hex never contains "_") + the type.
+  parts <- strsplit(fields, "_", fixed = TRUE)
+  token <- vapply(parts, function(p) paste(p[-length(p)], collapse = "_"), "")
+  ty    <- vapply(parts, function(p) p[length(p)], "")
+  real <- vapply(token, function(t) {
+    d <- token_decode(t)
+    if (is.null(d)) stop(sprintf("view blob '%s': field '%s' is not a token", basename(ref$path), t))
+    d
+  }, "")
   for (i in seq_along(fields)) {
     if (!ty[i] %in% ALIAS_TYPES)
       stop(sprintf("view blob '%s': bad type suffix '%s'", fields[i], ty[i]))
-    hex <- paste(sprintf("%02x", as.integer(charToRaw(real[i]))), collapse = "")
-    want <- meta$token_map[[real[i]]]
-    if (length(want) != 1L || !identical(unname(want), hex))
+    want <- meta$token_map[[token[i]]]
+    # NOTE: compare by VALUE — identical() is encoding-sensitive and JSON-borne
+    # strings arrive native-marked while the codec's are UTF-8-marked.
+    if (length(want) != 1L || !isTRUE(unname(want) == real[i]))
       stop(sprintf(
         "view blob token_map mismatch for '%s': blob=%s derived=%s — non-deterministic build (AV8)?",
-        real[i], if (length(want)) want else "<absent>", hex))
+        token[i], if (length(want)) want else "<absent>", real[i]))
+    # The identity claim itself: the field IS the alias the codec derives.
+    if (!isTRUE(alias_encode(real[i], ty[i]) == fields[i]))
+      stop(sprintf("view blob field '%s' is not the alias of '%s'/%s — non-deterministic build (AV8)?",
+        fields[i], real[i], ty[i]))
   }
   out <- list()
   for (i in seq_along(fields))
-    out[[alias_encode(real[i], ty[i])]] <- df[[fields[i]]]
+    out[[fields[i]]] <- df[[fields[i]]]      # identity: blob fields ARE the aliases
   log_step("view read", t0, sprintf("%s (%d rows x %d col(s), %d bytes)",
             basename(ref$path), nrow(df), length(fields), file.size(ref$path)))
   list(frame  = .frame_from_cols(out),
@@ -965,7 +1092,7 @@ primary_view_frame <- function() {
                                     columns.as.ordinal = NULL, columns.as.factor = NULL,
                                     all.columns = FALSE) {
   if (isTRUE(all.columns)) {                   # the 5 free-syntax sites: full frame,
-    nms <- .state$schemaNames                  # aliased by SCHEMA types (§3.3)
+    nms <- schema_displays()                   # aliased by SCHEMA types (§3.3)
     tys <- schema_all_types()
     load_cols(nms)
     out <- list()
@@ -1008,7 +1135,7 @@ serve_column <- function(symbol, raw, ty, vf) {
       if (!is.null(src)) return(coerce_col(src, ty))
     }
   }
-  if (!(raw %in% .state$schemaNames))          # 3. migration: the lazy base read
+  if (is.null(schema_display_name(raw)))      # 3. migration: the lazy base read
     stop(sprintf(".readDatasetToEndNative: unknown column '%s'", raw))
   load_cols(raw)
   coerce_col(.state$cols[[raw]], ty)
@@ -1032,7 +1159,7 @@ serve_column <- function(symbol, raw, ty, vf) {
                            function(i) alias_encode(flds$name[i], flds$type[i]), "")
       return(.frame_from_cols(out))
     }
-    nms <- .state$schemaNames
+    nms <- schema_displays()
     tys <- schema_all_types()
     out <- lapply(nms, function(nm) empty_col(tys[[nm]]))
     names(out) <- vapply(nms, function(nm) alias_encode(nm, tys[[nm]]),
@@ -1049,7 +1176,7 @@ serve_column <- function(symbol, raw, ty, vf) {
     ty <- if (!is.null(d)) d$type else (schema_type_of(raw) %||% "scale")
     if (!is.null(flds)) {
       if (!any(flds$name == raw && flds$type == ty)) next
-    } else if (!(raw %in% .state$schemaNames)) next
+    } else if (is.null(schema_display_name(raw))) next
     out[[s]] <- empty_col(ty)
   }
   .frame_from_cols(out)
@@ -1070,24 +1197,22 @@ serve_column <- function(symbol, raw, ty, vf) {
 
 .encodeColNamesStrict <- function(x) {
   if (is.null(x)) return(x)
-  vapply(unname(as.character(x)), function(nm) {
-    ty <- schema_type_of(nm)
-    if (!is.null(ty)) alias_encode(nm, ty) else nm
-  }, character(1L), USE.NAMES = FALSE)
+  vapply(unname(as.character(x)), schema_alias_of, character(1L), USE.NAMES = FALSE)
 }
 .encodeColNamesLax <- function(x) {
   if (is.null(x)) return(x)
-  vapply(unname(as.character(x)), function(s) rewrite_syntax(s, .state$schemaNames, schema_alias_of),
+  vapply(unname(as.character(x)), function(s)
+    rewrite_syntax(s, schema_displays(), schema_alias_of),
          character(1L), USE.NAMES = FALSE)
 }
 .decodeColNamesStrict <- function(x) {
   if (is.null(x)) return(x)
-  vapply(unname(as.character(x)), function(s) alias_decode_strict(s, .state$schemaNames),
+  vapply(unname(as.character(x)), function(s) alias_decode_strict(s, .state$schemaGate),
          character(1L), USE.NAMES = FALSE)
 }
 .decodeColNamesLax <- function(x) {
   if (is.null(x)) return(x)
-  vapply(unname(as.character(x)), function(s) alias_decode_lax(s, .state$schemaNames),
+  vapply(unname(as.character(x)), function(s) alias_decode_lax(s, .state$schemaGate),
          character(1L), USE.NAMES = FALSE)
 }
 
@@ -1254,13 +1379,16 @@ run_analysis <- function(work) {
   if (is.null(schema)) stop("could not read dataset schema")
   .state$dataPath    <- data_path
   .state$schema      <- schema
-  .state$schemaNames <- schema$names            # vectorized: full width, names only (ms)
-  # name -> 0-based field index; Schema$field(i) is O(1) (GetFieldByName is an O(k) scan).
-  # Types are NOT extracted here — schema_type_of resolves them lazily per used column.
+  .state$schemaNames <- schema$names            # vectorized: full width — the FIELD names (D11 tokens)
+  # token -> 0-based field index; Schema$field(i) is O(1) (GetFieldByName is an O(k) scan).
+  # Types and displays are NOT extracted here — schema_type_of/schema_display_name
+  # resolve them lazily per used column (the wide-file start stays O(1) in schema reads).
   .state$schemaIdx   <- list2env(as.list(setNames(seq_along(.state$schemaNames) - 1L,
                                                   .state$schemaNames)), parent = emptyenv())
   .state$typeCache   <- new.env(parent = emptyenv())
   .state$aliasCache  <- new.env(parent = emptyenv())
+  .state$displayNames <- NULL                    # lazy (schema_displays, on demand)
+  .state$schemaGate  <- function(nm) !is.null(schema_display_name(nm))  # decode gate (D11)
   .state$cols        <- new.env(parent = emptyenv())
   log_step("schema read", t_schema,
            sprintf("%s (%d cols)", data_path, length(.state$schemaNames)))
@@ -1304,7 +1432,8 @@ run_analysis <- function(work) {
   if (VERBOSE) cat(sprintf("[runner] raw options (pre-walk): %s\n",
                            toJSON(raw_options, auto_unbox = TRUE, null = "null", digits = NA)))
   walked <- walk_and_rewrite_options(raw_options,
-    list(names = .state$schemaNames, idx = .state$schemaIdx, type_of = schema_type_of))
+    list(idx = .state$schemaIdx, type_of = schema_type_of,
+         resolve = schema_display_name, displays = schema_displays))
   options <- walked$options
   pairs   <- walked$pairs
   log_step("options walk", t_walk, sprintf("%d pair(s)", nrow(pairs)))

@@ -1088,7 +1088,11 @@ fn parse_window_schema(
         };
         if covered {
             let f = &fields[j as usize];
-            if let Some(nm) = name.as_deref().filter(|nm| nm != f.name()) {
+            // The echo may name the column by its storage token (the wire `name`, D11) or
+            // by its display — both identify the same column; anything else is a
+            // positional misalignment.
+            let same_column = |nm: &str| nm == f.name() || nm == display_of(f.as_ref());
+            if let Some(nm) = name.as_deref().filter(|nm| !same_column(nm)) {
                 return Err(mismatch(format!(
                     "target_schema entry {i} names column '{nm}' but position {i} \
                      is column '{}' — the array is positional over the paste (echo \
@@ -1124,13 +1128,13 @@ fn parse_window_schema(
             // An overflow entry: declaring a NEW column's name. The name must be free
             // against the live columns and the other declarations (a postcondition is
             // never silently uniquified — insert_cols' P6 differs because its names
-            // are inputs, not assertions).
+            // are inputs, not assertions). D11: declared names are DISPLAY names — the
+            // pool is display space (the field name is their token, derived later).
             if let Some(nm) = &name {
-                if fields.iter().any(|f| f.name() == nm) {
+                if fields.iter().any(|f| display_of(f) == nm.as_str()) {
                     return Err(mismatch(format!(
-                        "target_schema names a new column '{}' but the dataset already \
-                         has one — declared names must be free",
-                        nm
+                        "target_schema names a new column '{nm}' but the dataset already \
+                         has one — declared names must be free"
                     )));
                 }
                 if declared_names.contains(nm) {
@@ -1238,7 +1242,7 @@ fn apply_insert_block(
                     message: format!(
                         "declared scale column '{}' cannot take the cell '{bad}' \
                          (omit the declaration to promote it)",
-                        fields[j].name()
+                        display_of(&fields[j])
                     ),
                     count: None,
                     rows: None,
@@ -1531,11 +1535,12 @@ fn apply_insert_block(
             // A column this edit creates. P13: a DECLARED name (which must be free —
             // a postcondition is never silently uniquified; insert_cols' P6 differs
             // because its names are inputs, not assertions) or the importer convention
-            // (§3); the display rides the placeholder for the branches below. The
-            // placeholder type is nominal — resolution decorates the REAL field via
-            // `jasp_field`; only name and display matter from here.
+            // (§3). D11: declared/generated names are DISPLAY names — the field name
+            // is their token, derived inside `jasp_field`; the placeholder type is
+            // nominal — resolution decorates the REAL field; only the display matters
+            // from here.
             let entry = bc.and_then(&entry_of);
-            let (name, display) = match entry.and_then(|e| e.name.clone()) {
+            let display = match entry.and_then(|e| e.name.clone()) {
                 Some(nm) => {
                     if used_names.iter().any(|u| u == &nm) {
                         return Err(EditFailure::Validation(vec![messages::ValidationIssue {
@@ -1549,21 +1554,17 @@ fn apply_insert_block(
                             rows: None,
                         }]));
                     }
-                    let disp = entry
-                        .and_then(|e| e.display_name.clone())
-                        .unwrap_or_else(|| nm.clone());
-                    (nm, disp)
+                    entry.and_then(|e| e.display_name.clone()).unwrap_or(nm)
                 }
-                None => {
-                    let nm = csv2arrow::unique_new_name(&used_names, "", j + 1);
-                    (nm.clone(), nm)
-                }
+                None => csv2arrow::unique_new_name(&used_names, "", j + 1),
             };
-            used_names.push(name.clone());
-            csv2arrow::jasp_field(&name, &display, Level::Nominal, false)
+            used_names.push(display.clone());
+            csv2arrow::jasp_field(&display, Level::Nominal, false)
         };
         if j < n {
-            used_names.push(field.name().to_string());
+            // The uniquification pool is DISPLAY-name space (D11): generated names
+            // must never collide with a live column's display.
+            used_names.push(display_of(&field));
         }
 
         let (build, field) = if j < n && !in_block {
@@ -1615,12 +1616,8 @@ fn apply_insert_block(
                                 && typed
                                     .iter()
                                     .all(|v| v.is_none_or(|v| v.is_finite() && v.fract() == 0.0));
-                            let f = csv2arrow::jasp_field(
-                                field.name(),
-                                &display_of(&field),
-                                Level::Scale,
-                                all_int,
-                            );
+                            let f =
+                                csv2arrow::jasp_field(&display_of(&field), Level::Scale, all_int);
                             (ColBuild::BuildFloat { cells: typed }, f)
                         }
                         Level::Scale => {
@@ -1636,12 +1633,8 @@ fn apply_insert_block(
                                     cell_text(c, &nulls).and_then(|t| dict.index.get(t).copied())
                                 })
                                 .collect();
-                            let f = csv2arrow::jasp_field(
-                                field.name(),
-                                &display_of(&field),
-                                Level::Nominal,
-                                false,
-                            );
+                            let f =
+                                csv2arrow::jasp_field(&display_of(&field), Level::Nominal, false);
                             (
                                 ColBuild::BuildDict {
                                     dict,
@@ -1723,7 +1716,7 @@ fn apply_insert_block(
                                 message: format!(
                                     "declared scale column '{}' cannot take the cell \
                                      '{bad}' — omit the type to let the lane infer",
-                                    field.name()
+                                    display_of(&field)
                                 ),
                                 count: None,
                                 rows: None,
@@ -1733,12 +1726,7 @@ fn apply_insert_block(
                             && typed
                                 .iter()
                                 .all(|v| v.is_none_or(|v| v.is_finite() && v.fract() == 0.0));
-                        let f = csv2arrow::jasp_field(
-                            field.name(),
-                            &display_of(&field),
-                            Level::Scale,
-                            all_int,
-                        );
+                        let f = csv2arrow::jasp_field(&display_of(&field), Level::Scale, all_int);
                         (ColBuild::BuildFloat { cells: typed }, f)
                     }
                     Some(cat @ (Level::Nominal | Level::Ordinal)) => {
@@ -1748,12 +1736,7 @@ fn apply_insert_block(
                                 // order; never sorted, never canonicalized).
                                 let dict = csv2arrow::dict_from_list(levels);
                                 let keys = declared_keys(&cells, &dict)?;
-                                let f = csv2arrow::jasp_field(
-                                    field.name(),
-                                    &display_of(&field),
-                                    cat,
-                                    false,
-                                );
+                                let f = csv2arrow::jasp_field(&display_of(&field), cat, false);
                                 (
                                     ColBuild::BuildDict {
                                         dict,
@@ -1767,12 +1750,7 @@ fn apply_insert_block(
                                 // Declared categorical, levels derived from the cells (the
                                 // shared derivation — only the level is pinned).
                                 let (_stats, dict, keys) = derive_dict(&cells);
-                                let f = csv2arrow::jasp_field(
-                                    field.name(),
-                                    &display_of(&field),
-                                    cat,
-                                    false,
-                                );
+                                let f = csv2arrow::jasp_field(&display_of(&field), cat, false);
                                 (
                                     ColBuild::BuildDict {
                                         dict,
@@ -1796,7 +1774,6 @@ fn apply_insert_block(
                                     .collect();
                                 let all_int = stats.only_ints && stats.count > 0;
                                 let f = csv2arrow::jasp_field(
-                                    field.name(),
                                     &display_of(&field),
                                     Level::Scale,
                                     all_int,
@@ -1804,12 +1781,7 @@ fn apply_insert_block(
                                 (ColBuild::BuildFloat { cells: typed }, f)
                             }
                             _ => {
-                                let f = csv2arrow::jasp_field(
-                                    field.name(),
-                                    &display_of(&field),
-                                    level,
-                                    false,
-                                );
+                                let f = csv2arrow::jasp_field(&display_of(&field), level, false);
                                 (
                                     ColBuild::BuildDict {
                                         dict,
@@ -1825,8 +1797,9 @@ fn apply_insert_block(
             }
         } else {
             // j >= n && !in_block: an empty hole column (anchor beyond the column
-            // extent) — nominal, all null (inference over zero observed cells).
-            let f = csv2arrow::jasp_field(field.name(), field.name(), Level::Nominal, false);
+            // extent) — nominal, all null (inference over zero observed cells). The
+            // placeholder (built above) carries the display; the field derives from it.
+            let f = csv2arrow::jasp_field(&display_of(&field), Level::Nominal, false);
             let dict = empty_cat_dict();
             (
                 ColBuild::BuildDict {
@@ -2422,8 +2395,9 @@ fn apply_insert_cols(
 
     // The plan: survivors pass through around the specs. Names uniquify against the
     // FULL post-edit list as each lands (P6) — an earlier insert may already own
-    // `score_3`, so the generator loops until genuinely free.
-    let mut used_names: Vec<String> = fields.iter().map(|f| f.name().to_string()).collect();
+    // `score_3`, so the generator loops until genuinely free. D11: the pool is
+    // DISPLAY-name space; the field name is the display's token (via jasp_field).
+    let mut used_names: Vec<String> = fields.iter().map(|f| display_of(f)).collect();
     let mut out_cols: Vec<OutCol> = Vec::with_capacity(n + columns.len());
     for (j, f) in fields.iter().enumerate().take(at as usize) {
         out_cols.push(pass_col(f.as_ref().clone(), j));
@@ -2435,7 +2409,7 @@ fn apply_insert_cols(
         let level = spec_level(spec).expect("validated above");
         let (field, build) = match level {
             Level::Scale => (
-                csv2arrow::jasp_field(&name, &display, Level::Scale, false),
+                csv2arrow::jasp_field(&display, Level::Scale, false),
                 ColBuild::BuildFloat { cells: Vec::new() },
             ),
             lv => {
@@ -2446,7 +2420,7 @@ fn apply_insert_cols(
                     _ => empty_cat_dict(),
                 };
                 (
-                    csv2arrow::jasp_field(&name, &display, lv, false),
+                    csv2arrow::jasp_field(&display, lv, false),
                     ColBuild::BuildDict {
                         dict,
                         keys: Vec::new(),
@@ -2455,7 +2429,9 @@ fn apply_insert_cols(
                 )
             }
         };
-        used_names.push(name);
+        // The pool tracks the DISPLAY (the token derives from it — two equal displays
+        // would collide in storage, so that is the invariant P6 defends).
+        used_names.push(display.clone());
         out_cols.push(OutCol {
             field,
             old: None,
@@ -2768,6 +2744,7 @@ struct Change {
     /// Input column index.
     j: usize,
     entry_idx: usize,
+    /// The uniquified new DISPLAY name (P4/P6; the field name is its token, D11).
     rename_to: Option<String>,
     new_level: Level,
     rebuild: Rebuild,
@@ -2821,12 +2798,23 @@ fn apply_schema_change(
             entries.len()
         )));
     }
-    // Match by CURRENT name, each column exactly once; duplicates are ambiguous.
+    // Match by CURRENT identity, each column exactly once; duplicates are ambiguous.
+    // D11: the entry's `name` is the column's storage token (the wire `name` — the
+    // frontend's vocabulary); the display name still matches during the migration
+    // window (hand-built works), but the token wins when both exist (the torture case:
+    // a display that literally spells another column's token means the token).
     let mut match_of: Vec<Option<usize>> = vec![None; entries.len()];
     for (ei, e) in entries.iter().enumerate() {
         let hits: Vec<usize> = (0..n)
             .filter(|&j| fields[j].name() == e.name.as_str())
             .collect();
+        let hits = if hits.is_empty() {
+            (0..n)
+                .filter(|&j| display_of(&fields[j]) == e.name.as_str())
+                .collect()
+        } else {
+            hits
+        };
         match hits.as_slice() {
             [j] => match_of[ei] = Some(*j),
             [] => {
@@ -2856,7 +2844,9 @@ fn apply_schema_change(
     }
 
     // ── Classify each column's change; validate what needs no data. ──
-    let mut used_names: Vec<String> = fields.iter().map(|f| f.name().to_string()).collect();
+    // The rename pool is DISPLAY-name space (D11): the new field name derives from the
+    // new display, so that is the namespace P6's uniquification defends.
+    let mut used_names: Vec<String> = fields.iter().map(|f| display_of(f)).collect();
     let mut changes: Vec<Change> = Vec::with_capacity(n);
     for (ei, e) in entries.iter().enumerate() {
         let j = match_of[ei].expect("matched above");
@@ -2910,8 +2900,8 @@ fn apply_schema_change(
                 None => Rebuild::Keep, // flag flip / rename / relabel only
             },
         };
-        // A rename's new field name derives from the new display name (P4) and uniquifies
-        // against the evolving pool (P6's loop rule).
+        // A rename declares the new DISPLAY name (P4: the field name derives from it,
+        // D11: as its token) and uniquifies against the evolving pool (P6's loop rule).
         let rename_to = e.display_name.as_ref().map(|d| {
             let new_name = csv2arrow::unique_new_name(&used_names, d, j + 1);
             used_names[j] = new_name.clone();
@@ -3188,9 +3178,13 @@ fn apply_schema_change(
                 })
                 .filter(|l: &Vec<String>| !l.is_empty());
             let reencoded = matches!(c.rebuild, Rebuild::ToScale | Rebuild::ToCategorical { .. });
+            // The undo locates the column by its POST-edit field name (the storage
+            // token — unchanged columns keep theirs; a rename's derives from the new
+            // display).
             let post_name = c
                 .rename_to
-                .clone()
+                .as_deref()
+                .map(csv2arrow::token_of)
                 .unwrap_or_else(|| fields[c.j].name().to_string());
             json!({
                 "current": post_name,
@@ -3234,27 +3228,24 @@ fn apply_schema_change(
         .collect();
     let mut out_cols: Vec<OutCol> = Vec::with_capacity(n);
     for c in &changes {
-        let e = &entries[c.entry_idx];
         let base = fields[c.j].as_ref().clone();
         let old_all_int = base
             .metadata()
             .get("jasp:all_integer")
             .is_some_and(|v| v == "true");
-        let (name, display) = match c.rename_to.as_deref() {
-            Some(new_name) => (
-                new_name.to_string(),
-                e.display_name
-                    .clone()
-                    .unwrap_or_else(|| new_name.to_string()),
-            ),
-            None => (base.name().to_string(), display_of(&base)),
+        // The rebuilt field's display: the uniquified new display on a rename (P4 —
+        // the declared display, uniquified per P6), else the column's current one.
+        // D11: the field name is the display's token, derived inside jasp_field.
+        let display = match c.rename_to.as_deref() {
+            Some(new_display) => new_display.to_string(),
+            None => display_of(&base),
         };
         let all_int = if matches!(c.rebuild, Rebuild::ToScale) {
             to_scale_all_int.get(&c.j).copied().unwrap_or(false)
         } else {
             old_all_int
         };
-        let mut field = csv2arrow::jasp_field(&name, &display, c.new_level, all_int);
+        let mut field = csv2arrow::jasp_field(&display, c.new_level, all_int);
         // The overlay: declared labels replace (`{}` detaches); absent keeps the old.
         let overlay = match &c.labels {
             Some(l) => Some(serde_json::Value::Object(l.clone())),
@@ -4355,13 +4346,13 @@ fn restore_schema_exec(
                 });
             } else {
                 // The all_integer hint survives on the current field (a metadata-only
-                // change never touched the data, so the hint never moved).
+                // change never touched the data, so the hint never moved). D11: the
+                // restored field's name is the old display's token (jasp_field).
                 let all_int = fields[j]
                     .metadata()
                     .get("jasp:all_integer")
                     .is_some_and(|v| v == "true");
-                let mut field =
-                    csv2arrow::jasp_field(&e.old_name, &e.old_display, e.old_type, all_int);
+                let mut field = csv2arrow::jasp_field(&e.old_display, e.old_type, all_int);
                 if let Some(l) = &e.old_labels {
                     csv2arrow::attach_labels(&mut field, l);
                 }
@@ -4572,15 +4563,20 @@ mod tests {
         }
     }
 
+    /// Locate a cache field by its DISPLAY name (the vocabulary tests speak; the field
+    /// name is the D11 token).
+    fn field_idx(schema: &SchemaRef, name: &str) -> usize {
+        schema
+            .fields()
+            .iter()
+            .position(|f| display_of(f) == name || f.name() == name)
+            .unwrap_or_else(|| panic!("column {name} exists"))
+    }
+
     /// Read one column of a cache as a materialized Float64 vector (test helper).
     fn read_f64(path: &std::path::Path, name: &str) -> Vec<Option<f64>> {
         let reader = FileReader::try_new(File::open(path).unwrap(), None).unwrap();
-        let idx = reader
-            .schema()
-            .fields()
-            .iter()
-            .position(|f| f.name() == name)
-            .expect("column exists");
+        let idx = field_idx(&reader.schema(), name);
         let mut out = Vec::new();
         for batch in reader {
             let b = batch.unwrap();
@@ -4597,12 +4593,7 @@ mod tests {
     /// Read one dictionary column's VALUE strings per row (test helper).
     fn read_dict_values(path: &std::path::Path, name: &str) -> Vec<Option<String>> {
         let reader = FileReader::try_new(File::open(path).unwrap(), None).unwrap();
-        let idx = reader
-            .schema()
-            .fields()
-            .iter()
-            .position(|f| f.name() == name)
-            .expect("column exists");
+        let idx = field_idx(&reader.schema(), name);
         let mut out = Vec::new();
         for batch in reader {
             let b = batch.unwrap();
@@ -4624,12 +4615,7 @@ mod tests {
     /// a different values array for one field).
     fn read_dict_dictionary(path: &std::path::Path, name: &str) -> Vec<String> {
         let mut reader = FileReader::try_new(File::open(path).unwrap(), None).unwrap();
-        let idx = reader
-            .schema()
-            .fields()
-            .iter()
-            .position(|f| f.name() == name)
-            .expect("column exists");
+        let idx = field_idx(&reader.schema(), name);
         match reader.next() {
             Some(Ok(b)) => b
                 .column(idx)
@@ -4668,7 +4654,7 @@ mod tests {
         let locale = Locale::new('.', None);
         let schema = Arc::new(Schema::new(
             cols.iter()
-                .map(|(n, l)| csv2arrow::jasp_field(n, n, *l, false))
+                .map(|(n, l)| csv2arrow::jasp_field(n, *l, false))
                 .collect::<Vec<Field>>(),
         ));
         let dicts: Vec<Option<CatDict>> = (0..cols.len())
@@ -5031,7 +5017,8 @@ mod tests {
         );
         let schema = out.schema.expect("schema");
         assert_eq!(schema.as_array().unwrap().iter().count(), 3);
-        assert_eq!(schema[2]["name"], "V3");
+        assert_eq!(schema[2]["name"], csv2arrow::token_of("V3"), "D11 token");
+        assert_eq!(schema[2]["display_name"], "V3");
         assert_eq!(
             schema[2]["type"], "nominal",
             "two distinct text cells → nominal"
@@ -5216,8 +5203,22 @@ mod tests {
         assert_eq!(out.invalidation.all, Some(true));
         assert_eq!(out.invalidation.rows_from, None);
         let schema = out.schema.as_ref().unwrap().as_array().unwrap();
+        // D11: the wire `name` is the storage token of the DISPLAY (a declared
+        // display_name overrides the declared name — the display is the identity).
         let names: Vec<&str> = schema.iter().map(|c| c["name"].as_str().unwrap()).collect();
-        assert_eq!(names, vec!["score", "group", "Q1", "Q3"]);
+        let want_tokens: Vec<String> = ["score", "group", "Q1", "Question 3"]
+            .into_iter()
+            .map(csv2arrow::token_of)
+            .collect();
+        assert_eq!(
+            names,
+            want_tokens.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        let displays: Vec<&str> = schema
+            .iter()
+            .map(|c| c["display_name"].as_str().unwrap())
+            .collect();
+        assert_eq!(displays, vec!["score", "group", "Q1", "Question 3"]);
         let q1 = &schema[2];
         assert_eq!(q1["type"], "scale");
         let q3 = &schema[3];
@@ -5230,7 +5231,7 @@ mod tests {
         // The cells landed: Q1 scale, Q3 keys point at the declared list.
         assert_eq!(read_f64(&out_cache, "Q1"), vec![None, Some(9.0)]);
         assert_eq!(
-            read_dict_values(&out_cache, "Q3"),
+            read_dict_values(&out_cache, "Question 3"),
             vec![None, Some("c".into())]
         );
         // The null entry behaved as undeclared: "group" absorbed "D" (auto path).
@@ -5260,7 +5261,10 @@ mod tests {
         let out = serve(&job).expect("the declared remap applies");
         assert_eq!(out.invalidation.all, Some(true));
         let schema = out.schema.as_ref().unwrap().as_array().unwrap();
-        let label = schema.iter().find(|c| c["name"] == "label").unwrap();
+        let label = schema
+            .iter()
+            .find(|c| c["display_name"] == "label")
+            .expect("label by display");
         // VERBATIM spec order — never value-sorted (invariant 9).
         assert_eq!(
             label["levels"].as_array().unwrap(),
@@ -5886,6 +5890,11 @@ mod tests {
         }
     }
 
+    /// The D11 tokens of a display list (field names / wire names post-flip).
+    fn tokens(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| csv2arrow::token_of(n)).collect()
+    }
+
     /// The output cache's field names, in order (column position IS schema meaning).
     fn read_field_names(path: &std::path::Path) -> Vec<String> {
         let reader = FileReader::try_new(File::open(path).unwrap(), None).unwrap();
@@ -5921,7 +5930,7 @@ mod tests {
         assert_eq!(out.rows, 2, "rows never move");
         assert_eq!(
             read_field_names(&out_cache),
-            vec!["score", "age", "rank", "group"],
+            tokens(&["score", "age", "rank", "group"]),
             "survivors shift right around the inserted window"
         );
         assert_eq!(read_f64(&out_cache, "age"), vec![None, None]);
@@ -5934,15 +5943,16 @@ mod tests {
         // the ordered flag carries ordinal (the cache's type encoding)
         let reader = FileReader::try_new(File::open(&out_cache).unwrap(), None).unwrap();
         let schema_ref = reader.schema();
-        let rank = schema_ref
-            .fields()
-            .iter()
-            .find(|f| f.name() == "rank")
-            .unwrap();
+        let rank_idx = field_idx(&schema_ref, "rank");
+        let rank = schema_ref.field(rank_idx);
         assert_eq!(rank.dict_is_ordered(), Some(true));
 
-        // the wire schema: column order, null-filled stats, spec-order levels
+        // the wire schema: column order (by D11 token), null-filled stats, spec-order levels
         let schema = out.schema.expect("column set changed — schema ships");
+        let want_tokens: Vec<String> = ["score", "age", "rank", "group"]
+            .into_iter()
+            .map(csv2arrow::token_of)
+            .collect();
         assert_eq!(
             schema
                 .as_array()
@@ -5950,7 +5960,7 @@ mod tests {
                 .iter()
                 .map(|c| c["name"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            vec!["score", "age", "rank", "group"]
+            want_tokens.iter().map(String::as_str).collect::<Vec<_>>()
         );
         assert_eq!(schema[1]["type"], "scale");
         assert_eq!(schema[1]["value_count"], 0);
@@ -6004,7 +6014,7 @@ mod tests {
         serve(&job).expect("applies");
         assert_eq!(
             read_field_names(&out_cache),
-            vec!["score", "score_4", "V3", "V5", "score_2", "score_3"],
+            tokens(&["score", "score_4", "V3", "V5", "score_2", "score_3"]),
             "score_2/score_3 taken → the loop walks to score_4; empty → V3; 5 → V5"
         );
     }
@@ -6086,7 +6096,7 @@ mod tests {
         assert_eq!(out.rows, 3);
         assert_eq!(
             read_field_names(&out_cache),
-            vec!["score", "extra"],
+            tokens(&["score", "extra"]),
             "survivors shift left over the removed window"
         );
         assert_eq!(
@@ -6111,7 +6121,7 @@ mod tests {
         assert_eq!(meta.ops["at"], 1);
         assert_eq!(meta.ops["count"], 1);
         assert_eq!(meta.ops["old_cols"], 3);
-        assert_eq!(meta.ops["columns"][0]["name"], "group");
+        assert_eq!(meta.ops["columns"][0]["name"], csv2arrow::token_of("group"));
 
         let reader =
             FileReader::try_new(std::io::Cursor::new(&out.inverse_bytes[..]), None).unwrap();
@@ -6173,19 +6183,19 @@ mod tests {
         )
     }
 
-    /// A field's `jasp:labels` overlay read back from a cache.
+    /// A field's `jasp:labels` overlay read back from a cache (by DISPLAY name).
     fn read_field_labels(path: &std::path::Path, name: &str) -> Option<serde_json::Value> {
         let reader = FileReader::try_new(File::open(path).unwrap(), None).unwrap();
         let schema = reader.schema();
-        let f = schema.fields().iter().find(|f| f.name() == name).unwrap();
+        let f = schema.field(field_idx(&schema, name));
         csv2arrow::labels_of_field(f)
     }
 
-    /// A field's ordered flag (nominal↔ordinal).
+    /// A field's ordered flag (nominal↔ordinal; by DISPLAY name).
     fn read_field_ordered(path: &std::path::Path, name: &str) -> bool {
         let reader = FileReader::try_new(File::open(path).unwrap(), None).unwrap();
         let schema = reader.schema();
-        let f = schema.fields().iter().find(|f| f.name() == name).unwrap();
+        let f = schema.field(field_idx(&schema, name));
         f.dict_is_ordered() == Some(true)
     }
 
@@ -6206,7 +6216,7 @@ mod tests {
         );
         let out = serve(&job).expect("applies");
 
-        assert_eq!(read_field_names(&out_cache), vec!["group", "Score v2"]);
+        assert_eq!(read_field_names(&out_cache), tokens(&["group", "Score v2"]));
         assert_eq!(read_f64(&out_cache, "Score v2"), vec![Some(1.5), Some(2.5)]);
         assert_eq!(
             out.invalidation,
@@ -6221,12 +6231,14 @@ mod tests {
         assert_eq!(schema[1]["display_name"], "Score v2");
 
         // The inverse is JSON-only: the old order + the old identity, no capture.
+        // D11: `old_order`/`old_name`/`current` are FIELD names (tokens); the display
+        // rides `old_display`.
         let meta = out.inverse_meta.unwrap();
         assert_eq!(meta.ops["op"], "restore_schema");
-        assert_eq!(meta.ops["old_order"], json!(["score", "group"]));
+        assert_eq!(meta.ops["old_order"], json!(tokens(&["score", "group"])));
         let col = &meta.ops["columns"][0];
-        assert_eq!(col["current"], "Score v2");
-        assert_eq!(col["old_name"], "score");
+        assert_eq!(col["current"], csv2arrow::token_of("Score v2"));
+        assert_eq!(col["old_name"], csv2arrow::token_of("score"));
         assert_eq!(col["old_display"], "score");
         assert_eq!(col["capture"], serde_json::Value::Null);
         assert!(out.inverse_bytes.is_empty());
@@ -6628,7 +6640,7 @@ mod tests {
         );
         let out = serve(&job).expect("applies");
         assert_eq!(out.rows, 1);
-        assert_eq!(read_field_names(&out_cache), vec!["score", "group"]);
+        assert_eq!(read_field_names(&out_cache), tokens(&["score", "group"]));
         assert_eq!(
             out.invalidation,
             messages::Invalidation {
@@ -6688,7 +6700,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["even", "odd", "even", "odd", "even", "odd"]
         );
-        assert_eq!(read_field_names(&del), vec!["score", "band"]);
+        assert_eq!(read_field_names(&del), tokens(&["score", "band"]));
 
         // Insert at position 0: every survivor shifts, dictionaries stay whole.
         let ins = cache.parent().unwrap().join("ins.arrow");
@@ -6701,7 +6713,10 @@ mod tests {
             ins.to_str().unwrap(),
         );
         serve(&job).expect("applies");
-        assert_eq!(read_field_names(&ins), vec!["new", "score", "tag", "band"]);
+        assert_eq!(
+            read_field_names(&ins),
+            tokens(&["new", "score", "tag", "band"])
+        );
         assert_eq!(
             read_dict_dictionary(&ins, "band"),
             vec!["hi".to_string(), "lo".to_string()],
@@ -7208,7 +7223,7 @@ mod tests {
         .expect("applies");
         assert_eq!(
             read_field_names(&rev1),
-            vec!["Grp".to_string(), "score".to_string()],
+            tokens(&["Grp", "score"]),
             "post-edit: entry order + derived names"
         );
 
@@ -7234,19 +7249,25 @@ mod tests {
         assert!(undo.schema.is_some(), "undo always ships the schema");
         assert_eq!(
             read_field_names(&rev2),
-            vec!["score".to_string(), "group".to_string()],
+            tokens(&["score", "group"]),
             "old order + old names restored"
         );
 
         let ops = &undo.inverse_meta.as_ref().unwrap().ops;
         assert_eq!(ops["op"], "restore_schema");
-        assert_eq!(ops["old_order"], json!(["Grp", "score"]));
+        assert_eq!(ops["old_order"], json!(tokens(&["Grp", "score"])));
         let cols = ops["columns"].as_array().unwrap();
-        let grp = cols.iter().find(|c| c["current"] == "group").unwrap();
-        assert_eq!(grp["old_name"], "Grp");
+        let grp = cols
+            .iter()
+            .find(|c| c["current"] == csv2arrow::token_of("group"))
+            .unwrap();
+        assert_eq!(grp["old_name"], csv2arrow::token_of("Grp"));
         assert_eq!(grp["old_type"], "nominal");
         assert_eq!(grp["old_levels"], json!(["A", "B"]));
-        let score = cols.iter().find(|c| c["current"] == "score").unwrap();
+        let score = cols
+            .iter()
+            .find(|c| c["current"] == csv2arrow::token_of("score"))
+            .unwrap();
         assert_eq!(score["old_type"], "nominal");
         assert_eq!(score["capture"], "full");
         assert!(

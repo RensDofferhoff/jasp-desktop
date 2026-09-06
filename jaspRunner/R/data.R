@@ -50,16 +50,40 @@ jasp_level_string <- function(v) {
 #' coercion matrix (the worker's, analysisview.rs) — the migration-era twin of the
 #' views builder; its formatting/typing quirks die with this file at slice D.
 #'
+#' D11 (runner-views-read-design.md): the cache's FIELD names are the storage tokens
+#' `jasp_enc_hex_<hex(display)>`. A spec name resolves by FIELD name (the token — the
+#' post-flip vocabulary) first, with the `jasp:display_name` field metadata as the
+#' migration bridge (display-named specs still resolve) — the same rule the worker's
+#' resolve_column applies, one convention, no copies. Output columns are named by the
+#' REQUESTED name, so callers index by whatever they asked for.
+#'
 #' @param path         Path to the dataset's Feather cache file (orchestrator-owned; read-only).
-#' @param columns_spec list of `list(name = <canonical name>, as = "scale"|"nominal"|"ordinal")`.
+#' @param columns_spec list of `list(name = <storage token or display name>, as = "scale"|"nominal"|"ordinal")`.
 #' @param filters      optional names of stored boolean filter columns, ANDed into a row mask.
 #' @return a data.frame of the requested columns (in `columns_spec` order).
 read_jasp_data <- function(path, columns_spec, filters = NULL) {
   sel <- vapply(columns_spec, function(s) s$name, character(1))
 
+  # Resolve every requested name to its STORAGE field (footer-only read — no data):
+  # field-name (token) hit first, jasp:display_name metadata second (the bridge).
+  footer <- arrow::RecordBatchFileReader$create(arrow::ReadableFile$create(path))$schema
+  field_names <- footer$names
+  displays <- vapply(seq_along(field_names), function(i) {
+    m <- footer$field(i - 1L)$metadata[["jasp:display_name"]]
+    if (is.null(m) || !nzchar(m)) field_names[i] else m
+  }, character(1))
+  resolve <- function(nm) {
+    hit <- which(field_names == nm)
+    if (length(hit)) return(field_names[hit[1L]])
+    hit <- which(displays == nm)
+    if (length(hit)) return(field_names[hit[1L]])
+    stop(sprintf("unknown column '%s' in %s", nm, path))
+  }
+  fields <- vapply(sel, resolve, character(1))
+
   # ONE batched C++ read as a Table; col_select prunes to the requested columns (plus the filter
   # columns, if any) at the C++ level, so a wide file materializes only what is needed.
-  need <- if (length(filters)) unique(c(sel, filters)) else sel
+  need <- if (length(filters)) unique(c(fields, vapply(filters, resolve, character(1)))) else fields
   tbl <- arrow::read_feather(path, as_data_frame = FALSE,
                              col_select = tidyselect::all_of(need))
 
@@ -71,7 +95,7 @@ read_jasp_data <- function(path, columns_spec, filters = NULL) {
   if (!is.null(filters) && length(filters) > 0L) {
     mask <- NULL
     for (f in filters) {
-      m <- tbl[[f]]$as_vector()                       # boolean column -> R logical (cheap)
+      m <- tbl[[resolve(f)]]$as_vector()               # boolean column -> R logical (cheap)
       mask <- if (is.null(mask)) m else (mask & m)    # AND the filter columns
     }
     mask[is.na(mask)] <- FALSE                        # a filter that yields NA excludes the row
@@ -81,8 +105,8 @@ read_jasp_data <- function(path, columns_spec, filters = NULL) {
   # The schema (footer) travels with the Table; parse each distinct labels JSON once.
   sch <- tbl$schema
   label_cache <- new.env(parent = emptyenv())
-  labels_for <- function(name) {
-    lj <- sch$GetFieldByName(name)$metadata[["jasp:labels"]]
+  labels_for <- function(field) {
+    lj <- sch$GetFieldByName(field)$metadata[["jasp:labels"]]
     if (is.null(lj) || !nzchar(lj)) return(NULL)            # value == label; nothing to map
     if (is.null(label_cache[[lj]])) label_cache[[lj]] <- jsonlite::fromJSON(lj)
     label_cache[[lj]]
@@ -90,19 +114,20 @@ read_jasp_data <- function(path, columns_spec, filters = NULL) {
 
   df <- as.data.frame(tbl)                             # convert ONLY the (filtered) rows to R
   out <- as.list(df)
-  for (s in columns_spec) {
-    vals <- out[[s$name]]
+  for (i in seq_along(columns_spec)) {
+    s <- columns_spec[[i]]
+    vals <- out[[fields[i]]]
     if (is.factor(vals)) {                                  # categorical (Arrow dictionary)
       if (s$as == "scale") {
         # read-as-scale returns the VALUES: parse the k levels once, index the N rows.
-        out[[s$name]] <- as.numeric(levels(vals))[as.integer(vals)]
+        vals <- as.numeric(levels(vals))[as.integer(vals)]
       } else {
         # Relabel only where a label overlay exists. When value == label (the common case: string
         # categoricals, unlabelled numeric codes) the levels are already the display values; SKIP
         # the assignment, because `levels(vals) <-` forces a copy-on-modify of the N codes
         # (~7 ms/col at 1M rows) even when it changes nothing (~3.6x on tall sparse data). Never
         # rebuild with factor(vals, levels=levels(vals), labels=lab) — that re-matches all N rows.
-        labels <- labels_for(s$name)
+        labels <- labels_for(fields[i])
         if (!is.null(labels) && length(labels) > 0L)
           levels(vals) <- label_or_value(levels(vals), labels)
         # System matrix: nominal is UNORDERED, always (the worker emits plain
@@ -111,12 +136,9 @@ read_jasp_data <- function(path, columns_spec, filters = NULL) {
           class(vals) <- "factor"
         if (s$as == "ordinal" && !is.ordered(vals))
           class(vals) <- c("ordered", "factor")              # O(1): flag flip only
-        out[[s$name]] <- vals
       }
     } else {                                                # scale (float64) column
-      if (s$as == "scale") {
-        out[[s$name]] <- vals                                # already numeric — no factor round-trip
-      } else {
+      if (s$as != "scale") {
         # System matrix: non-finite is MISSING, never a category; levels = the
         # distinct values sorted NUMERICALLY, rendered with the system
         # jasp_level_string and DEDUPED ON THE STRING (values agreeing at 15
@@ -127,10 +149,11 @@ read_jasp_data <- function(path, columns_spec, filters = NULL) {
         labs <- labs[!duplicated(labs)]      # first occurrence in numeric order wins
         row_lab <- vapply(vals, function(x)
           if (is.na(x)) NA_character_ else jasp_level_string(x), character(1))
-        out[[s$name]] <- factor(match(row_lab, labs), levels = seq_along(labs),
-                                labels = labs, ordered = (s$as == "ordinal"))
-      }
+        vals <- factor(match(row_lab, labs), levels = seq_along(labs),
+                       labels = labs, ordered = (s$as == "ordinal"))
+      }                                    # scale: already numeric — no factor round-trip
     }
+    out[[s$name]] <- vals
   }
   out <- out[sel]                                            # drop filter cols, keep requested order
 
