@@ -228,7 +228,11 @@ Terms JASPListControl::_getCombinedTerms(SourceItem* sourceToCombine)
 		{
 			QStringList components = termToCombine.components();
 			components.append(termToBeCombined.components());
-			result.add(Term(components));
+			Term combined(components);
+			// D11: the label is the display vocabulary — compose it from the source terms'
+			// labels so the combined interaction never renders joined storage tokens.
+			combined.setLabel(QStringList({ termToCombine.label(), termToBeCombined.label() }).join(Term::separator));
+			result.add(combined);
 		}
 	}
 

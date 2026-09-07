@@ -150,7 +150,26 @@ Terms ListModel::checkTermsTypes(const Terms& terms) const
 {
 	Terms checkedTerms = terms; // Keep terms properties
 	for (Term& term : checkedTerms)
+	{
 		_setAllowedType(term);
+
+		// D11 display safety net: terms constructed without labels (option values,
+		// cross-model combination, generated interactions) render label()=value=
+		// storage tokens — hex in the lists. Decode each component via the provider;
+		// non-columns (levels, "none", ...) keep themselves. Terms that already
+		// carry a display label (drag flow, bindTo) are untouched.
+		if (term.label().isEmpty() || term.label() == term.value())
+		{
+			QStringList displayParts;
+			for (const QString& component : term.components())
+			{
+				QString displayName = requestInfo(varInfoType::DisplayName, component).toString();
+				displayParts.push_back(displayName.isEmpty() ? component : displayName);
+			}
+			if (displayParts.size())
+				term.setLabel(displayParts.join(Term::separator));
+		}
+	}
 	return checkedTerms;
 }
 
