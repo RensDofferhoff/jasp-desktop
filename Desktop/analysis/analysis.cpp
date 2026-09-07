@@ -21,6 +21,7 @@
 #include "tempfiles.h"
 #include "appinfo.h"
 #include "filter.h"
+#include "dataset.h"
 #include "dirs.h"
 #include "utils.h"
 #include "qutils.h"
@@ -336,6 +337,223 @@ void Analysis::run()
 	Log::log() << "Analysis::run() submitted work " << workId() << " (revision " << revision() << ") for " << title() << std::endl;
 }
 
+// ─── NEO views staple (runner-views-read-design.md §4 slice C) ─────────────────────
+//
+// Collects the (storage token, cast) pairs the bound options carry and staples them as
+// the analysis's view spec, so the orchestrator materializes the projection (AV4) and
+// the runner READS a frame instead of assembling one (slice B's seam). This is the
+// COLLECTION half of the legacy catalog (Common/columnencoder.cpp
+// encodeColumnNamesinOptions — _addTypeToColumnNamesInOptionsRecursively +
+// _convertPreloadingDataOption), mirrored 1:1 by the runner's own walk
+// (runner_jaspbase.R walk_and_rewrite_options): no encoding happens here.
+//
+// Pairing rules (the walk's, do not invent):
+//   * a variable slot's `types` entry broadcasts over interaction components when it is
+//     a scalar and indexes per component when it is an array;
+//   * an untyped/invalid slot falls back to the column's schema type;
+//   * bare strings anywhere in the options that name a schema column pair at the schema
+//     type (the meta pass's strict rewrite collects the same);
+//   * resolution is display-first — a display name always wins over a same-spelled
+//     token (the torture case; the walk's resolve()).
+// Superset-safe (analysis-views §12): extra pairs are harmless, and a missed pair
+// surfaces as the runner's lazy-append rung — the designed safety valve, never a crash.
+
+namespace
+{
+
+bool viewCastValid(const std::string & type)
+{
+	return type == "scale" || type == "ordinal" || type == "nominal";
+}
+
+class ViewStapleCollector
+{
+public:
+	explicit ViewStapleCollector(const DataSet * ds)
+	{
+		for (const ColumnInfo & info : ds->schema())
+		{
+			_byDisplay.emplace(info.displayName, &info);	// first-wins, like DataSet's index
+			_byName.emplace(info.name, &info);
+		}
+	}
+
+	void collect(const Json::Value & options)
+	{
+		collectStructural(options);
+		if (options.isObject() && options.isMember(".meta"))
+			collectByMeta(options, options[".meta"]);
+	}
+
+	const std::vector<std::pair<std::string, std::string>> & pairs() const { return _pairs; }
+
+private:
+	// resolve: display first (the walk's rule — a display that spells another column's
+	// token is always the display), then the storage token itself.
+	const ColumnInfo * resolve(const std::string & name) const
+	{
+		if (name.empty()) return nullptr;
+		auto it = _byDisplay.find(name);
+		if (it != _byDisplay.end()) return it->second;
+		it = _byName.find(name);
+		if (it != _byName.end()) return it->second;
+		return nullptr;
+	}
+
+	void addPair(const std::string & value, const std::string & cast)
+	{
+		const ColumnInfo * info = resolve(value);
+		if (!info) return;								// not a schema column: the walk passes it through
+
+		std::string type = cast;
+		if (type.empty())							// schema-type fallback for untyped slots
+		{
+			if (info->type == columnType::unknown) return;	// typeless: no pair (mirrors the walk)
+			type = columnTypeToString(info->type);
+		}
+
+		if (!_seen.insert(std::make_pair(info->name, type)).second) return;
+		_pairs.push_back({info->name, type});
+	}
+
+	static bool isVariableNode(const Json::Value & v)
+	{
+		return v.isObject() && v.isMember("value") && v.isMember("types");
+	}
+
+	// types entry -> cast for component `component` (1-based): scalar broadcasts, array
+	// indexes per component (legacy columnencoder.cpp :716/:750, the walk's type_for).
+	static std::string castFor(const Json::Value * typeEntry, int component)
+	{
+		if (!typeEntry) return "";
+		const Json::Value * t = nullptr;
+		if (typeEntry->isString()) t = typeEntry;
+		else if (typeEntry->isArray() && int(typeEntry->size()) >= component && (*typeEntry)[Json::ArrayIndex(component - 1)].isString())
+			t = &(*typeEntry)[Json::ArrayIndex(component - 1)];
+		return (t && viewCastValid(t->asString())) ? t->asString() : "";
+	}
+
+	// One element of a variable slot's value list: a plain string, or an interaction
+	// (array of strings — collected only when every component is a string, like the walk).
+	void collectElement(const Json::Value & element, const Json::Value * typeEntry)
+	{
+		if (element.isString())
+			addPair(element.asString(), castFor(typeEntry, 1));
+		else if (element.isArray() && element.size() > 0)
+		{
+			bool allStrings = true;
+			for (const Json::Value & component : element) if (!component.isString()) { allStrings = false; break; }
+			if (!allStrings) return;
+			for (Json::ArrayIndex j = 0; j < element.size(); ++j)
+				addPair(element[j].asString(), castFor(typeEntry, int(j) + 1));
+		}
+	}
+
+	// A {value, types, ...} variable slot (legacy _convertPreloadingDataOption, the walk's
+	// convert_variable_node): value may be a scalar or a list; rowComponent rows carry
+	// the name under `optionKey`; SEM model nodes (optionKey + extra members) keep the
+	// value elements directly. The model-text dispositions add no pairs (their columns
+	// surface via the runner's lazy-append rung — basic analyses carry none).
+	void collectVariableNode(const Json::Value & node)
+	{
+		std::string optionKey = node.isMember("optionKey") && node["optionKey"].isString() ? node["optionKey"].asString() : "";
+		bool keepOriginal = !optionKey.empty() && node.size() > 3;	// SEM model-node shape
+
+		const Json::Value & values = node["value"];
+		const Json::Value & types  = node["types"];
+
+		size_t count = values.isString() ? 1 : (values.isArray() ? values.size() : 0);
+		for (size_t i = 0; i < count; ++i)
+		{
+			const Json::Value & element	= values.isString() ? values : values[Json::ArrayIndex(i)];
+			const Json::Value * typeEntry	= types.isString() ? (i == 0 ? &types : nullptr)
+												: (types.isArray() && i < types.size() ? &types[Json::ArrayIndex(i)] : nullptr);
+
+			if (!optionKey.empty() && !keepOriginal && element.isObject() && element.isMember(optionKey))
+				collectElement(element[optionKey], typeEntry);
+			else
+				collectElement(element, typeEntry);
+		}
+	}
+
+	// The structural pass (the walk's walk_object/walk_any): variable slots convert,
+	// everything else recurses; bare strings naming schema columns pair at schema type.
+	void collectStructural(const Json::Value & x)
+	{
+		if (x.isObject())
+		{
+			for (const std::string & memberName : x.getMemberNames())
+			{
+				const Json::Value & member = x[memberName];
+				if (isVariableNode(member)) collectVariableNode(member);
+				else						collectStructural(member);
+			}
+		}
+		else if (x.isArray())
+			for (const Json::Value & element : x) collectStructural(element);
+		else if (x.isString())
+			addPair(x.asString(), "");
+	}
+
+	// The meta pass (the walk's rewrite_by_meta over options/.meta in parallel): a
+	// shouldEncode subtree pairs its schema-column strings at schema type; isRCode adds
+	// none; object meta recurses members present on both sides (variable slots are the
+	// structural pass's — post-conversion the runner sees alias strings there); array
+	// meta indexes per element, object meta broadcasts over arrays.
+	void collectByMeta(const Json::Value & opt, const Json::Value & meta)
+	{
+		if (!meta.isObject() && !meta.isArray()) return;
+
+		if (meta.isObject())
+		{
+			if (meta.get("shouldEncode", false).asBool())	{ collectStrict(opt); return; }
+			if (meta.get("isRCode", false).asBool())			return;
+
+			if (opt.isObject())
+			{
+				for (const std::string & nm : opt.getMemberNames())
+				{
+					if (nm == ".meta" || nm == "types" || (nm.size() >= 6 && nm.compare(nm.size() - 6, 6, ".types") == 0)) continue;
+					if (!meta.isMember(nm)) continue;
+					const Json::Value & member = opt[nm];
+					if (isVariableNode(member)) continue;
+					collectByMeta(member, meta[nm]);
+				}
+			}
+			else if (opt.isArray())
+				for (const Json::Value & element : opt) collectByMeta(element, meta);
+			return;
+		}
+
+		if (opt.isArray())	// array meta: per-index, bounded by the shorter side
+			for (Json::ArrayIndex i = 0; i < opt.size() && i < meta.size(); ++i)
+				collectByMeta(opt[i], meta[i]);
+	}
+
+	// shouldEncode subtree (the walk's strict_rewrite): every string that names a schema
+	// column pairs at the schema type.
+	void collectStrict(const Json::Value & x)
+	{
+		if (x.isString())		{ addPair(x.asString(), ""); return; }
+		if (x.isObject())
+		{
+			for (const std::string & nm : x.getMemberNames())
+			{
+				if (isVariableNode(x[nm])) continue;
+				collectStrict(x[nm]);
+			}
+		}
+		else if (x.isArray())
+			for (const Json::Value & element : x) collectStrict(element);
+	}
+
+	std::unordered_map<std::string, const ColumnInfo *>	_byDisplay, _byName;
+	std::set<std::pair<std::string, std::string>>			_seen;
+	std::vector<std::pair<std::string, std::string>>		_pairs;
+};
+
+} // namespace
+
 Json::Value Analysis::createWorkJson()
 {
 	// NEO wire format (neo-jasp.md §19.1): level-zero orchestrator fields + a kind-specific
@@ -360,7 +578,8 @@ Json::Value Analysis::createWorkJson()
 	payload["module"]			= module();
 	payload["module_version"]	= moduleVersion().asString();
 	payload["analysis"]			= name();
-	payload["options"]			= boundValues();
+	Json::Value options			= boundValues();
+	payload["options"]			= options;
 	// NEO pruning (HANDOVER-runner-data-pruning.md §3.1): from the module's AnalysisEntry;
 	// the runner defaults missing -> true (compat). Reports have no module data -> true.
 	payload["preloadData"]		= _moduleData ? _moduleData->preloadData() : true;
@@ -371,6 +590,41 @@ Json::Value Analysis::createWorkJson()
 	payload["settings"]		= settings;
 
 	work["payload"] = payload;
+
+	// NEO views staple (slice C — runner-views-read-design.md §4): the (token, cast) pairs
+	// the options bind, as the analysis's view spec. The orchestrator materializes the
+	// projection so the runner reads a frame instead of assembling one. Superset-safe
+	// (analysis-views §12): a missed pair surfaces as the runner's lazy-append rung,
+	// never a crash.
+	if (!_datasetId.empty() && dataSet())
+	{
+		ViewStapleCollector collector(dataSet());
+		collector.collect(options);
+		if (!collector.pairs().empty())
+		{
+			Json::Value spec(Json::objectValue);
+			spec["dataset_id"]	= _datasetId;
+			Json::Value columns(Json::arrayValue);
+			for (const auto & pair : collector.pairs())
+			{
+				Json::Value column(Json::objectValue);
+				column["name"]	= pair.first;
+				column["as"]	= pair.second;
+				columns.append(column);
+			}
+			spec["columns"] = columns;
+
+			Json::Value views(Json::arrayValue);
+			views.append(spec);
+			work["views"] = views;
+
+			Log::log() << "Analysis::createWorkJson(): stapled view spec for " << title() << " (" << collector.pairs().size() << " columns: "
+				<< Json::writeString(Json::StreamWriterBuilder(), views) << ")" << std::endl;
+		}
+		else
+			Log::log() << "Analysis::createWorkJson(): no view spec for " << title() << " (no column pairs collected)" << std::endl;
+	}
+
 	return work;
 }
 
