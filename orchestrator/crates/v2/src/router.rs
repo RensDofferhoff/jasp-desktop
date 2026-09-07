@@ -2024,6 +2024,14 @@ impl Router {
                 return;
             };
             exec.outstanding += 1;
+            // The hang clock starts AT DISPATCH, not at the executor's last message.
+            // An idle executor sends nothing (activity = work cycles), so without this
+            // stamp `last_activity` carries the whole pre-dispatch idle window: any
+            // work sent to an executor idle > hang_timeout is recycled on the next
+            // tick, mid-flight, no matter how fast it actually runs. Stamping here
+            // gives the work exactly one hang_timeout to produce a message — the §7
+            // intent.
+            exec.last_activity = now_ms();
             exec.inflight.insert(
                 key.clone(),
                 DispatchRecord {
@@ -3960,6 +3968,61 @@ mod tests {
         send_result(&runner2, &session2, "W", 2);
         let r2 = recv_result(&fe2);
         assert_eq!(r2.status, Status::Complete);
+    }
+
+    /// **Regression (idle executor + dispatch):** the wedge clock starts AT DISPATCH.
+    /// An executor that sat idle longer than the hang timeout (idle executors send no
+    /// activity — their last_activity ages) must NOT be recycled by the tick right
+    /// after it is finally dispatched work: the stamp at dispatch gives the work its
+    /// full hang_timeout to produce a message. Without the dispatch stamp this test
+    /// fails — the first tick after dispatch reads the whole idle window as staleness
+    /// and evicts mid-flight (the GUI's first open died exactly this way).
+    #[test]
+    fn work_dispatched_to_idle_executor_is_not_recycled() {
+        let url = format!("inproc://v2-idle-{}", unique());
+        let config = Config {
+            hang_timeout_ms: 1_500, // > one tick, < the idle window below
+            ..test_config(url.clone())
+        };
+        let (tx, rx) = mpsc::channel();
+        let broker = Broker::start_inner(config, tx.clone(), rx, None);
+        let control = Socket::new(Protocol::Rep0).unwrap();
+        wire::transport::listen_control(&control, &url).unwrap();
+        Broker::arm_control(&broker, Arc::new(control)).unwrap();
+        transport::start_hang_detector(|| RouterMsg::Tick, tx);
+
+        let (runner, rid) = register_executor(&url, "jaspTTests");
+        let (fe, session) = hello_frontend(&url);
+
+        // Idle past the hang timeout: no messages, last_activity ages beyond it.
+        std::thread::sleep(Duration::from_millis(2_100));
+
+        fe.send(frame_envelope(&analysis_work("W", "jaspTTests", 1)).as_slice())
+            .map_err(|(_, e)| e)
+            .unwrap();
+        assert_eq!(recv_work(&runner).work_id, "W");
+
+        // Hold the result until a tick has passed post-dispatch: the tick must find
+        // the work in flight and the clock re-stamped — NOT evict (pre-fix staleness
+        // here ≈ 3s > 1.5s → evicted; post-fix ≈ 0.9s → alive).
+        std::thread::sleep(Duration::from_millis(1_200));
+        assert!(
+            broker.runners_snapshot().contains(&rid),
+            "idle executor evicted on dispatch"
+        );
+
+        // The work completes within its fresh hang_timeout window.
+        send_result(&runner, &session, "W", 1);
+        let r = recv_result(&fe);
+        assert_eq!(
+            r.status,
+            Status::Complete,
+            "work on a long-idle executor must complete"
+        );
+        assert!(
+            broker.runners_snapshot().contains(&rid),
+            "survives its completed work"
+        );
     }
 
     /// **Op-aware evictions** (§9): an open dies with its lane (dataset identity
