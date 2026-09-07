@@ -655,11 +655,21 @@ rewrite_syntax <- function(text, schema_names, alias_of = NULL) {
 #              `.meta` dropped (modules never saw it).
 #   pairs    — data.frame(name, type), unique, first-appearance order.
 
-walk_and_rewrite_options <- function(options, schema_types) {
+walk_and_rewrite_options <- function(options, schema_types, preloading = TRUE) {
   # schema_types: EAGER named vector display->type (fixtures) OR LAZY accessor
   # list(idx, type_of, resolve, displays) (runner). The walk only needs membership,
   # per-name types, and schema-type aliases — the lazy shape keeps wide-file work
   # starts O(used), not O(all).
+  #
+  # `preloading` mirrors the classic engine contract (columnencoder.cpp
+  # encodeColumnNamesinOptions(options, preloadingData)): with preloading, slot
+  # values are aliased PER THE SLOT'S types entry (the preload frame carries every
+  # collected pair, so dual-role columns exist under both casts). WITHOUT
+  # preloading (on-demand), the classic meta pass encoded everything by the
+  # SCHEMA type — ONE alias per column — because formula-building modules (ANOVA)
+  # reference a column through one slot (modelTerms) but read it through another
+  # (fixedFactors): divergent per-slot aliases would break the formula↔dataset
+  # name match. The runner passes its payload's preloadData here.
   #
   # D11 dual vocabulary: an option value may name a column by its DISPLAY name
   # (classic-shaped options — the migration window) or by its STORAGE TOKEN (the
@@ -721,7 +731,10 @@ walk_and_rewrite_options <- function(options, schema_types) {
 
   # types entry -> usable type string ("" = none). Scalar broadcasts; arrays index (legacy
   # :716/:750). "unknown"/invalid -> schema fallback (:720-724); still none -> "".
+  # On-demand (preloading=FALSE): the slot's types are IGNORED — "" forces the
+  # schema-type fallback in rewrite_name, the classic contract (see above).
   type_for <- function(t_entry, j) {
+    if (!preloading) return("")
     t <- ""
     if (is.character(t_entry)) {
       t <- if (length(t_entry) == 1L) t_entry
@@ -1433,7 +1446,8 @@ run_analysis <- function(work) {
                            toJSON(raw_options, auto_unbox = TRUE, null = "null", digits = NA)))
   walked <- walk_and_rewrite_options(raw_options,
     list(idx = .state$schemaIdx, type_of = schema_type_of,
-         resolve = schema_display_name, displays = schema_displays))
+         resolve = schema_display_name, displays = schema_displays),
+    preloading = preloadData)
   options <- walked$options
   pairs   <- walked$pairs
   log_step("options walk", t_walk, sprintf("%d pair(s)", nrow(pairs)))

@@ -361,6 +361,36 @@ check("rewrite_syntax never rewrites tokens",
                                function(nm) alias_encode(nm, schema[[nm]])),
                 paste0(tok("contNormal"), " + ", alias_encode("contNormal", "scale"))))
 
+# ── 15. on-demand contract (preloading=FALSE): ONE schema-typed alias per column
+#
+# The classic engine contract (columnencoder.cpp encodeColumnNamesinOptions(options,
+# preloadingData)): without preloading, the meta pass encoded everything by the SCHEMA
+# type — one alias per column. Formula-building modules (ANOVA) reference a column
+# through one slot (modelTerms) but read it through another (fixedFactors): per-slot
+# typing on-demand would give the formula col_4_ordinal while the module reads
+# col_4_nominal — the exact GUI-lane ANOVA failure this pins.
+od_opts <- list(
+  dependent    = list(value = "contNormal", types = "scale"),
+  fixedFactors = list(value = list("contBinom"), types = "nominal"),
+  modelTerms   = list(optionKey = "components",
+                      types = list("scale"),           # slot type DIVERGES from schema
+                      value = list(list(components = list("contBinom")))),
+  .meta = list(dependent = list(shouldEncode = TRUE),
+               fixedFactors = list(shouldEncode = TRUE),
+               modelTerms = list(shouldEncode = TRUE)))
+w_od <- walk_and_rewrite_options(od_opts, schema, preloading = FALSE)
+check("on-demand: slot types ignored — schema alias everywhere",
+      identical(w_od$options$fixedFactors, list(alias_encode("contBinom", "nominal"))) &&
+      identical(w_od$options$modelTerms[[1L]]$components, list(alias_encode("contBinom", "nominal"))) &&
+      identical(w_od$options$dependent, alias_encode("contNormal", "scale")))
+check("on-demand: one pair per column, schema type",
+      identical(w_od$pairs$type[match("contBinom", w_od$pairs$name)], "nominal") &&
+      sum(w_od$pairs$name == "contBinom") == 1L)
+check("preloading (default): per-slot typing preserved",
+      identical(
+        walk_and_rewrite_options(od_opts, schema)$options$modelTerms[[1L]]$components,
+        list(alias_encode("contBinom", "scale"))))   # slot said scale → per-slot alias
+
 cat(sprintf("\n%s (%d failure%s)\n", if (nfail == 0L) "ALL PASS" else "FAILURES",
             nfail, if (nfail == 1L) "" else "s"))
 if (nfail > 0L) quit(status = 1L)
