@@ -391,6 +391,51 @@ check("preloading (default): per-slot typing preserved",
         walk_and_rewrite_options(od_opts, schema)$options$modelTerms[[1L]]$components,
         list(alias_encode("contBinom", "scale"))))   # slot said scale → per-slot alias
 
+# ── 16. virtual vocabulary (encodeThis non-columns — RM factor/level names) ────
+#
+# The classic encoder's registered vocabulary: FactorLevelListBase registers its
+# factor names + levels via .meta encodeThis; the classic engine encoded them
+# EVERYWHERE they appeared in options so R-land is identifier-safe ("RM Factor 1"
+# has a space — the RM formula and .shortToLong's colnames must both be symbols).
+# Not schema columns → never join the pairs (nothing reads them from the dataset);
+# synthetic aliases, decoded at results via the gate.
+rm_opts <- list(
+  withinModelTerms = list(
+    optionKey = "components", types = list("unknown"),
+    value = list(list(components = list("RM Factor 1")))),
+  contrasts = list(
+    optionKey = "variable", types = list("unknown"),
+    value = list(list(contrast = "none", variable = list("RM Factor 1")))),
+  repeatedMeasuresFactors = list(list(name = "RM Factor 1",
+                                      levels = list("Level 1", "Level 2"))),
+  repeatedMeasuresCells = list("contNormal", "contBinom"),
+  .meta = list(
+    withinModelTerms = list(shouldEncode = TRUE),
+    contrasts = list(shouldEncode = TRUE),
+    repeatedMeasuresFactors = list(
+      encodeThis = list("RM Factor 1", "Level 1", "Level 2"),
+      shouldEncode = TRUE),
+    repeatedMeasuresCells = list(shouldEncode = TRUE)))
+w_rm <- walk_and_rewrite_options(rm_opts, schema)
+rm_alias <- alias_encode("RM Factor 1", "nominal")
+lv1_alias <- alias_encode("Level 1", "nominal")
+lv2_alias <- alias_encode("Level 2", "nominal")
+check("RM within term components → virtual alias",
+      identical(w_rm$options$withinModelTerms[[1L]]$components, list(rm_alias)))
+check("RM contrasts variable → virtual alias",
+      identical(w_rm$options$contrasts[[1L]]$variable, list(rm_alias)))
+check("RM factor name+levels → virtual aliases",
+      identical(w_rm$options$repeatedMeasuresFactors[[1L]]$name, rm_alias) &&
+      identical(w_rm$options$repeatedMeasuresFactors[[1L]]$levels, list(lv1_alias, lv2_alias)))
+check("virtual names never join the pairs",
+      !any(c("RM Factor 1", "Level 1", "Level 2") %in% w_rm$pairs$name))
+check("RM cells (real columns) still aliased by schema",
+      identical(w_rm$options$repeatedMeasuresCells,
+                list(alias_encode("contNormal", "scale"),
+                     alias_encode("contBinom", "nominal"))))
+check("virtual set exported for the decode gate",
+      setequal(w_rm$virtual, c("RM Factor 1", "Level 1", "Level 2")))
+
 cat(sprintf("\n%s (%d failure%s)\n", if (nfail == 0L) "ALL PASS" else "FAILURES",
             nfail, if (nfail == 1L) "" else "s"))
 if (nfail > 0L) quit(status = 1L)

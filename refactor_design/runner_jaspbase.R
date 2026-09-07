@@ -749,7 +749,12 @@ walk_and_rewrite_options <- function(options, schema_types, preloading = TRUE) {
   rewrite_name <- function(name, t_entry, j) {
     if (!is.character(name) || length(name) != 1L || !nzchar(name)) return(name)
     d <- resolve(name)
-    if (is.null(d)) return(name)        # not a schema column: passes through (legacy)
+    if (is.null(d)) {
+      # Virtual rung: a registered (encodeThis) non-column string — RM factor names —
+      # becomes a synthetic alias (identifier-safe in R-land; decoded at results).
+      if (!is.null(virtual[[name]])) return(virtual_alias(name))
+      return(name)                        # not a schema column: passes through (legacy)
+    }
     ty <- type_for(t_entry, j)
     if (!nzchar(ty)) {
       sty <- raw_type_of(d)
@@ -883,7 +888,9 @@ walk_and_rewrite_options <- function(options, schema_types, preloading = TRUE) {
   strict_rewrite <- function(x) {
     if (is.character(x)) {
       out <- vapply(x, function(s)
-        if (has_col(s)) { add_pair(s, type_of(s)); alias_of(s) } else s,
+        if (has_col(s)) { add_pair(s, type_of(s)); alias_of(s) }
+        else if (nzchar(s) && !is.null(virtual[[s]])) virtual_alias(s)
+        else s,
         character(1L), USE.NAMES = FALSE)
       if (length(out) == 1L) out else as.list(out)
     } else if (is_obj(x)) {
@@ -923,14 +930,27 @@ walk_and_rewrite_options <- function(options, schema_types, preloading = TRUE) {
 
   # .meta encodeThis (FactorLevelListBase factors+levels, factorlevellistbase.cpp:108-117)
   # — collect recursively anywhere in .meta (legacy collectExtraEncodingsFromMetaJson).
+  # Two kinds of registered names:
+  #   * schema columns -> a pair (they read from the dataset)
+  #   * VIRTUAL names (RM factor/level strings — not columns) -> the classic encoder's
+  #     registered vocabulary: encoded everywhere they appear in options so R-land is
+  #     identifier-safe ("RM Factor 1" has a space; formulas and the .shortToLong
+  #     colnames must match), decoded back at results. They never join the pairs —
+  #     nothing reads them from the dataset (no view/preload implications).
+  virtual <- new.env(parent = emptyenv())
+  virtual_alias <- function(name) alias_encode(name, "nominal")
   collect_encode_this <- function(meta) {
     if (!is.list(meta)) return()
     et <- meta[["encodeThis"]]
     if (!is.null(et)) {
       if (is.character(et)) et <- as.list(et)
       if (is.list(et)) for (e in et)
-        if (is.character(e) && length(e) == 1L && has_col(e))
-          add_pair(e, type_of(e))
+        if (is.character(e) && length(e) == 1L && nzchar(e)) {
+          if (has_col(e))
+            add_pair(e, type_of(e))
+          else if (is.null(virtual[[e]]))
+            assign(e, TRUE, envir = virtual)
+        }
     }
     for (i in seq_along(meta)) collect_encode_this(meta[[i]])
   }
@@ -948,7 +968,8 @@ walk_and_rewrite_options <- function(options, schema_types, preloading = TRUE) {
                stringsAsFactors = FALSE)
   } else data.frame(name = character(0), type = character(0), stringsAsFactors = FALSE)
 
-  list(options = options, pairs = pairs)
+  list(options = options, pairs = pairs,
+       virtual = if (length(virtual)) ls(virtual) else character(0))
 }
 
 # ── frame assembly + cache (§3.2 steps 3-4) ───────────────────────────────────
@@ -1450,6 +1471,14 @@ run_analysis <- function(work) {
     preloading = preloadData)
   options <- walked$options
   pairs   <- walked$pairs
+  # Virtual vocabulary (encodeThis non-columns — RM factor/level names): the walk
+  # minted synthetic aliases for them; the decode gate must admit them so results,
+  # plot titles, and error messages decode back (schema gate + the registry).
+  if (length(walked$virtual)) {
+    vset <- walked$virtual
+    base_gate <- .state$schemaGate
+    .state$schemaGate <- function(nm) base_gate(nm) || nm %in% vset
+  }
   log_step("options walk", t_walk, sprintf("%d pair(s)", nrow(pairs)))
   if (preloadData && nrow(pairs) == 0L)
     cat(paste0(
