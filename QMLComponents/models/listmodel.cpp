@@ -156,17 +156,23 @@ Terms ListModel::checkTermsTypes(const Terms& terms) const
 		// D11 display safety net: terms constructed without labels (option values,
 		// cross-model combination, generated interactions) render label()=value=
 		// storage tokens — hex in the lists. Decode each component via the provider;
-		// non-columns (levels, "none", ...) keep themselves. Terms that already
+		// the label is set ONLY when EVERY component resolves to a schema column
+		// (non-columns keep themselves — levels, "none"; empty components are
+		// placeholder terms and must never be touched: an empty name would hit the
+		// provider's column-0 fallback and mislabel placeholders). Terms that already
 		// carry a display label (drag flow, bindTo) are untouched.
 		if (term.label().isEmpty() || term.label() == term.value())
 		{
 			QStringList displayParts;
+			bool allColumns = term.components().size() > 0;
 			for (const QString& component : term.components())
 			{
+				if (component.isEmpty()) { allColumns = false; break; }
 				QString displayName = requestInfo(varInfoType::DisplayName, component).toString();
-				displayParts.push_back(displayName.isEmpty() ? component : displayName);
+				if (displayName.isEmpty()) { allColumns = false; break; }
+				displayParts.push_back(displayName);
 			}
-			if (displayParts.size())
+			if (allColumns)
 				term.setLabel(displayParts.join(Term::separator));
 		}
 	}

@@ -161,9 +161,11 @@ bool Term::operator!=(const Term &other) const
 
 bool Term::operator<(const Term &other) const
 {
-	// D11: sort in DISPLAY order (labels), not storage-token order — the available
-	// variables list renders labels, so token-order sorting looks scrambled.
-	if (label() != other.label())	return label() < other.label();
+	// Value-space ordering ONLY: operator< is load-bearing for std::map<Term>/Terms
+	// invariants (indexesFromTerms' term→index map, sorting) and must be independent
+	// of labels — labels are RENDER data (display names) that the same components can
+	// carry inconsistently across construction paths. Display sorting sorts by label
+	// explicitly where needed (ListModelTermsAvailable::sortItems SortByName).
 	return value() < other.value();
 }
 

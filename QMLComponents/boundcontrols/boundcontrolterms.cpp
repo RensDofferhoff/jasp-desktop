@@ -142,10 +142,17 @@ void BoundControlTerms::bindTo(const Json::Value &value)
 			// D11: option values speak storage tokens; the list renders display names.
 			// Terms rebuilt here carry no labels, so without this decode a bound list
 			// shows hex for its singles while live-created interactions (labeled at
-			// creation) show display names — the asymmetry. Non-columns (levels, etc.)
-			// decode to empty and keep the component itself.
-			QString displayName = _listView->model()->requestInfo(varInfoType::DisplayName, component).toString();
-			displayParts.push_back(displayName.isEmpty() ? component : displayName);
+			// creation) show display names — the asymmetry. Empty components
+			// (placeholders) are never decoded — an empty name would hit the
+			// provider's column-0 fallback and mislabel them.
+			if (!component.isEmpty())
+			{
+				QString displayName = _listView->model()->requestInfo(varInfoType::DisplayName, component).toString();
+				if (!displayName.isEmpty())
+					displayParts.push_back(displayName);
+				else
+					displayParts.push_back(component);
+			}
 		}
 
 		term.setTypes(checkedTypes);
