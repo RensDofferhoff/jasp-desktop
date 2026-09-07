@@ -162,22 +162,49 @@ fixtures + all cargo suites re-run green. NOTE for slice C: a full jaspAnova e2e
 needs the GUI's complete default options object (jaspBase fills no defaults for
 absent keys) — the real frontend's options arrive complete, so it rides with slice C.
 
-**Next: the D11 STORAGE VOCABULARY FLIP** (converged 2026-09-04, recorded as D11 in the
-design doc — the reshaped slice C): the base cache's field names become the encoded
-canonical identity (`jasp_enc_hex_<hex(name)>`, NO type suffix); **`display_name` IS the
-decode** (the wire ColumnInfo + grid/picker plumbing already exist — audit: 40 QML
-bindings are opaque tokens, display flows through displayName, zero UI decode calls);
-the R alias = storage name + `_` + cast type (worker appends); analysis-side everything
-speaks tokens; the runner's walk + rename die after the migration window (classic-shaped
-options still arrive with real names until the frontend binds tokens). Plan the flip as:
-ingest encoder (csv2arrow) → wire schema/lanes render display_name → worker resolve by
-token → runner token-native (walk kept only for real-name options during migration) →
-fixtures/e2e vocabulary update. The parity gate + walk fixtures + both real-runner e2es
-are the safety net — the data plane is at peak test coverage right now., (D) retirement after the classic
-freeze (~670 → ~500 data-pipeline lines; the coercion semantics then live in ONE place
-— the worker — AV4's whole point). Module-visible behavior is unchanged throughout.
-jaspBase itself is untouched — the bridge contract (`jaspbase-plugin.md` §4.1) is the
-stable seam.
+**Next: slice C's C++ half + D12 (the D11 flip's data plane is DONE + GREEN, 2026-09-04;
+D12 DECIDED 2026-09-07, not yet implemented).** The storage vocabulary flip landed as
+converged (D11, runner-views-read-design.md): the base cache's field names ARE the tokens
+(`jasp_enc_hex_<hex(display)>`, no type suffix), the wire `ColumnInfo.name` IS the token
+(display_name IS the decode), blob fields are `<token>_<type>` (= the R alias — the
+runner's slice-B rename became an identity), the worker/edit-lane/`read_jasp_data` all
+resolve either vocabulary (token first), and the walk is dual-vocabulary for the
+migration window (the t-test e2e's bridge pair pins classic display-named options
+byte-equivalent). All gates re-green: parity 145/145 (over the token vocabulary), walk_test
+(+ §13 token fixtures), the t-test e2e (6 runs), the full cargo suite (classic 41+1i + 7 e2e ·
+data_runner 94+1i · v2 19 · views e2e 1 · wire 5), clippy clean, supersede e2e green,
+abort plane 6/6. **D12 (the owner's call, recorded in the design doc's decisions table):
+the FRONTEND composes the suffix** — bound controls emit `token_type` values at the
+emission point (where the `types` entry already sits), because slice C's staple must
+implement `(token, type)` pairing in C++ anyway and the suffix is the general dual-role
+convention, not a jaspBase quirk. **The slice C work list for the next agent:**
+1. **C++ emission (D12):** compose `token_type` at the boundValues emission base — one
+   site, value[i] × types[i] adjacent; bare/runtime-cast strings stay BARE;
+   modelOriginal/model text untouched.
+2. **C++ staple:** `createWorkJson` collects+dedupes the SAME `(token, type)` pairs into
+   `work["views"]` (superset-tolerant); the AV3 `fullDataset` flag for the 5 offender
+   sites + registry lint.
+3. **R runner (small):** `rewrite_name` gains a pre-composed passthrough rung (an
+   arriving `token_type` that decodes to a schema column passes through untouched; its
+   `(display, type)` joins the pairs — ~5 lines). The classic encode path stays until
+   slice D.
+4. **Fixtures:** walk_test gains pre-composed passthrough fixtures; the t-test e2e gains
+   a pre-suffixed-options run pinning C++-composed ≡ R-composed (same byte-identical
+   harness as the existing bridge pair).
+5. **Then the REAL FRONTEND TEST** (the user's explicit next milestone): build
+   (`cmake --build build --target JASP`), run the GUI against v2, and check: analyses
+   produce results; the terror_tall §8.6 memory recipes; **plot labels show display
+   names** (the `decodeplot` → `decodeColNames` → runner-natives chain is verified
+   in-code — jaspBase/R/writeImage.R:180-236 — but has ZERO e2e coverage: our e2e runs
+   all plots OFF); **the rlang/jags model-editor extraction matches `displayName`
+   post-D11** (pre-D11 name==display made this invisible — check
+   `boundcontrolrlangtextarea`/`boundcontroljagstextarea`); saved .jasp loading (old
+   options carry display names — the load path must bind them against the token schema).
+After that: (D) retirement after the classic freeze (~670 → ~500 data-pipeline lines; the
+coercion semantics then live in ONE place — the worker — AV4's whole point). Module-visible
+behavior is unchanged throughout. jaspBase itself is untouched — the bridge contract
+(`jaspbase-plugin.md` §4.1) is the stable seam. **NOTE: the D11 slice is UNCOMMITTED in
+the working tree — commit it as one atomic slice BEFORE starting the C++ half.**
 
 ### 2. jasp_checkpoint() wiring (carried over, anytime)
 
@@ -206,9 +233,19 @@ Rscript refactor_design/test_abort_plane.R         # 6/6
 Rscript refactor_design/test_v2_supersede_e2e.R    # §6 story; runner boot 60–180 s
 ```
 
-### Environment gotchas (unchanged + one new)
+### Environment gotchas (unchanged + two new from the D11 session)
 
 - **NEW: build the worker before the views e2e** (gotcha #9 above).
+- **NEW (2026-09-07): run EVERYTHING that spawns sockets with unsandboxed terminal
+  permissions — not just ipc.** Inside the sandbox, AF_UNIX is blocked outright AND
+  nanonext loopback TCP silently misbehaves (send() "succeeds", nothing arrives —
+  the R gates hang at the hello handshake with a confusing `invalid connection`).
+  Symptom guide: cargo e2e `Permission denied` on `ipc://`, or an R gate dying at
+  handshake → you forgot `unsandboxed`.
+- **NEW (2026-09-07): R `identical()` is encoding-sensitive** — a UTF-8-marked string
+  (from `rawToChar`, the codec, `fromJSON`) is NOT `identical()` to a native-marked
+  equal string (from Arrow/names()). Compare by `==` when the two sides have different
+  provenance. Bit both `view_frame_from_ref`'s tripwire and the parity gate this session.
 - The Zed sandbox blocks AF_UNIX binds — run cargo tests unsandboxed or
   `-- --skip routing_over_ipc`.
 - `JASP_RUNNER_LIBDIR` is the MODULE dir (self-contained libpath), not the workdir root.

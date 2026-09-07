@@ -20,12 +20,14 @@
 //! | float64 | scale | copied directly (NaN included) — no factor round-trip |
 //! | float64 | nominal/ordinal | dictionary of the distinct values, levels **numerically** sorted; level strings via [`level_string`] (shortest round-trip, collision-free); `ordered=1` for ordinal; non-finite (NaN/±Inf) → null — missing is missing, not a category |
 //!
-//! The artifact (AV5/§6/§5): Feather V2 + LZ4 (the caches' codec stack), fields named
-//! `<real name>__<type>` (AV6 — the type vocabulary never contains `__`, so parsing
-//! anchors at the LAST `__`), a base-row index column (`__base_row`, int32, 0-based),
-//! and `jasp:view` schema metadata carrying the decode authority: the real↔token map
-//! (token = hex of the display name's UTF-8 bytes — name-derived, stable under
-//! insert/reorder, AV6), the base revision, the spec, and the row count.
+//! The artifact (AV5/§6/§5, D11): Feather V2 + LZ4 (the caches' codec stack), fields
+//! named `<token>_<type>` — the storage token (the base field's own name,
+//! `jasp_enc_hex_<hex(display)>`) plus `_` + the cast type, which IS the R alias
+//! (the runner's stateless codec derives the identical string, so the blob arrives
+//! pre-aliased and the slice-B rename is an identity) — a base-row index column
+//! (`__base_row`, int32, 0-based), and `jasp:view` schema metadata carrying the
+//! decode authority: the token→display-name map (display_name IS the decode, D11),
+//! the base revision, the spec, and the row count.
 //!
 //! Determinism is load-bearing (AV8): same `(spec, base)` ⇒ byte-identical rebuild —
 //! fixed field order, deterministic dictionary orders (base order preserved /
@@ -106,6 +108,15 @@ pub(crate) fn build(fill: &messages::CacheFill) -> Result<u64, String> {
         plans.push((idx, Plan::new(&schema, idx, c)?));
     }
 
+    // D11: the spec names columns by storage token; the resolved field's display name
+    // (its `jasp:display_name` metadata) is the decode, and the CANONICAL token is
+    // re-derived from it — so a display-named entry (the migration bridge) and its
+    // token-named twin produce the IDENTICAL blob (same fields, same view bytes).
+    let displays: Vec<String> = plans
+        .iter()
+        .map(|&(idx, _)| display_of_field(schema.field(idx)))
+        .collect();
+
     // Stream the base, collecting per-row raw values into the plans.
     let mut rows: usize = 0;
     while let Some(batch) = reader
@@ -123,9 +134,12 @@ pub(crate) fn build(fill: &messages::CacheFill) -> Result<u64, String> {
     let mut fields: Vec<Field> = Vec::with_capacity(plans.len() + 1);
     let mut arrays: Vec<ArrayRef> = Vec::with_capacity(plans.len() + 1);
     let mut token_map = serde_json::Map::new();
-    for ((_idx, plan), c) in plans.into_iter().zip(columns.iter()) {
-        let (field, array) = plan.finish(&c.name, c.as_type)?;
-        token_map.insert(c.name.clone(), json!(hex_token(&c.name)));
+    for (i, ((_idx, plan), c)) in plans.into_iter().zip(columns.iter()).enumerate() {
+        let token = csv2arrow::token_of(&displays[i]);
+        let (field, array) = plan.finish(&token, c.as_type)?;
+        // display_name IS the decode (D11): the map carries the resolved display per
+        // token, cross-checkable by the stateless codec on the read side.
+        token_map.insert(token.clone(), json!(displays[i]));
         fields.push(field);
         arrays.push(array);
     }
@@ -186,7 +200,7 @@ pub(crate) fn build(fill: &messages::CacheFill) -> Result<u64, String> {
 
 /// One spec entry's cast. All four shapes collect per-row raw values while streaming;
 /// dictionaries/lookups are computed once from the first batch (single-dictionary
-/// caches) and applied at finish. Field name and type per AV6/§8.3.
+/// caches) and applied at finish. Field name and type per D11/§8.3 (`<token>_<type>`).
 enum Plan {
     /// float64 → scale: verbatim copy (NaN included — a scale read keeps it).
     ScaleF64 { raw: Vec<Option<f64>> },
@@ -323,8 +337,10 @@ impl Plan {
         Ok(())
     }
 
+    /// `name` is the column's storage TOKEN (D11): the field name is the token + `_` +
+    /// the cast type — exactly the R alias, so the runner's slice-B rename is identity.
     fn finish(self, name: &str, level: messages::ViewLevel) -> Result<(Field, ArrayRef), String> {
-        let field_name = format!("{}__{}", name, level.as_str());
+        let field_name = format!("{}_{}", name, level.as_str());
         match self {
             Plan::ScaleF64 { raw } => {
                 let mut b = Float64Builder::with_capacity(raw.len());
@@ -435,46 +451,34 @@ fn dict_of(array: &dyn Array) -> Result<&DictionaryArray<Int32Type>, String> {
         .ok_or_else(|| "stored categorical column is not a dictionary".to_string())
 }
 
-/// DISPLAY name → field index: `jasp:display_name` field metadata first, canonical-name
-/// fallback — arrowview's §24.4 resolution, same rule (one convention, no copies).
-fn resolve_column(schema: &SchemaRef, display: &str) -> Result<usize, String> {
+/// Spec name → field index (D11): the STORAGE TOKEN (the field's own name) first —
+/// the wire `name` and the analysis-side vocabulary — with the `jasp:display_name`
+/// metadata as the migration bridge (display-named entries still resolve; arrowview's
+/// §24.4 resolution, same rule, one convention, no copies). Token-first matters for
+/// the torture case: a display that literally spells another column's token means
+/// the TOKEN (the spec speaks tokens).
+fn resolve_column(schema: &SchemaRef, name: &str) -> Result<usize, String> {
     schema
         .fields()
         .iter()
-        .position(|f| {
-            f.metadata().get("jasp:display_name").map(String::as_str) == Some(display)
-                || f.name() == display
+        .position(|f| f.name() == name)
+        .or_else(|| {
+            schema.fields().iter().position(|f| {
+                f.metadata().get("jasp:display_name").map(String::as_str) == Some(name)
+            })
         })
-        .ok_or_else(|| format!("unknown column '{display}'"))
+        .ok_or_else(|| format!("unknown column '{name}'"))
 }
 
-/// token = lowercase hex of the display name's UTF-8 bytes (AV6: name-derived, stable
-/// under insert/reorder — index-derived tokens would churn every view hash).
-fn hex_token(name: &str) -> String {
-    name.bytes().map(|b| format!("{b:02x}")).collect()
+/// A cache field's display name — its `jasp:display_name` metadata (always present on
+/// lane-written caches; the field name is the token, so the metadata IS the decode).
+fn display_of_field(f: &Field) -> String {
+    f.metadata()
+        .get("jasp:display_name")
+        .cloned()
+        .unwrap_or_else(|| f.name().to_string())
 }
 
-// ── The system level-string format (f64 → nominal/ordinal level labels) ──────
-
-/// Render an f64 as a level string — **system law, not a language's cosmetics**
-/// (AV4: the worker owns casts; legacy JASP cast in C++, and future runner
-/// families must not inherit anyone's formatting folklore). The contract:
-///
-/// 1. **15 significant digits, trailing zeros trimmed** (`%.15g` grouping):
-///    values agreeing at 15 significant digits are ONE category — deliberate,
-///    documented semantics (they are indistinguishable at display precision;
-///    R/classic have always grouped this way). Consequence: cast code must
-///    DEDUPE ON THE RENDERED STRING (factors may never carry duplicate levels).
-/// 2. **Shape — the C `%g` range rule**: scientific iff the decimal exponent is
-///    < −4 or ≥ 15, otherwise fixed. Exponents explicit-signed, ≥2 digits
-///    (`1e+15`, `1e-05`).
-/// 3. `±0.0` → `"0"`; locale-free by design — level strings are data identity
-///    keys, not presentation (locale lives at ingest parsing and grid rendering).
-///
-/// The migration-era R fallback mirrors this in `jaspRunner/R/data.R`
-/// (`jasp_level_string`, dying at slice D); the coercion-parity gate
-/// (`refactor_design/tests/view_parity.R`) pins the two implementations together.
-/// Every quirk stays ISOLATED HERE so a change is one-place.
 // ── The system level-string format (f64 → nominal/ordinal level labels) ──────
 
 /// Render an f64 as a level string — **system law, not a language's cosmetics**
@@ -554,7 +558,7 @@ pub(crate) fn level_string(v: f64) -> String {
     };
 
     // C %g at precision 15: scientific iff exponent < -4 or >= 15.
-    let body = if exp < -4 || exp >= 15 {
+    let body = if !(-4..15).contains(&exp) {
         scientific()
     } else {
         fixed()
@@ -570,16 +574,17 @@ mod tests {
     use arrow::array::Int32Array;
     use serde_json::Value;
 
-    // The fixture base cache (§8.3 shapes): four columns, five rows.
+    // The fixture base cache (§8.3 shapes, D11 vocabulary — fields via jasp_field, so
+    // their names are the displays' storage tokens): four columns, five rows.
     //
-    //   score  Float64        display "Score (points)"  values [1.5, null, 3.0, NaN, 2.0]
-    //   group  Dictionary     display "Group"           keys [0,1,1,null,0] values ["ctrl","trt"]
-    //                        labels {"ctrl":"Control"} (sparse overlay)
-    //   level  Dictionary ord display "Level"          keys [0,2,1,null,1] values ["low","high","med"]
-    //   code   Dictionary     display "Code"           keys [0,1,null,2,0] values ["10","20","30"]
+    //   "Score (points)"  Float64        values [1.5, null, 3.0, NaN, 2.0]
+    //   "Group"           Dictionary     keys [0,1,1,null,0] values ["ctrl","trt"]
+    //                                   labels {"ctrl":"Control"} (sparse overlay)
+    //   "Level"           Dictionary ord keys [0,2,1,null,1] values ["low","high","med"]
+    //   "Code"            Dictionary     keys [0,1,null,2,0] values ["10","20","30"]
     //
     // Every matrix cell and both null paths (float null, dict null, NaN, text-as-scale)
-    // are reachable from this one fixture.
+    // are reachable from this one fixture. `tok("Group")` etc. name columns in specs.
     fn write_base(dir: &std::path::Path) -> String {
         let mut score = Float64Builder::new();
         for v in [Some(1.5), None, Some(3.0), Some(f64::NAN), Some(2.0)] {
@@ -610,51 +615,11 @@ mod tests {
         }
         let code = DictionaryArray::<Int32Type>::try_new(code_keys.finish(), code_values).unwrap();
 
-        let f_score = Field::new("score", DataType::Float64, true).with_metadata(
-            vec![(
-                "jasp:display_name".to_string(),
-                "Score (points)".to_string(),
-            )]
-            .into_iter()
-            .collect(),
-        );
-        let f_group = Field::new(
-            "group",
-            DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
-            true,
-        )
-        .with_metadata(
-            vec![
-                ("jasp:display_name".to_string(), "Group".to_string()),
-                (
-                    "jasp:labels".to_string(),
-                    r#"{"ctrl":"Control"}"#.to_string(),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        let f_level = Field::new(
-            "level",
-            DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
-            true,
-        )
-        .with_dict_is_ordered(true)
-        .with_metadata(
-            vec![("jasp:display_name".to_string(), "Level".to_string())]
-                .into_iter()
-                .collect(),
-        );
-        let f_code = Field::new(
-            "code",
-            DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
-            true,
-        )
-        .with_metadata(
-            vec![("jasp:display_name".to_string(), "Code".to_string())]
-                .into_iter()
-                .collect(),
-        );
+        let f_score = csv2arrow::jasp_field("Score (points)", csv2arrow::Level::Scale, false);
+        let mut f_group = csv2arrow::jasp_field("Group", csv2arrow::Level::Nominal, false);
+        csv2arrow::attach_labels(&mut f_group, &serde_json::json!({"ctrl": "Control"}));
+        let f_level = csv2arrow::jasp_field("Level", csv2arrow::Level::Ordinal, false);
+        let f_code = csv2arrow::jasp_field("Code", csv2arrow::Level::Nominal, false);
 
         let schema = Schema::new(vec![f_score, f_group, f_level, f_code]);
         let batch = RecordBatch::try_new(
@@ -685,6 +650,13 @@ mod tests {
         }
     }
 
+    /// The storage token of a display name (the spec vocabulary, D11).
+    fn tok(display: &str) -> String {
+        csv2arrow::token_of(display)
+    }
+
+    /// A spec naming columns by DISPLAY (the migration-bridge form — the worker resolves
+    /// either vocabulary and the canonical token derives from the resolved field).
     fn spec(columns: Vec<(&str, messages::ViewLevel)>) -> messages::ViewSpec {
         messages::ViewSpec {
             dataset_id: "ds-1".into(),
@@ -693,6 +665,24 @@ mod tests {
                     .into_iter()
                     .map(|(name, as_type)| messages::ViewColumn {
                         name: name.into(),
+                        as_type,
+                    })
+                    .collect(),
+            ),
+            filter: None,
+            all: false,
+        }
+    }
+
+    /// A spec naming columns by STORAGE TOKEN (the post-flip wire form).
+    fn tspec(columns: Vec<(&str, messages::ViewLevel)>) -> messages::ViewSpec {
+        messages::ViewSpec {
+            dataset_id: "ds-1".into(),
+            columns: Some(
+                columns
+                    .into_iter()
+                    .map(|(display, as_type)| messages::ViewColumn {
+                        name: tok(display),
                         as_type,
                     })
                     .collect(),
@@ -778,19 +768,24 @@ mod tests {
     }
 
     /// THE determinism gate (AV8): same (spec, base_revision) ⇒ byte-identical
-    /// rebuild — delete the blob, rebuild, compare every byte.
+    /// rebuild — delete the blob, rebuild, compare every byte. D11 addition: a
+    /// token-named spec and its display-named twin (the migration bridge) produce
+    /// the identical CANONICAL artifact (fields + data) — the token derives from
+    /// the resolved field, never from the raw spec spelling. (Their `jasp:view`
+    /// metadata differs in spec/view_id by construction: the spec spelling IS the
+    /// hash input — content addressing.)
     #[test]
     fn determinism_gate_same_spec_same_bytes() {
         let dir = tmp("determinism");
         let source = write_base(&dir);
         let target = dir.join("view.arrow");
-        let s = spec(vec![
+        let cols = vec![
             ("Score (points)", messages::ViewLevel::Scale),
             ("Group", messages::ViewLevel::Nominal),
             ("Code", messages::ViewLevel::Scale),
             ("Score (points)", messages::ViewLevel::Nominal),
-        ]);
-        let f = fill(&source, target.to_str().unwrap(), s);
+        ];
+        let f = fill(&source, target.to_str().unwrap(), tspec(cols.clone()));
         let bytes1 = build(&f).unwrap();
         let blob1 = std::fs::read(&target).unwrap();
         std::fs::remove_file(&target).unwrap();
@@ -798,16 +793,37 @@ mod tests {
         let blob2 = std::fs::read(&target).unwrap();
         assert_eq!(bytes1, bytes2);
         assert_eq!(blob1, blob2, "rebuild must be byte-identical (AV8)");
+        let (s1, b1) = read_view(target.to_str().unwrap());
+        // The display-named twin: same columns, display spellings — identical fields
+        // and data (the canonical artifact).
+        let f_disp = fill(&source, target.to_str().unwrap(), spec(cols));
+        std::fs::remove_file(&target).unwrap();
+        let _ = build(&f_disp).unwrap();
+        let (s3, b3) = read_view(target.to_str().unwrap());
+        let names1: Vec<String> = s1.fields().iter().map(|f| f.name().to_string()).collect();
+        let names3: Vec<String> = s3.fields().iter().map(|f| f.name().to_string()).collect();
+        assert_eq!(
+            names1, names3,
+            "same fields regardless of spec spelling (D11)"
+        );
+        assert_eq!(b1.num_columns(), b3.num_columns());
+        assert_eq!(b1.num_rows(), b3.num_rows());
+        for i in 0..b1.num_columns() {
+            let a1 = b1.column(i).to_data();
+            let a3 = b3.column(i).to_data();
+            assert_eq!(a1, a3, "column {i} identical across spec spellings");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The §8.3 matrix, cell by cell, on the fixture base.
+    /// The §8.3 matrix, cell by cell, on the fixture base — specs in the post-flip
+    /// token vocabulary; blob fields are `<token>_<type>` (the R alias, D11).
     #[test]
     fn coercion_matrix() {
         let dir = tmp("matrix");
         let source = write_base(&dir);
         let target = dir.join("view.arrow");
-        let s = spec(vec![
+        let s = tspec(vec![
             ("Score (points)", messages::ViewLevel::Scale), // f64 → scale
             ("Score (points)", messages::ViewLevel::Nominal), // f64 → nominal
             ("Group", messages::ViewLevel::Nominal),        // dict → nominal (labels)
@@ -819,18 +835,19 @@ mod tests {
         ]);
         build(&fill(&source, target.to_str().unwrap(), s)).unwrap();
         let (_schema, batch) = read_view(target.to_str().unwrap());
+        let f = |display: &str, ty: &str| format!("{}_{}", tok(display), ty);
 
         // f64 → scale: verbatim — null stays null, NaN stays NaN (as.numeric keeps it).
         assert_f64s(
             &batch,
-            "Score (points)__scale",
+            &f("Score (points)", "scale"),
             &[Some(1.5), None, Some(3.0), Some(f64::NAN), Some(2.0)],
         );
 
         // f64 → nominal: finite levels numerically sorted via the system
         // level_string; non-finite (NaN) is MISSING (a null), never a category.
         {
-            let (vals, keys, ordered) = cats(&batch, "Score (points)__nominal");
+            let (vals, keys, ordered) = cats(&batch, &f("Score (points)", "nominal"));
             assert_eq!(vals, vec!["1.5", "2", "3"]);
             assert_eq!(keys, vec![Some(0), None, Some(2), None, Some(1)]);
             assert!(!ordered);
@@ -839,7 +856,7 @@ mod tests {
         // dict → nominal: label overlay applied ("ctrl"→"Control"), order preserved,
         // keys pass through, null stays null.
         {
-            let (vals, keys, ordered) = cats(&batch, "Group__nominal");
+            let (vals, keys, ordered) = cats(&batch, &f("Group", "nominal"));
             assert_eq!(vals, vec!["Control", "trt"]);
             assert_eq!(keys, vec![Some(0), Some(1), Some(1), None, Some(0)]);
             assert!(!ordered);
@@ -847,25 +864,29 @@ mod tests {
 
         // dict → ordinal: same levels, ordered=1 (the ranking is the dictionary order).
         {
-            let (vals, keys, ordered) = cats(&batch, "Group__ordinal");
+            let (vals, keys, ordered) = cats(&batch, &f("Group", "ordinal"));
             assert_eq!(vals, vec!["Control", "trt"]);
             assert_eq!(keys, vec![Some(0), Some(1), Some(1), None, Some(0)]);
             assert!(ordered);
         }
 
         // dict → scale, text values: nothing parses ⇒ all null (AV4 text-as-scale).
-        assert_f64s(&batch, "Group__scale", &[None, None, None, None, None]);
+        assert_f64s(
+            &batch,
+            &f("Group", "scale"),
+            &[None, None, None, None, None],
+        );
 
         // dict → scale, numeric-coded values: the k values parsed once, rows indexed.
         assert_f64s(
             &batch,
-            "Code__scale",
+            &f("Code", "scale"),
             &[Some(10.0), Some(20.0), None, Some(30.0), Some(10.0)],
         );
 
         // dict → ordinal passthrough of a base ordinal: ranking (dict order) kept.
         {
-            let (vals, keys, ordered) = cats(&batch, "Level__ordinal");
+            let (vals, keys, ordered) = cats(&batch, &f("Level", "ordinal"));
             assert_eq!(vals, vec!["low", "high", "med"]);
             assert_eq!(keys, vec![Some(0), Some(2), Some(1), None, Some(1)]);
             assert!(ordered);
@@ -874,7 +895,7 @@ mod tests {
         // dict → nominal of a base ORDINAL dictionary: nominal is UNORDERED, always
         // (system law — the wire vocabulary says "plain dictionary").
         {
-            let (vals, keys, ordered) = cats(&batch, "Level__nominal");
+            let (vals, keys, ordered) = cats(&batch, &f("Level", "nominal"));
             assert_eq!(vals, vec!["low", "high", "med"]);
             assert_eq!(keys, vec![Some(0), Some(2), Some(1), None, Some(1)]);
             assert!(
@@ -895,18 +916,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The `jasp:view` metadata block is the decode authority (AV5): view id, base
-    /// revision, spec, rows, and the name-derived hex token map.
+    /// The `jasp:view` metadata block is the decode authority (AV5/D11): view id, base
+    /// revision, spec, rows, and the token→display map (display_name IS the decode).
     #[test]
     fn artifact_metadata_is_the_protocol() {
         let dir = tmp("meta");
         let source = write_base(&dir);
         let target = dir.join("view.arrow");
-        let s = spec(vec![("Group", messages::ViewLevel::Nominal)]);
+        let s = tspec(vec![("Group", messages::ViewLevel::Nominal)]);
         let f = fill(&source, target.to_str().unwrap(), s.clone());
         let expected_id = messages::view_id(&s, 7);
         build(&f).unwrap();
-        let (schema, _batch) = read_view(target.to_str().unwrap());
+        let (schema, batch) = read_view(target.to_str().unwrap());
         let meta: Value =
             serde_json::from_str(schema.metadata().get("jasp:view").unwrap()).unwrap();
         assert_eq!(meta["format_version"], messages::VIEW_FORMAT_VERSION);
@@ -915,15 +936,19 @@ mod tests {
         assert_eq!(meta["dataset_id"], "ds-1");
         assert_eq!(meta["rows"], 5);
         assert_eq!(meta["base_row_column"], BASE_ROW_FIELD);
-        assert_eq!(meta["token_map"]["Group"], hex_token("Group"));
+        // The blob field IS the R alias (token + "_" + type) — the slice-B rename is
+        // identity, and the map decodes the token to its display.
         assert_eq!(
-            meta["token_map"]["Group"],
-            "47726f7570", // "Group" UTF-8 bytes, hex
+            schema.fields()[0].name(),
+            format!("{}_nominal", tok("Group")).as_str()
         );
+        assert_eq!(meta["token_map"][tok("Group")], "Group");
         assert_eq!(meta["spec"]["columns"][0]["as"], "nominal");
+        assert_eq!(meta["spec"]["columns"][0]["name"], tok("Group"));
         // The spec round-trips through the metadata (it IS the hash input).
         let spec_back: messages::ViewSpec = serde_json::from_value(meta["spec"].clone()).unwrap();
         assert_eq!(spec_back, s);
+        let _ = batch; // (kept for symmetry with read_view's shape)
         let _ = std::fs::remove_dir_all(&dir);
     }
 

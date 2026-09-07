@@ -15,9 +15,11 @@
 //!   ③ build — sequential streaming, byte-budgeted batch with a 1M-row cap, encode each column
 //!     against the shared dictionaries, write incrementally to the LZ4 Feather writer.
 //!
-//! Output contract (neo-jasp §8.3, `HANDOVER-csvlane.md` §4): scale → `Float64` (+
+//! Output contract (neo-jasp §8.3, `HANDOVER-csvlane.md` §4, D11): scale → `Float64` (+
 //! `jasp:all_integer`); categorical → `Dictionary(Int32, Utf8)` with the ordered flag carrying
-//! ordinal-vs-nominal; field metadata `jasp:display_name` / `jasp:auto_sort_by_value` /
+//! ordinal-vs-nominal; FIELD NAMES are the display names' storage tokens
+//! `jasp_enc_hex_<hex>` (no type suffix — types stay schema metadata, retypes never
+//! rename); field metadata `jasp:display_name` (the decode) / `jasp:auto_sort_by_value` /
 //! `jasp:all_integer`; Feather V2 + LZ4_FRAME.
 
 use indexmap::IndexSet;
@@ -664,11 +666,31 @@ pub(crate) fn unique_new_name(existing: &[String], base: &str, position: usize) 
     renamed
 }
 
+/// The storage-vocabulary prefix (D11, runner-views-read-design.md): a cache field's
+/// name is the ENCODED canonical identity `jasp_enc_hex_<hex>`, minted HERE at ingest —
+/// the one encoder in the system. The payload is the lowercase hex of the display name's
+/// UTF-8 bytes (the R alias codec's own, pruning §2.2 — stateless, family-neutral), with
+/// NO type suffix: types stay schema metadata, so a retype never renames a field.
+pub(crate) const TOKEN_PREFIX: &str = "jasp_enc_hex_";
+
+/// The storage token of a display name: `jasp_enc_hex_` + lowercase hex of its UTF-8
+/// bytes. Injective by construction, so unique display names give unique fields.
+pub(crate) fn token_of(display: &str) -> String {
+    let mut s = String::with_capacity(TOKEN_PREFIX.len() + display.len() * 2);
+    s.push_str(TOKEN_PREFIX);
+    for b in display.as_bytes() {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
 /// One decorated output field (neo-jasp §8.3): scale → Float64 (+ `jasp:all_integer` when
 /// hinted), categorical → Dictionary(Int32, Utf8) with the ordered flag carrying ordinal,
-/// plus the `jasp:*` metadata. Extracted from `build_output_schema` so the edit engine's
-/// rebuilt columns decorate identically — ONE rule, no copies.
-pub(crate) fn jasp_field(name: &str, display_name: &str, level: Level, all_integer: bool) -> Field {
+/// plus the `jasp:*` metadata. The FIELD NAME is the display name's storage token (D11) —
+/// the display name itself rides `jasp:display_name` metadata, which IS the decode.
+/// Extracted from `build_output_schema` so the edit engine's rebuilt columns decorate
+/// identically — ONE rule, no copies.
+pub(crate) fn jasp_field(display_name: &str, level: Level, all_integer: bool) -> Field {
     let mut meta: Vec<(String, String)> =
         vec![("jasp:display_name".into(), display_name.to_string())];
     let f = match level {
@@ -676,12 +698,12 @@ pub(crate) fn jasp_field(name: &str, display_name: &str, level: Level, all_integ
             if all_integer {
                 meta.push(("jasp:all_integer".into(), "true".into()));
             }
-            Field::new(name, DataType::Float64, true)
+            Field::new(token_of(display_name), DataType::Float64, true)
         }
         Level::Ordinal | Level::Nominal => {
             meta.push(("jasp:auto_sort_by_value".into(), "true".into()));
             Field::new(
-                name,
+                token_of(display_name),
                 DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
                 true,
             )
@@ -744,7 +766,7 @@ fn build_output_schema(names: &[String], levels: &[Level], stats: &[ColStats]) -
     let fields: Vec<Field> = names
         .iter()
         .enumerate()
-        .map(|(i, name)| jasp_field(name, name, levels[i], stats[i].only_ints))
+        .map(|(i, name)| jasp_field(name, levels[i], stats[i].only_ints))
         .collect();
     Arc::new(Schema::new(fields))
 }
@@ -1063,7 +1085,10 @@ pub fn convert(
                 .as_ref()
                 .map(|cd| numeric_levels_of(cd, locale));
             ColumnInfo {
-                name: names[i].clone(),
+                // D11: the wire `name` IS the storage token — the opaque identity the
+                // frontend binds (columnName) and every analysis-side vocabulary speaks.
+                // `display_name` is the decode; the UI renders it and nothing else.
+                name: token_of(&names[i]),
                 display_name: names[i].clone(),
                 level: levels[i].as_str(),
                 all_integer: levels[i] == Level::Scale && stats[i].only_ints,
@@ -1167,15 +1192,23 @@ mod tests {
         assert_eq!(ext.index["m"], 3);
     }
 
-    // One decoration rule (§8.3): the ordered flag carries ordinal-vs-nominal, metadata
-    // keys are exactly the three jasp:* entries, scale carries all_integer only when true.
+    // One decoration rule (§8.3 + D11): the ordered flag carries ordinal-vs-nominal, the
+    // FIELD NAME is the display name's storage token (no type suffix — a retype never
+    // renames), metadata keys are exactly the three jasp:* entries, scale carries
+    // all_integer only when true.
     #[test]
     fn jasp_field_decorates_the_output_contract() {
-        let s = jasp_field("x", "X disp", Level::Scale, true);
+        let s = jasp_field("X disp", Level::Scale, true);
         assert_eq!(s.data_type(), &DataType::Float64);
         assert_eq!(
+            s.name(),
+            token_of("X disp").as_str(),
+            "the field name IS the token"
+        );
+        assert_eq!(
             s.metadata().get("jasp:display_name").map(String::as_str),
-            Some("X disp")
+            Some("X disp"),
+            "display_name metadata IS the decode"
         );
         assert_eq!(
             s.metadata().get("jasp:all_integer").map(String::as_str),
@@ -1183,24 +1216,24 @@ mod tests {
         );
         assert!(s.metadata().get("jasp:auto_sort_by_value").is_none());
 
-        let n = jasp_field("g", "g", Level::Nominal, false);
+        let n = jasp_field("g", Level::Nominal, false);
         assert!(matches!(n.data_type(), DataType::Dictionary(_, _)));
         assert_eq!(n.dict_is_ordered(), Some(false));
 
-        let o = jasp_field("r", "r", Level::Ordinal, false);
+        let o = jasp_field("r", Level::Ordinal, false);
         assert_eq!(
             o.dict_is_ordered(),
             Some(true),
             "the ordered flag IS the ordinal marker"
         );
 
-        let plain = jasp_field("p", "p", Level::Scale, false);
+        let plain = jasp_field("p", Level::Scale, false);
         assert!(plain.metadata().get("jasp:all_integer").is_none());
 
         // The decoration round-trips: jasp_field → level_of_field is the identity for all
         // three levels — the edit engine reads back exactly what the conversion wrote.
         for level in [Level::Scale, Level::Ordinal, Level::Nominal] {
-            let f = jasp_field("x", "x", level, false);
+            let f = jasp_field("x", level, false);
             assert_eq!(level_of_field(&f), Some(level));
         }
         assert_eq!(
@@ -1208,6 +1241,22 @@ mod tests {
             None,
             "a non-v1 cache shape has no level"
         );
+    }
+
+    // D11: the token is hex-of-UTF-8 — injective, ASCII, identifier-safe, and exactly
+    // what the R alias codec derives (the alias = token + "_" + cast type).
+    #[test]
+    fn token_of_is_the_hex_codec() {
+        assert_eq!(token_of("score"), "jasp_enc_hex_73636f7265");
+        assert_eq!(token_of(""), TOKEN_PREFIX);
+        // Hex-of-UTF-8: every byte renders as exactly two hex digits (CJK included).
+        assert_eq!(
+            token_of("국어 점수").len(),
+            TOKEN_PREFIX.len() + "국어 점수".len() * 2
+        );
+        // Injective: distinct displays never collide.
+        assert_ne!(token_of("a"), token_of("b"));
+        assert_ne!(token_of("a"), token_of("jasp_enc_hex_61"));
     }
 
     // Column naming must match the GUI importer (csvimporter.cpp) exactly, because the
@@ -1233,9 +1282,9 @@ mod tests {
     // The encoding-torture dataset (test_data/encoding_torture.csv; HANDOVER-runner-data-
     // pruning.md §8.6 special-character dataset): headers with spaces, CJK, reserved words,
     // leading digits, dots, an alias-shaped raw name, plus lane-normalization cases. Lane
-    // contract: everything passes through RAW except empty -> V{n} and pure-integer ->
-    // V{name}. The runner's alias codec round-trips exactly these names
-    // (refactor_design/tests/walk_test.R, section 10).
+    // contract: DISPLAY names pass through RAW except empty -> V{n} and pure-integer ->
+    // V{name}; the wire `name` of every column is its D11 storage token. The runner's alias
+    // codec round-trips exactly these displays (refactor_design/tests/walk_test.R §10).
     #[test]
     fn encoding_torture_csv_lane_contract() {
         let src = format!(
@@ -1247,31 +1296,48 @@ mod tests {
         let dst = dir.join("torture.arrow");
         let out = convert(&src, dst.to_str().unwrap(), &IngestParams::default())
             .expect("torture CSV converts");
-        let names: Vec<&str> = out.columns.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(
-            names,
-            vec![
-                "subject id",
-                "reaction time",
-                "국어 점수",
-                "weight.kg",
-                "T",
-                "if",
-                "3rd measurement",
-                "treatment_group",
-                "score",
-                "jasp_enc_hex_61_scale",
-                "V2020", // pure-integer header 2020
-                "V12",   // empty header, 1-based position 12
-                "groep",
-            ],
-            "lane normalization: raw names untouched, 2020 -> V2020, empty -> V12"
-        );
+        let displays = [
+            "subject id",
+            "reaction time",
+            "국어 점수",
+            "weight.kg",
+            "T",
+            "if",
+            "3rd measurement",
+            "treatment_group",
+            "score",
+            "jasp_enc_hex_61_scale",
+            "V2020", // pure-integer header 2020
+            "V12",   // empty header, 1-based position 12
+            "groep",
+        ];
         assert_eq!(out.rows, 24);
+        // The wire schema: name = the storage token, display_name = the raw display.
+        for (i, d) in displays.iter().enumerate() {
+            let c = &out.columns[i];
+            assert_eq!(c.display_name, *d, "display {i} passes the lane raw");
+            assert_eq!(c.name, token_of(d), "wire name is the token (D11)");
+        }
+        // The written cache's FIELD names are the tokens too (one encoder, jasp_field).
+        let fields: Vec<String> = {
+            let reader =
+                arrow_ipc::reader::FileReader::try_new(File::open(&dst).unwrap(), None).unwrap();
+            reader
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.name().to_string())
+                .collect()
+        };
+        assert_eq!(
+            fields,
+            displays.iter().map(|d| token_of(d)).collect::<Vec<_>>(),
+            "cache field names are the tokens"
+        );
         let level = |n: &str| {
             out.columns
                 .iter()
-                .find(|c| c.name == n)
+                .find(|c| c.display_name == n)
                 .unwrap_or_else(|| panic!("column {n}"))
                 .level
         };
@@ -1279,7 +1345,7 @@ mod tests {
         assert_eq!(level("reaction time"), "scale");
         assert_eq!(level("국어 점수"), "scale");
         assert_eq!(level("if"), "nominal"); // reserved-word name, string values
-        assert_eq!(level("jasp_enc_hex_61_scale"), "scale"); // alias-shaped raw name
+        assert_eq!(level("jasp_enc_hex_61_scale"), "scale"); // alias-shaped raw DISPLAY
         assert_eq!(level("groep"), "nominal");
     }
 
@@ -1296,10 +1362,12 @@ mod tests {
             .unwrap_or_else(|e| panic!("convert failed: {e}"))
     }
 
+    /// Find a wire column by its DISPLAY name (the human vocabulary the tests speak;
+    /// `name` is the D11 token).
     fn col<'a>(out: &'a ConvertOutput, name: &str) -> &'a ColumnInfo {
         out.columns
             .iter()
-            .find(|c| c.name == name)
+            .find(|c| c.display_name == name)
             .unwrap_or_else(|| panic!("column {name} missing"))
     }
 

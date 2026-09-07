@@ -10,6 +10,15 @@ averaged to sane system-native behavior — `%.15g` grouping), not R's `as.chara
 the R fallback (`jaspRunner/R/data.R`) CONFORMS (a one-`sprintf` `jasp_level_string` mirror +
 matrix fixes) and dies at slice D with the rest of the R data engine. Locale is display-time
 only (D10).
+**D11 — the storage vocabulary flip — is IMPLEMENTED and GREEN (2026-09-04, the reshaped
+slice C's data plane):** base-cache field names are the tokens `jasp_enc_hex_<hex(display)>`
+(no type suffix), the wire `ColumnInfo.name` IS the token, blob fields are `<token>_<type>`
+(= the R alias — the runner's rename is an identity), `token_map` is `{token: display}`
+(display_name IS the decode), and the walk is dual-vocabulary for the migration window
+(token-shaped AND classic display-named options both work; the t-test e2e pins their
+equivalence with a bridge pair). Remaining for slice C: the C++ half — which now also
+ carries **D12: the FRONTEND composes the cast-suffixed symbol at options emission**
+ (decided 2026-09-07; see D12 below) — plus the GUI-lane memory gate.
 This is the runner half of the views phase — the router/worker half is DONE (see
 `orchestrator-v2-design.md` §8 + its §13 post-views addendum, and
 `HANDOVER-orchestrator-v2.md`). It sits in the family of:
@@ -40,7 +49,7 @@ The simplification, quantified (of `runner_jaspbase.R`'s ~670 data-pipeline line
 
 | Piece | Lines (≈) | Fate |
 |---|---|---|
-| options walk + meta rewrite (`walk_and_rewrite_options` L578-833) | 255 | **stays** (language boundary) |
+| options walk + meta rewrite (`walk_and_rewrite_options` L578-833) | 255 | **stays, thins** (language boundary; under D12 the suffix composition moves to the frontend — the walk keeps flatten/siblings/grammar/pairs and gains a pre-composed passthrough rung) |
 | `rewrite_syntax` (L549-577) | 30 | **stays** |
 | alias codec encode/decode + lax tree (L390-548) | 160 | **stays** (decode is the results authority) |
 | `coerce_col` + `load_cols` (L834-870) | 40 | **dies** (slice D; `coerce_col` lingers as the migration ladder's last rung) |
@@ -67,6 +76,16 @@ pass-through. The schema machinery shrinks but does not vanish in the pass-throu
 (the frontend audit below) showed the "cannot know which family" argument was weaker
 than assumed and the alias is less R-shaped than assumed once the type suffix is
 excluded. The walk stays in R **for the migration window only**; see D11.
+
+**Addendum (2026-09-07, D12):** the boundary moved again, narrowly. The walk itself
+stays runner-side (flatten + `.types` siblings + grammar + decode are jaspBase's
+contract, i.e. R-family business) — but **the suffix composition moves to the
+frontend**. The decisive new fact: slice C's staple must implement `(token, type)`
+pairing in C++ anyway (views do not work without it), so composing `token_type` at
+the emission point — where `value[i]` and `types[i]` sit adjacent — is one line, and
+the suffix is the GENERAL dual-role convention (already forced by the blob's field
+names), not a jaspBase quirk. Family appeasement (the flat shape + siblings) no longer
+shapes the wire vocabulary. See D12 for the full rationale and the accepted costs.
 
 ## 3. The seam — what the runner does per work (slice B)
 
@@ -103,8 +122,10 @@ After slice B, with `view_refs` present on the work envelope (v2 injects it at d
      assembly loop dies.
    - `.readDataSetHeaderNative` → names/types split from the frame fields; zero callers
      today (audited), stays completeness-only.
-5. **The walk runs BEFORE all of this, unchanged** — options arrive raw (frontend is
-   language-agnostic); its schema-type fallback consults the frame fields first.
+5. **The walk runs BEFORE all of this** — options arrive in either vocabulary during
+   the migration window (classic display names; post-D12 also pre-composed
+   `token_type` values, which pass through untouched); the schema-type fallback
+   consults the frame fields first.
 6. **Results decode** (schema-gated lax tree): unchanged.
 
 `.meta` keeps riding the wire (the walk needs `shouldEncode`/`isRCode`).
@@ -157,22 +178,42 @@ GUI's complete default options object (jaspBase fills no defaults for absent key
 that rides with slice C, where the real frontend's options arrive complete; the walk's
 interaction-array shape stays pinned by walk_test.R §3.
 
-### Slice C — the frontend derives and staples specs (AV2; the memory win)
+### Slice C — the frontend derives and staples specs (AV2; the memory win) — RESHAPED by D11 + D12
 
-1. Revive the C++ options walk as the spec deriver: `ColumnEncoder::
-   encodeColumnNamesinOptions` **already returns `colsPlusTypes`** — the walk's return
-   value IS the spec. Do NOT encode (that stays runner-side, §2); just collect, dedupe,
-   and staple in `createWorkJson` (`work["views"] = [{dataset_id, columns: [...]}]`).
-   The engine-side heuristic (any option string equal to a schema column name becomes
-   wanted, `columnencoder.cpp:882-893`) rides along — it is the superset guarantee.
-2. AV3 `fullDataset` flag in `Description.qml` (next to `preloadData`, the 22-module
+**The D11 data plane is DONE (2026-09-04):** ingest mints the tokens, the wire renders
+`name` = token / `display_name` = decode, the worker resolves by token, the runner is
+token-native with the walk kept for classic-shaped options. **D12 (2026-09-07,
+decided, NOT yet implemented)** adds the frontend composition. The C++ half is now:
+
+1. **Emission composition (D12):** the bound controls emit `value` already carrying
+   its slot's cast — `token_type` — composed from the `types` entry sitting next to
+   it at the emission point (one base emission site preferred over per-control
+   edits). Dispositions preserved by construction: bare/runtime-cast strings (e.g.
+   `splitBy`) stay BARE — they are distinct control shapes the emission point can
+   distinguish; `modelOriginal`/model text is untouched (grammar rewriting stays
+   runner-side); unfilled slots stay empty. A declared `types` entry wins; a missing
+   one leaves the value bare (the runner's schema-fallback rung serves it).
+2. **Staple from the same pairs:** `createWorkJson` collects + dedupes the
+   `(token, type)` pairs it now composes anyway and staples `work["views"] =
+   [{dataset_id, columns: [{name, as}]}]`. The pairing logic is written ONCE, in C++,
+   for both the emission and the staple. Keep stapling **supersets** (AV §12).
+3. **Runner passthrough rung (small, R):** `rewrite_name` gains a pre-composed rung —
+   an arriving `token_type` that decodes to a schema column passes through UNTOUCHED
+   and its `(display, type)` joins the pairs (~5 lines). Classic display-named
+   options keep the full encode path until slice D — the walk is bilingual either way.
+4. AV3 `fullDataset` flag in `Description.qml` (next to `preloadData`, the 22-module
    precedent): `true` → staple `{all: true}` (pass-through) instead of derived pairs.
    Registry lint (fail `all.columns=TRUE`/`.allColumnNamesDataset()` without the flag)
    follows the audit's 3 offender modules (jaspSem conditional, jaspMetaAnalysis ×2,
    jaspBain ×2 — 5 sites).
-3. Keep stapling **supersets** (over-inclusive specs are safe — AV §12); tighten later.
-4. Gate: the terror_tall memory story re-measured through the real GUI lane (the §8.6
-   recipes of the pruning handover, re-run against views).
+5. **Gate: the real GUI lane.** The terror_tall memory story re-measured (the §8.6
+   recipes of the pruning handover); PLUS the D12/D11 GUI checklist: plot labels show
+   display names (the `decodeplot` → `decodeColNames` → runner-natives chain is
+   verified in-code; run at least one plot-producing analysis), the rlang/jags
+   model-editor extraction matches `displayName` post-D11 (pre-D11 name==display made
+   this invisible — verify `boundcontrolrlangtextarea`/`boundcontroljagstextarea`),
+   and the e2e gains a pre-suffixed-options run pinning C++-composed symbols ≡
+   R-composed (byte-identical results, same harness as the existing bridge pair).
 
 ### Slice D — retirement (after soak + the classic freeze, §12 step 7)
 
@@ -199,18 +240,20 @@ which was AV4's whole point.
 | D8 | `__base_row` dropped from module frames for now | no consumer yet; revisit with per-row-result analyses (outliers/influence) |
 | D9 | **Coercion semantics are SYSTEM law, not R's** — the worker's matrix is the contract: nominal is always unordered, non-finite is null (never a "NaN" category), and f64→nominal level strings use the system `level_string` = plain **`%.15g`** (15 significant digits, trailing zeros trimmed, the C `%g` range rule: scientific iff exponent < −4 or ≥ 15). The grouping is deliberately lossy at the fringe — values agreeing at 15 significant digits are ONE category (cast code dedupes on the rendered string; R/classic have always grouped this way). The migration-era R fallback (`read_jasp_data`) CONFORMS via the `jasp_level_string` mirror (one `sprintf`) + matrix fixes, and dies at slice D | Multi-runtime law (§8.2/AV5): a future Julia/Python runner must not inherit R cosmetics; legacy JASP cast in C++ anyway (the R engine was itself an interim approximation, so R-exactness was never the real contract); chasing bit-exact round-trip labels (`0.30000000000000004`) buys nothing real — fringe collisions are invisible at display precision and arguably the correct grouping semantics. The parity gate (slice A) pins worker vs fallback, not worker vs `as.character` |
 | D10 | **Locale is a display-time concern, never baked into data.** Level strings (and every identity key) stay canonical ASCII `.`-form in blobs/results/syntax; localization happens at render time for the *viewer*. The grid already does this (frontend re-requests TSV with its own `ViewRender` params). If results-table label localization is ever wanted: the cheap mechanism is a canonical-string check at render (parse → re-render at %.15g → equal? then localize); the proper one is a format hint on jaspResults columns. Neither built; noted for the future | Baked locale freezes the *runner's* locale into shared data (wrong for every other viewer); it would enter the view_id hash (locale flip → full cache invalidation) and break cross-locale string identity (saved filters, generated R syntax). Precision is semantics (which values group); separators are cosmetics (how a value is drawn) — semantics live in data, cosmetics in the viewer |
-| D11 | **THE STORAGE VOCABULARY FLIP (converged 2026-09-04, NOT yet implemented — this reshapes slice C).** The base cache's field names become the encoded canonical identity: `jasp_enc_hex_<hex(display-name)>`, **no type suffix** (types stay schema metadata — retypes never rename). **`display_name` IS the decode**: the wire `ColumnInfo.display_name` + field metadata already carry real names end-to-end, so zero new decode calls anywhere. The R alias = storage name + `_` + cast type (the worker appends the suffix at blob build). Everything analysis-side — picker bindings, options, spec, blob fields, module frame — speaks tokens; the runner's walk + blob-rename die (the walk stays alive only for the migration window: classic-shaped options still arrive with real names). The one irreducible R-grammar piece (`rewrite_syntax` for user-typed R code strings) stays runner-side. **Audit evidence** (2026-09-04, this repo): 40 QML `columnName` reads are all opaque-token binding/logic (FilterConstructor, type lookups); display flows through `displayName` (gridmodel.cpp L303/337/433, columnmodel.cpp L139+ — "display_name IS the Long name, the schema is its truth"); the whole Desktop tree has 7 encode/decode calls, all in the data layer; results decode already exists (analysis.cpp L591) | One encoder in the system (ingest) instead of three name-mangling schemes (real / `real__type` / hex); the dual-walk drift risk is eliminated rather than ladder-bounded; slice C becomes trivial (the spec = the bound tokens — no deriver heuristic); storage vocabulary is family-neutral without the type suffix (hex-of-UTF-8 is language-free); renames/retypes cost the same as today (edits rewrite files anyway). Costs accepted: artifacts are hex to humans (decode helper for logs), migration is a coordinated flip across lane+wire+worker+runner+fixtures |
+| D11 | **THE STORAGE VOCABULARY FLIP (converged 2026-09-04, IMPLEMENTED same day — the data plane is green).** The base cache's field names became the encoded canonical identity: `jasp_enc_hex_<hex(utf8 display name)>`, **no type suffix** (types stay schema metadata). **`display_name` IS the decode**: the wire `ColumnInfo.name` IS the token (display_name carries the real name); field metadata already carried it. The R alias = storage name + `_` + cast type (the worker appends at blob build — blob fields ARE the aliases, so the runner's rename is an identity). Everything analysis-side speaks tokens; the walk stays alive for the migration window only (classic-shaped display-named options still arrive — the t-test e2e's bridge pair pins their byte-equivalence). The one irreducible R piece (`rewrite_syntax` for user-typed R code) stays runner-side. Implementation: `csv2arrow` mints (`TOKEN_PREFIX`/`token_of`/`jasp_field(display)`), the edit engine uniquifies in DISPLAY space + matches both vocabularies (token first), the worker resolves token-first (display bridge), `read_jasp_data` resolves either form, the runner's schema accessors take either form (`schema_display_name`/`token_of`) with displays extracted lazily (work starts stay O(1) in schema reads). `token_map` = `{token: display_name}`. **Audit evidence** (2026-09-04, this repo): 40 QML `columnName` reads are all opaque-token binding/logic (FilterConstructor, type lookups); display flows through `displayName` (gridmodel.cpp L303/337/433, columnmodel.cpp L139+); the whole Desktop tree has 7 encode/decode calls, all in the data layer; results decode already exists (analysis.cpp L591) | One encoder in the system (ingest) instead of three name-mangling schemes (real / `real__type` / hex); the dual-walk drift risk is eliminated rather than ladder-bounded; slice C becomes trivial (the spec = the bound tokens — no deriver heuristic); storage vocabulary is family-neutral without the type suffix (hex-of-UTF-8 is language-free); renames/retypes cost the same as today (edits rewrite files anyway). Costs accepted: artifacts are hex to humans (decode helper for logs), migration is a coordinated flip across lane+wire+worker+runner+fixtures |
+| D12 | **FRONTEND COMPOSES THE SUFFIX (decided 2026-09-07, NOT yet implemented — rides with slice C).** The bound controls emit option values already cast-suffixed: `value = token + "_" + type`, composed at the emission point from the adjacent `types` entry. The runner walk gains a pre-composed passthrough rung (decode → pair → leave untouched) and KEEPS: the flatten + `.types`-sibling reshape, SEM/JAGS/`isRCode` grammar rewrites, results decode, `all.columns` schema-type aliasing, and the classic display-name encode path until slice D. **This consciously overrides the suffix half of §2's Option-A rejection / pruning §2.1's "symbols are runner-family property"** — the owner's call, with new evidence those decisions predated. | The new fact: slice C's staple must implement `(token, type)` pairing in C++ regardless (views do not work without it), so composition at the emission point — where value and types sit adjacent — is one line, written once for both the emission and the staple. And the suffix is NOT a jaspBase quirk (that's the flat shape + siblings, which stay runner-side): it is the general dual-role convention, already forced system-wide by the blob's field names; family appeasement should not shape the general wire vocabulary. Costs accepted (known, reversible): two spelling paths during the migration window (C++ composes new options, R composes classic-shaped — the e2e bridge runs pin identical symbols); the emission's value shape changes frontend-wide (one base site preferred); the runner keeps its traversal regardless. Fallback if it bites: the runner's encode half stays alive through slice D anyway — reverting is deleting the C++ composition line and the passthrough rung |
 
 ## 6. Considered and rejected (do not relitigate)
 
 | Idea | Why it died |
 |---|---|
-| Frontend encodes options (Option A, legacy shape) | breaks frontend language-agnosticity (§8.2); symbols are runner-family property; a second runtime would strand it |
+| Frontend encodes options (Option A, legacy shape) | breaks frontend language-agnosticity (§8.2); symbols are runner-family property; a second runtime would strand it — **narrowly superseded by D12 (2026-09-07) for the SUFFIX only**: the staple forced `(token, type)` pairing into C++ anyway and the suffix is the general dual-role convention, not R property. The rest of Option A (the reshape, the grammar) stays dead |
 | Runner eagerly reads pass-through views | regresses the pruning memory win exactly where it was won |
 | Keep silent coercion on view miss forever | hides spec-derivation bugs; the superset guarantee makes loudness safe |
-| Move `rewrite_syntax`/encodeRScript to the frontend | same family as Option A — it is language work, and the R engine is built and pinned |
+| Move `rewrite_syntax`/encodeRScript to the frontend | same family as Option A — it is language work, and the R engine is built and pinned (**still dead under D12** — grammar is irreducibly R-side) |
 | Rename via the metadata map as authority (not the codec) | makes the runner depend on blob provenance for a pure function; the map's job is the tripwire + results decode |
 | Views replace the `dataset_paths` bridge now | classic never injects `view_refs`; the bridge dies with classic (slice D) |
+| Move the whole walk (flatten + siblings) into the frontend | that is Option A entire, not the narrow D12 carve-out: it changes the options wire format wholesale (flat shape from every bound control) to save a traversal the runner keeps anyway for grammar/decode/classic — the arithmetic never worked. Revisit only post-slice-D, possibly as jaspBase natively accepting the nested shape (backlog note) |
 
 ## 7. File map (where each change lands)
 
@@ -219,21 +262,33 @@ which was AV4's whole point.
 | Parity harness (slice A — DONE) | `refactor_design/tests/view_parity.R` (new; sources the conforming fallback from `jaspRunner/R/data.R`) |
 | System level-string + matrix conformance (slice A, D9) | `orchestrator/crates/data_runner/src/analysisview.rs` (`level_string`, CatF64/CatDict), `jaspRunner/R/data.R` (`jasp_level_string` mirror, nominal-unordered, non-finite→NA) |
 | Seam: read+rename+frame-first natives (slice B — DONE) | `refactor_design/runner_jaspbase.R` (view_frame_from_ref + the seam in run_analysis + frame-first natives + factor_from_numeric) |
-| e2e drivers with hand-stapled specs | `refactor_design/test_v2_views_ttest_e2e.R` (DONE — four-run dual-role gate) |
-| Spec derivation + staple + fullDataset flag (slice C) | `Common/columnencoder.cpp` (revive walk return), `Desktop/analysis/analysis.cpp` `createWorkJson` (~L339), `QMLComponents/modules/analysisentry.*` (flag), modules' `Description.qml` (3 offenders) |
+| e2e drivers with hand-stapled specs | `refactor_design/test_v2_views_ttest_e2e.R` (DONE — the four-run dual-role gate + the D11 bridge pair) |
+| **D11 storage vocabulary flip (DONE — the data plane)** | `csv2arrow.rs` (`TOKEN_PREFIX`/`token_of`/`jasp_field(display)`/ColumnInfo), `dataedit.rs` (display-space pools + both-forms matching), `analysisview.rs` (token-first resolve, `<token>_<type>` fields, `{token: display}` map), `arrowview.rs` (token-first resolve), `wire/messages.rs` (docs), `jaspRunner/R/data.R` (both-forms resolve), `runner_jaspbase.R` (`token_of`/`token_decode`, `schema_display_name`/`schema_displays`, dual-vocabulary walk, identity view read) |
+| Spec staple + emission composition + fullDataset flag (slice C — the C++ half + the D12 R rung, next) | `QMLComponents/boundcontrols/*` (the boundValues emission base — compose `token_type` where `types` rides; keep bare/runtime-cast strings bare), `Desktop/analysis/analysis.cpp` `createWorkJson` (~L339: the same pairs → `work["views"]`), `refactor_design/runner_jaspbase.R` (`rewrite_name` pre-composed passthrough rung, ~5 lines), `QMLComponents/modules/analysisentry.*` (fullDataset flag), modules' `Description.qml` (3 offenders) |
 | Retirement (slice D) | runner deletions (§4 slice D list) |
 
 ## 8. Validation ladder (cumulative)
 
 1. `Rscript refactor_design/tests/view_parity.R` — the gate (slice A, blocks B). **GREEN:
-   144/144 (2026-09-02), after the D9 contract revision.**
-2. `walk_test.R` 58/58 still green (the walk is untouched). **GREEN.**
+   145/145 (2026-09-04, re-run over the D11 token vocabulary: blob fields are
+   `<token>_<type>`, the token_map decodes {token: display}, and the parity matrix is
+   unchanged).**
+2. `walk_test.R` still green — now with §13, the D11 token fixtures (token-shaped
+   options ≡ display-shaped options; the torture display priority; tokens never
+   rewritten inside R code). **GREEN (ALL PASS).**
 3. `test_v2_views_ttest_e2e.R`: dual-role t-test, views vs fallback, identical
-   jaspResults JSON (slice B). **GREEN: 4 runs (preload + on-demand x fallback +
-   views), all byte-identical; supersede e2e + the parity gate re-run green.**
-4. Full orchestrator suite (166) + clippy clean, every slice.
-5. GUI lane (slice C): the pruning handover's §8.6 recipes re-run — terror_tall RSS,
-   preload pair, jaspSem `all.columns`, the special-character dual-role dataset,
-   revision re-run hygiene.
+   jaspResults JSON (slice B) — post-D11 the options and staple speak TOKENS, plus a
+   bridge pair re-running classic display-named options (both paths). **GREEN: 6 runs
+   (fallback/views × preload/on-demand, token options — all byte-identical — plus the
+   2-run bridge pair, also identical); supersede e2e green.**
+4. Full orchestrator suite (classic 41+1i + classic e2e 7 · data_runner 94+1i · v2 19 ·
+   v2 views e2e 1 · wire 5 = 167) + clippy clean, every slice. **GREEN (2026-09-04).**
+5. GUI lane (slice C's C++ half + D12): the pruning handover's §8.6 recipes re-run —
+   terror_tall RSS, preload pair, jaspSem `all.columns`, the special-character
+   dual-role dataset, revision re-run hygiene — PLUS: plot labels show display names
+   (one plot-producing analysis; the `decodeplot` → `decodeColNames` → runner-natives
+   chain is verified in-code), the rlang/jags model-editor extraction matches
+   `displayName` post-D11, and a pre-suffixed-options e2e run pinning C++-composed ≡
+   R-composed symbols.
 
-*The frame was always the analysis's; now it arrives that way.* 📐
+*The frame was always the analysis's; now it arrives that way — named in one tongue.* 📐

@@ -18,6 +18,7 @@ runner_file <- normalizePath(file.path(here, "..", "runner_jaspbase.R"))
 
 want <- c("ALIAS_PREFIX", "ALIAS_TYPES", "alias_encode", "alias_decode",
           "alias_decode_names", "alias_decode_strict", "alias_decode_lax", "lax_decode_tree",
+          "token_of", "token_decode",
           ".substitute_free_occurrences", "rewrite_syntax", "walk_and_rewrite_options",
           "factor_from_numeric", "coerce_col", ".frame_from_cols")
 exprs <- parse(runner_file)
@@ -163,6 +164,9 @@ check("inserted alias cannot rematch",
 # ── 7. lax decode (schema-gated, single pass, boundary guard) ────────────────
 .state <- new.env(parent = emptyenv())
 .state$schemaNames <- names(schema)
+# D11: the runner's decode gate is a membership FUNCTION (display membership via the
+# token index — fixtures mirror it with the vector form both ways).
+.state$schemaGate <- function(nm) nm %in% names(schema)
 txt <- paste0("mean of ", alias_encode("국어 점수", "ordinal"),
               " by ", alias_encode("contBinom", "nominal"))
 check("lax decode", identical(alias_decode_lax(txt, schema), "mean of 국어 점수 by contBinom"))
@@ -274,9 +278,18 @@ lz_nms <- paste0("col_", 0:9)
 lz_idx <- list2env(as.list(setNames(seq_along(lz_nms), lz_nms)), parent = emptyenv())
 lz_calls <- 0L
 lz_type_of <- function(nm) { lz_calls <<- lz_calls + 1L; "scale" }
+# D11 accessor contract: idx is keyed by the working vocabulary here (displays —
+# fixtures); the runner passes its token-keyed idx with schema_display_name as resolve.
+lz_resolve <- function(nm) {
+  if (!is.null(lz_idx[[nm]])) return(nm)
+  d <- token_decode(nm)
+  if (!is.null(d) && !is.null(lz_idx[[d]])) d else NULL
+}
+lz_accessor <- list(idx = lz_idx, type_of = lz_type_of,
+                    resolve = lz_resolve, displays = function() lz_nms)
 lz_opts <- list(dependent = list(types = list(), value = list("col_3")),
                 splitBy = "col_7")           # bare string -> pair via type_of
-w <- walk_and_rewrite_options(lz_opts, list(names = lz_nms, idx = lz_idx, type_of = lz_type_of))
+w <- walk_and_rewrite_options(lz_opts, lz_accessor)
 check("lazy: pairs resolved on demand",
       nrow(w$pairs) == 2L &&
       all(w$pairs$name == c("col_3", "col_7")) && all(w$pairs$type == "scale"))
@@ -284,8 +297,69 @@ check("lazy: types only resolved for USED columns",
       lz_calls == 2L)                        # one per used column — no full-width pass
 check("lazy: unknown columns pass through untouched",
       identical(walk_and_rewrite_options(
-        list(x = "not_a_column"),
-        list(names = lz_nms, idx = lz_idx, type_of = lz_type_of))$options$x, "not_a_column"))
+        list(x = "not_a_column"), lz_accessor)$options$x, "not_a_column"))
+
+# ── 13. D11 STORAGE TOKENS: token-shaped option values (the post-flip frontend) ──
+# The base cache's field names are tokens (jasp_enc_hex_<hex>); post-flip options
+# bind them. The walk resolves EITHER vocabulary to the display, aliases under the
+# display's codec — identical output for identical columns — and records DISPLAY
+# names in pairs. Classic-shaped (display) options keep working: the migration window.
+tok <- function(nm) token_of(nm)
+check("token codec: token_of is alias_encode's front segment",
+      identical(tok("contNormal"),
+                sub("_[a-z]+$", "", alias_encode("contNormal", "scale"))) &&
+      identical(paste0(tok("score"), "_", "scale"), alias_encode("score", "scale")))
+check("token codec: round-trip",
+      identical(token_decode(tok("국어 점수")), "국어 점수") &&
+      is.null(token_decode("jasp_enc_hex_61_scale")) &&  # not bare-hex payload
+      is.null(token_decode("not-a-token")))
+
+# The SAME options in both vocabularies -> the SAME rewritten options + pairs.
+mk_opts <- function(v) list(
+  deps    = list(value = v("contNormal"), types = "scale"),
+  group   = list(value = v("contBinom"), types = "nominal"),
+  modelTerms = list(value = list(v("contNormal"), list(v("contNormal"), v("contBinom"))),
+                    types = list("scale", list("scale", "nominal"))))
+w_disp <- walk_and_rewrite_options(mk_opts(function(nm) nm), schema)
+w_tok  <- walk_and_rewrite_options(mk_opts(tok), schema)
+check("token options: rewritten IDENTICALLY to display options",
+      identical(w_disp$options, w_tok$options))
+check("token options: pairs identical (display names)",
+      identical(w_disp$pairs, w_tok$pairs) &&
+      all(w_tok$pairs$name %in% names(schema)))
+
+# A bare token string under shouldEncode: strict replacement under the SCHEMA type.
+opts <- list(factors = "contNormal",
+             .meta = list(factors = list(shouldEncode = TRUE)))
+w <- walk_and_rewrite_options(opts, schema)
+check("bare token + shouldEncode -> schema-type alias",
+      identical(w$options$factors, alias_encode("contNormal", "scale")))
+opts2 <- list(factors = tok("contNormal"),
+              .meta = list(factors = list(shouldEncode = TRUE)))
+w2 <- walk_and_rewrite_options(opts2, schema)
+check("bare display + shouldEncode -> same alias (bridge)",
+      identical(w$options$factors, w2$options$factors))
+
+# A token of an UNKNOWN column passes through untouched (the schema gate holds).
+w <- walk_and_rewrite_options(list(x = token_of("not_a_column_at_all")), schema)
+check("unknown token passes through", identical(w$options$x, token_of("not_a_column_at_all")) &&
+      nrow(w$pairs) == 0L)
+
+# The torture case: a DISPLAY that is itself token-shaped is the DISPLAY (display
+# priority) — aliased as its own name, never mistaken for another column's token.
+t_schema <- c(schema, "jasp_enc_hex_61_scale" = "scale")
+w <- walk_and_rewrite_options(
+  list(x = list(value = "jasp_enc_hex_61_scale", types = "scale")), t_schema)
+check("torture display stays the display",
+      identical(w$options$x, alias_encode("jasp_enc_hex_61_scale", "scale")))
+
+# rewrite_syntax scans DISPLAYS only: user-typed R code speaks displays — a token
+# occurring in code text is NOT rewritten (it is not a display name).
+code <- paste0(tok("contNormal"), " + contNormal")
+check("rewrite_syntax never rewrites tokens",
+      identical(rewrite_syntax(code, names(schema),
+                               function(nm) alias_encode(nm, schema[[nm]])),
+                paste0(tok("contNormal"), " + ", alias_encode("contNormal", "scale"))))
 
 cat(sprintf("\n%s (%d failure%s)\n", if (nfail == 0L) "ALL PASS" else "FAILURES",
             nfail, if (nfail == 1L) "" else "s"))

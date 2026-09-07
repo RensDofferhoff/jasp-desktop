@@ -37,7 +37,8 @@ const CONTINUATION_MARKER: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
 pub struct ViewRequest<'a> {
     pub row_offset: u64,
     pub row_limit: Option<u64>,
-    /// DISPLAY names (§24.4: the frontend never sees canonical names); `None` = all columns.
+    /// Column names — the D11 storage tokens (the wire `name` the frontend binds);
+    /// display names still resolve during the migration window. `None` = all columns.
     pub columns: Option<&'a [String]>,
     pub max_bytes: u64,
     pub render: Option<&'a messages::ViewRender>,
@@ -73,8 +74,10 @@ fn serve_inner(
     let (schema, block_rows) = footer_info(&mut file).map_err(cache_err)?;
     let rows_total: u64 = block_rows.iter().sum();
 
-    // Column selection: DISPLAY name → field index via `jasp:display_name` field metadata
-    // (canonical-name fallback for direct consumers/tests). Response order = request order.
+    // Column selection: storage TOKEN (the field's own name, D11) → field index first —
+    // the wire `name` the frontend binds — with the `jasp:display_name` metadata as the
+    // migration bridge (display-named requests still resolve; tests speak displays).
+    // Response order = request order.
     let projection: Option<Vec<usize>> = match req.columns {
         None => None,
         Some(names) => {
@@ -83,10 +86,12 @@ fn serve_inner(
                 let pos = schema
                     .fields()
                     .iter()
-                    .position(|f| {
-                        f.metadata().get("jasp:display_name").map(String::as_str)
-                            == Some(name.as_str())
-                            || f.name() == name
+                    .position(|f| f.name() == name.as_str())
+                    .or_else(|| {
+                        schema.fields().iter().position(|f| {
+                            f.metadata().get("jasp:display_name").map(String::as_str)
+                                == Some(name.as_str())
+                        })
                     })
                     .ok_or_else(|| format!("unknown column '{name}'"))?;
                 idx.push(pos);

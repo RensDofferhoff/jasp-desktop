@@ -13,8 +13,11 @@
 #
 # Dataset: test_data/encoding_torture.csv — dependent = `score` (stored ordinal
 # dict; the scale cast exercises dict→scale values-parse), grouping = `T` (0/1 —
-# exactly two levels; dict→nominal). The staple ALSO casts T as scale — the
-# DUAL-ROLE superset (two casts of one column in one blob, unused by the options).
+# exactly two levels; dict→nominal). D11: the options and the staple speak STORAGE
+# TOKENS (the post-flip wire vocabulary — the base's field names); a final bridge
+# pair re-runs with CLASSIC display-name options and must match byte-for-byte.
+# The staple ALSO casts T as scale — the DUAL-ROLE superset (two casts of one column
+# in one blob, unused by the options).
 # Two comparisons: (1) preloadData TRUE — the view frame IS the preload frame;
 # (2) preloadData FALSE — the on-demand frame-first natives (.readDatasetToEnd-
 # Native's ladder: frame hit / sibling coerce / lazy rung). Every pair must be
@@ -132,19 +135,24 @@ cat("runner is up\n")
 
 # TTestIndependentSamples options: dependent = score (stored ordinal-dict → the
 # dict→scale values-parse path), grouping = T (0/1 — exactly 2 levels; dict→nominal).
-# The staple additionally casts T as scale (the DUAL-ROLE superset: two casts of one
-# column in one blob; unused by the options — proves the frame holds both).
+# D11: the options bind STORAGE TOKENS (the post-flip frontend binds columnName = the
+# wire `name` = the token); the staple additionally casts T as scale (the DUAL-ROLE
+# superset: two casts of one column in one blob; unused by the options — proves the
+# frame holds both).
+tok <- function(nm) {
+  paste0("jasp_enc_hex_", paste(sprintf("%02x", as.integer(charToRaw(nm))), collapse = ""))
+}
 ttest_options <- list(
   `.meta` = list(dependent = list(shouldEncode = TRUE), group = list(shouldEncode = TRUE)),
   alternative = "twoSided",
   barPlot = FALSE, barPlotCiLevel = 0.95, barPlotErrorType = "ci",
   barPlotYAxisFixedToZero = TRUE,
-  dependent = list(types = list("scale"), value = list("score")),
+  dependent = list(types = list("scale"), value = list(tok("score"))),
   descriptives = TRUE, descriptivesPlot = FALSE, descriptivesPlotCiLevel = 0.95,
   effectSize = FALSE, effectSizeCi = FALSE, effectSizeCiLevel = 0.95,
   effectSizeType = "cohen",
   equalityOfVariancesTest = FALSE, equalityOfVariancesTestType = "brownForsythe",
-  group = list(types = list("nominal"), value = "T"),
+  group = list(types = list("nominal"), value = tok("T")),
   mannWhitneyU = FALSE, meanDifference = FALSE, meanDifferenceCi = FALSE,
   meanDifferenceCiLevel = 0.95,
   naAction = "perDependent", normalityTest = FALSE,
@@ -152,6 +160,15 @@ ttest_options <- list(
   qqPlot = FALSE, qqPlotCi = FALSE, qqPlotCiLevel = 0.95,
   raincloudPlot = FALSE, raincloudPlotHorizontal = FALSE,
   student = TRUE, vovkSellke = FALSE, welch = FALSE)
+
+# The migration bridge: the SAME options with CLASSIC display names — the walk must
+# produce identical results for either vocabulary during the migration window.
+ttest_options_classic <- local({
+  o <- ttest_options
+  o$dependent <- list(types = list("scale"), value = list("score"))
+  o$group <- list(types = list("nominal"), value = "T")
+  o
+})
 
 submit <- function(work_id, module, analysis, options, preload = TRUE, views = NULL) {
   w <- list(
@@ -193,9 +210,9 @@ resA <- run_one("w-fallback", "jaspTTests", "TTestIndependentSamples", ttest_opt
 
 cat("== run B: stapled views (frame-first seam) ==\n")
 spec <- list(dataset_id = dataset_id,
-             columns = list(list(name = "score", as = "scale"),
-                            list(name = "T", as = "nominal"),
-                            list(name = "T", as = "scale")))
+             columns = list(list(name = tok("score"), as = "scale"),
+                            list(name = tok("T"), as = "nominal"),
+                            list(name = tok("T"), as = "scale")))
 resB <- run_one("w-views", "jaspTTests", "TTestIndependentSamples", ttest_options, TRUE,
                 list(spec))
 
@@ -234,5 +251,18 @@ stopifnot(identical(jA, jC))   # preload and on-demand agree too (they always di
 log <- tryCatch(readLines(run_log, warn = FALSE), error = function(e) "")
 stopifnot(length(grep("view read", log)) >= 2L)
 cat("E2E OK: runner log shows both view reads (frame-first served)\n")
+
+# ── The D11 MIGRATION BRIDGE: classic display-name options must produce the IDENTICAL
+# results as token-name options, through BOTH paths (fallback + views). The walk
+# resolves either vocabulary to the same aliases — this pins that end to end.
+cat("== bridge run: classic display-name options (fallback + views) ==\n")
+resE <- run_one("w-bridge-fallback", "jaspTTests", "TTestIndependentSamples",
+                ttest_options_classic, TRUE, NULL)
+resF <- run_one("w-bridge-views", "jaspTTests", "TTestIndependentSamples",
+                ttest_options_classic, TRUE, list(spec))
+jE <- toJSON(scrub(resE), auto_unbox = TRUE, null = "null", digits = NA)
+jF <- toJSON(scrub(resF), auto_unbox = TRUE, null = "null", digits = NA)
+stopifnot(identical(jA, jE), identical(jA, jF))
+cat("E2E OK: token options == classic display options (the migration bridge holds)\n")
 
 quit(status = 0)

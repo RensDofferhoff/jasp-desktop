@@ -2,8 +2,9 @@
 //!
 //! The §8 implied-build story, running: a stapled analysis work misses the view
 //! book → the router orders `cache_fill` to the (provisioner-spawned) data worker →
-//! the worker materializes the AV5 artifact (Feather V2 + LZ4, `<real>__<type>`
-//! fields, `__base_row`, `jasp:view` metadata) → `cache_filled` un-parks the work →
+//! the worker materializes the AV5 artifact (Feather V2 + LZ4, `<token>_<type>`
+//! fields — the D11 storage token plus the cast type, which IS the R alias —
+//! `__base_row`, `jasp:view` metadata) → `cache_filled` un-parks the work →
 //! dispatch carries the resolved `view_refs` next to the untouched `dataset_paths`
 //! migration bridge. The analysis runner is a mock (views are router/worker
 //! business; the jaspBase read seam is migration step 3) — but the blob it is handed
@@ -29,6 +30,13 @@ use wire::{
 };
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// The D11 storage token of a display name (the spec vocabulary + the blob field front
+/// segment): `jasp_enc_hex_` + lowercase hex of the UTF-8 bytes.
+fn tok(display: &str) -> String {
+    let hex: String = display.bytes().map(|b| format!("{b:02x}")).collect();
+    format!("jasp_enc_hex_{hex}")
+}
 
 /// A spawned child killed on drop (also on test panic).
 struct Proc {
@@ -292,15 +300,16 @@ fn stapled_view_fills_builds_and_dispatches_e2e() {
         other => panic!("expected result, got {other:?}"),
     };
 
-    // 2. Submit an analysis work with three stapled casts: dict→nominal (group),
-    //    f64→scale (x), f64→nominal (z — the r_character level-string path).
+    // 2. Submit an analysis work with three stapled casts (by storage token, D11):
+    //    dict→nominal (group), f64→scale (x), f64→nominal (z — the r_character
+    //    level-string path).
     let spec = |columns: Vec<(&str, ViewLevel)>| ViewSpec {
         dataset_id: dataset_id.clone(),
         columns: Some(
             columns
                 .into_iter()
-                .map(|(name, as_type)| ViewColumn {
-                    name: name.into(),
+                .map(|(display, as_type)| ViewColumn {
+                    name: tok(display),
                     as_type,
                 })
                 .collect(),
@@ -392,7 +401,8 @@ fn stapled_view_fills_builds_and_dispatches_e2e() {
     let schema = reader.schema();
     let batch = reader.into_iter().next().unwrap().unwrap();
 
-    // Field names: `<real>__<type>` in spec order + the base-row index.
+    // Field names: `<token>_<type>` in spec order + the base-row index (D11 — the
+    // token plus the cast type IS the R alias).
     let names: Vec<String> = schema
         .fields()
         .iter()
@@ -400,7 +410,12 @@ fn stapled_view_fills_builds_and_dispatches_e2e() {
         .collect();
     assert_eq!(
         names,
-        vec!["group__nominal", "x__scale", "z__nominal", "__base_row"]
+        vec![
+            format!("{}_nominal", tok("group")),
+            format!("{}_scale", tok("x")),
+            format!("{}_nominal", tok("z")),
+            "__base_row".to_string()
+        ]
     );
 
     // group (dict→nominal): dictionary A/B, keys passthrough.
@@ -474,10 +489,8 @@ fn stapled_view_fills_builds_and_dispatches_e2e() {
     // The blob's file name IS the view_id, and the metadata agrees.
     let file_id = blob.file_stem().unwrap().to_string_lossy().into_owned();
     assert_eq!(meta["view_id"], file_id.as_str());
-    // The token map: name-derived hex.
-    assert_eq!(
-        meta["token_map"]["group"],
-        "67726f7570", // "group" UTF-8, hex
-    );
+    // The token map: display_name IS the decode (D11) — token → display.
+    assert_eq!(meta["token_map"][tok("group")], "group");
+    assert_eq!(meta["token_map"][tok("group")].as_str().unwrap(), "group");
     let _ = std::fs::remove_dir_all(&dir_root);
 }
