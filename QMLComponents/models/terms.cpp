@@ -629,7 +629,12 @@ int Terms::rankOf(const QString &component) const
 
 	for(const Term& compare : _parent->terms())
 	{
-		if (compare.label() == component)
+		// VALUE space: `component` is a term's value; the parent's term must be matched
+		// by ITS value. The old label()==component spelling only worked while label≡value
+		// (pre-D11); with display labels the ranks all tied and Terms::add's parented path
+		// treated every incoming term as a rank-0 duplicate — silently merged, never added
+		// (the assigned→available drag-back failure).
+		if (compare.value() == component)
 			break;
 		index++;
 	}
