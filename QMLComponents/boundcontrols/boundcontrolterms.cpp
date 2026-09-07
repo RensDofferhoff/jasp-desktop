@@ -124,6 +124,8 @@ void BoundControlTerms::bindTo(const Json::Value &value)
 		columnTypeVec	types = term.types(),
 						checkedTypes;
 		int componentId = 0;
+		QStringList displayParts;
+
 		for (const QString& component : term.components())
 		{
 			columnType type = types.size() > componentId ? types[componentId] : columnType::unknown;
@@ -136,9 +138,19 @@ void BoundControlTerms::bindTo(const Json::Value &value)
 
 			checkedTypes.push_back(type);
 			componentId++;
+
+			// D11: option values speak storage tokens; the list renders display names.
+			// Terms rebuilt here carry no labels, so without this decode a bound list
+			// shows hex for its singles while live-created interactions (labeled at
+			// creation) show display names — the asymmetry. Non-columns (levels, etc.)
+			// decode to empty and keep the component itself.
+			QString displayName = _listView->model()->requestInfo(varInfoType::DisplayName, component).toString();
+			displayParts.push_back(displayName.isEmpty() ? component : displayName);
 		}
 
 		term.setTypes(checkedTypes);
+		if (term.label().isEmpty() || term.label() == term.value())
+			term.setLabel(displayParts.join(Term::separator));
 	}
 
 	Json::Value newValue = Json::objectValue;
