@@ -272,6 +272,7 @@ QVariant ColumnsModel::provideInfo(varInfoType info, const QString& colName, int
 				// (numeric_levels) — the frontend never parses wire values (design doc §2).
 				return col->numericLevels;
 			case varInfoType::ColumnDescription:	return tq(col->description);
+			case varInfoType::DisplayName:		return tq(col->displayName);	// D11 decode: token -> human name
 			case varInfoType::DataSetPointer:		return QVariant::fromValue<void*>(nullptr);	// deliberately no raw handout (design decision 8)
 			default:								return QVariant();	// values/previews: nothing in the frontend until data_view
 			}
@@ -344,7 +345,12 @@ const Terms & ColumnsModel::dataSetTerms() const
 		const size_t count = _laneDataSet->schema().size();
 		for (size_t i = 0; i < count; i++)
 			if (const ColumnInfo * col = _laneDataSet->schemaColumnAt(i))
-				_dataSetTermsCache.add(Term(tq(col->name), col->type));
+			{
+				// D11: `name` is the storage token (the binding vocabulary); `displayName`
+				// is the decode. Terms carry both — value binds, label renders — so the
+				// variables lists show real names while options stay token-native.
+				_dataSetTermsCache.add(Term(tq(col->name), tq(col->displayName), QString(), col->type));
+			}
 	}
 	else
 	{

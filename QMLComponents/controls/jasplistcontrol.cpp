@@ -361,6 +361,12 @@ bool JASPListControl::_checkLevelsConstraintsForVariable(const QString& variable
 	if (variable.isEmpty() || !model())
 		return true;
 
+	// D11: the option vocabulary is storage tokens; error messages speak the display
+	// vocabulary. The lookups below need the token — only the rendered strings decode.
+	QString display = model()->requestInfo(varInfoType::DisplayName, variable).toString();
+	if (display.isEmpty())
+		display = variable;
+
 	columnType	type	= model()->getVariableType(variable);
 	if (type == columnType::unknown)
 		type = (columnType)model()->requestInfo(varInfoType::VariableType, variable).toInt();
@@ -374,12 +380,12 @@ bool JASPListControl::_checkLevelsConstraintsForVariable(const QString& variable
 
 	if (_minLevels >= 0 && nbLevels < _minLevels)
 	{
-		addControlErrorPermanent(tr("Minimum number of levels is %1. Variable %2 has only %3 levels").arg(_minLevels).arg(variable).arg(nbLevels));
+		addControlErrorPermanent(tr("Minimum number of levels is %1. Variable %2 has only %3 levels").arg(_minLevels).arg(display).arg(nbLevels));
 		return false;
 	}
 	else if (_maxLevels >= 0 && nbLevels > _maxLevels)
 	{
-		addControlErrorPermanent(tr("Maximum number of levels is %1. Variable %2 has %3 levels.").arg(_maxLevels).arg(variable).arg(nbLevels));
+		addControlErrorPermanent(tr("Maximum number of levels is %1. Variable %2 has %3 levels.").arg(_maxLevels).arg(display).arg(nbLevels));
 		return false;
 	}
 	else if (_maxLevels < 0 && noScaleAllowed && type == columnType::scale && nbLevels > maxScaleLevels)
@@ -387,17 +393,17 @@ bool JASPListControl::_checkLevelsConstraintsForVariable(const QString& variable
 		// This is the case when a scale variable is transformed into a nominal or ordinal, and the variable has more than the default maximum number of levels
 		// This should not be checked if maxLevels is explicitly set (that is if _maxLevels >= 0)
 		addControlErrorPermanent(tr("Attempt to transform scale variable %1 into a %2 variable, but its number of levels %3 exceeds the maximum %4. If you still want to use this variable, either change its type, or change 'Maximum allowed levels for scale' in Preferences / Data menu")
-								 .arg(variable).arg(columnTypeToQString(_allowedTypesModel->defaultType())).arg(nbLevels).arg(maxScaleLevels));
+								 .arg(display).arg(columnTypeToQString(_allowedTypesModel->defaultType())).arg(nbLevels).arg(maxScaleLevels));
 		return false;
 	}
 	else if (_minNumericLevels >= 0 && nbNumValues < _minNumericLevels)
 	{
-		addControlErrorPermanent(tr("Minimum number of numeric values is %1. Variable %2 has only %3 different numeric values").arg(_minNumericLevels).arg(variable).arg(nbNumValues));
+		addControlErrorPermanent(tr("Minimum number of numeric values is %1. Variable %2 has only %3 different numeric values").arg(_minNumericLevels).arg(display).arg(nbNumValues));
 		return false;
 	}
 	else if (_maxNumericLevels >= 0 && nbNumValues > _maxNumericLevels)
 	{
-		addControlErrorPermanent(tr("Maximum number of numeric values is %1. Variable %2 has %3 different numeric values").arg(_maxNumericLevels).arg(variable).arg(nbNumValues));
+		addControlErrorPermanent(tr("Maximum number of numeric values is %1. Variable %2 has %3 different numeric values").arg(_maxNumericLevels).arg(display).arg(nbNumValues));
 		return false;
 	}
 

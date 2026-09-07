@@ -8,5 +8,5 @@ DECLARE_ENUM(computedColumnType,		notComputed, rCode, constructorCode, analysis,
 // The excision, Cut 7: dropLevelsType and dbDbl died — drop/keep rode the never-pruning
 // legacy dictionary, dbDbl was Column's NaN/Inf storage encoding; zero users remained.
 DECLARE_ENUM(varIconType,			DefaultIconType, DisabledIconType, InactiveIconType, TransformedIconType );
-DECLARE_ENUM(varInfoType,				VariableType, VariableNames, DataSetRowCount, Labels, DoubleValues, NameRole, DataSetValue, DataSetValues, MaxWidth, SignalsBlocked, DataAvailable, TotalNumericValues, TotalLevels, PreviewScale, PreviewOrdinal, PreviewNominal, DataSetPointer, ColumnDescription, DataSetTerms); ///< DataSetTerms: NEO wide-data fast path — the full (name, type) Terms of the active dataset, cached by the provider
+DECLARE_ENUM(varInfoType,			VariableType, VariableNames, DataSetRowCount, Labels, DoubleValues, NameRole, DataSetValue, DataSetValues, MaxWidth, SignalsBlocked, DataAvailable, TotalNumericValues, TotalLevels, PreviewScale, PreviewOrdinal, PreviewNominal, DataSetPointer, ColumnDescription, DataSetTerms, DisplayName); ///< DataSetTerms: NEO wide-data fast path — the full (name, type) Terms of the active dataset, cached by the provider · DisplayName: D11 decode — the human name for a storage token (variables lists, constraint errors)
 #endif // COLUMNTYPE_H

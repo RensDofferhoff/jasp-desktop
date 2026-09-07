@@ -197,7 +197,9 @@ QVariant DataSetProvider::provideInfo(varInfoType info, const QString& colName, 
 		case varInfoType::PreviewScale:				return	"";
 		case varInfoType::PreviewOrdinal:				return	"";
 		case varInfoType::PreviewNominal:				return	"";
-		case varInfoType::DataSetPointer:				return	QVariant::fromValue<void*>(dataSet());
+		case varInfoType::ColumnDescription:		return	!column ? QString() : tq(column->description);
+		case varInfoType::DisplayName:			return	!column ? QString() : tq(column->displayName);	// D11 decode: token -> human name
+		case varInfoType::DataSetPointer:			return	QVariant::fromValue<void*>(dataSet());
 
 
 		default: break;

@@ -161,6 +161,9 @@ bool Term::operator!=(const Term &other) const
 
 bool Term::operator<(const Term &other) const
 {
+	// D11: sort in DISPLAY order (labels), not storage-token order — the available
+	// variables list renders labels, so token-order sorting looks scrambled.
+	if (label() != other.label())	return label() < other.label();
 	return value() < other.value();
 }
 

@@ -349,6 +349,7 @@ Terms Terms::crossCombinations() const
 		do {
 
 			vector<string> combination;
+			QStringList    labels;
 			columnTypeVec types;
 
 			for (uint i = 0; i < _terms.size(); i++) {
@@ -358,11 +359,16 @@ Terms Terms::crossCombinations() const
 					columnTypeVec termTypes = _terms.at(i).types();
 					combination.insert(combination.end(), components.begin(), components.end());
 					types.insert(types.end(), termTypes.begin(), termTypes.end());
+					labels.append(_terms.at(i).label());
 				}
 			}
 
 			Term newTerm(combination);
 			newTerm.setTypes(types);
+			// D11: label is the display vocabulary (displayName per component) —
+			// without it the interaction renders as joined storage tokens.
+			if (!labels.isEmpty())
+				newTerm.setLabel(labels.join(Term::separator));
 			t.add(newTerm);
 
 		} while (std::next_permutation(v.begin(), v.end()));
@@ -383,6 +389,7 @@ Terms Terms::wayCombinations(int ways) const
 		do {
 
 			vector<string> combination;
+			QStringList    labels;
 			columnTypeVec types;
 
 			for (uint i = 0; i < _terms.size(); ++i) {
@@ -392,11 +399,16 @@ Terms Terms::wayCombinations(int ways) const
 					columnTypeVec termTypes = _terms.at(i).types();
 					combination.insert(combination.end(), components.begin(), components.end());
 					types.insert(types.end(), termTypes.begin(), termTypes.end());
+					labels.append(_terms.at(i).label());
 				}
 			}
 
 			Term newTerm(combination);
 			newTerm.setTypes(types);
+			// D11: label is the display vocabulary (displayName per component) —
+			// without it the interaction renders as joined storage tokens.
+			if (!labels.isEmpty())
+				newTerm.setLabel(labels.join(Term::separator));
 			t.add(newTerm);
 
 		} while (std::next_permutation(v.begin(), v.end()));
