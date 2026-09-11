@@ -25,8 +25,8 @@
             "checksum": "6270dabb3aa1351bbe06ba8a717cf98c439720d6694080ee19f5e46243333819"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.5-beta.500_R-4-5-2_Beta/jaspTTests_0.96.5-beta.500_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "5df25d7668443294c5e97c3c281061d549b0241d7abf69ce056210691e4e42ab"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.5-beta.501_R-4-5-2_Beta/jaspTTests_0.96.5-beta.501_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "080d5cf2365a60e49019030cd2b6e15f4b2cf19a48b0c3da5e690a8240144785"
         }
     ],
     "MacOS-arm64": [
@@ -55,8 +55,8 @@
             "checksum": "f8645c801619a801bc2f81b550b49880881e492ca7cfd883f2de39996378ebd1"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.5-beta.503_R-4-5-2_Beta/jaspTTests_0.96.5-beta.503_MacOS_arm64_R-4-5-2.JASPModule",
-            "checksum": "37719a663bbada34d395083dc186a6d97cbd06409f9eebdd0a8803827096f76a"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.5-beta.504_R-4-5-2_Beta/jaspTTests_0.96.5-beta.504_MacOS_arm64_R-4-5-2.JASPModule",
+            "checksum": "30c063ace2589098df93b7c0762db36f86296455aed2153082a087b83806eb93"
         }
     ],
     "MacOS-x86_64": [
@@ -85,8 +85,8 @@
             "checksum": "7aff896779a48dde9dc418d4559a768eba6ab4cb6f59bfc313d3444e74f4fb31"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.5-beta.21_R-4-5-2_Beta/jaspTTests_0.96.5-beta.21_MacOS_x86_64_R-4-5-2.JASPModule",
-            "checksum": "9144251283c99c77f57521179e0940b22f7f2282f4616d98a6d5f5d0eba8b43e"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.5-beta.22_R-4-5-2_Beta/jaspTTests_0.96.5-beta.22_MacOS_x86_64_R-4-5-2.JASPModule",
+            "checksum": "a1a3aeecaddbfb94a458a3fd427ed8ad02215896ddc88e04fbce5ae10b66e908"
         }
     ]
 }
