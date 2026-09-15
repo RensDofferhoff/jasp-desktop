@@ -1,12 +1,12 @@
 {
     "Windows-x86_64": [
         {
-            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.503_R-4-5-2_Beta/jaspAnova_0.96.6-beta.503_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "32514a0e49f62df9e85dfd0d43980cc1ad07a0065fc9c7f9285590eff508e74f"
+            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.504_R-4-5-2_Beta/jaspAnova_0.96.6-beta.504_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "1cdfa0e249ed4a657be2c3ef625d123076a6e9dbbe3367be81fdf0c87d6660b7"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.96.5-beta.505_R-4-5-2_Beta/jaspDescriptives_0.96.5-beta.505_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "08d2648c72714fbd144528fe7a060ce739cfc6757f5b8ebe9b0c6d3ec57441ee"
+            "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.98.1-beta.0_R-4-5-2_Beta/jaspDescriptives_0.98.1-beta.0_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "b874a8961822e1393e1a7336472df93e8b9670dfd46219d1db14322911aafd56"
         },
         {
             "url": "https://github.com/jasp-stats-modules/jaspFactor/releases/download/0.97.1-beta.501_R-4-5-2_Beta/jaspFactor_0.97.1-beta.501_Windows_x86-64_R-4-5-2.JASPModule",
@@ -31,12 +31,12 @@
     ],
     "MacOS-arm64": [
         {
-            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.506_R-4-5-2_Beta/jaspAnova_0.96.6-beta.506_MacOS_arm64_R-4-5-2.JASPModule",
-            "checksum": "c6c359a7f8b337a4721eea65ea40e2c2dff000aa1bdfd2859624477d3d5dee1e"
+            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.507_R-4-5-2_Beta/jaspAnova_0.96.6-beta.507_MacOS_arm64_R-4-5-2.JASPModule",
+            "checksum": "7341dbb1b16d813fb2ee1026175901d8e9d8e5b4a8fc320bfe4f8b6bd0561547"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.96.5-beta.508_R-4-5-2_Beta/jaspDescriptives_0.96.5-beta.508_MacOS_arm64_R-4-5-2.JASPModule",
-            "checksum": "9c080b863323f216916ccfb3ecaa35442bcbbeff8db1a5a4999cdbebde5b1485"
+            "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.98.1-beta.0_R-4-5-2_Beta/jaspDescriptives_0.98.1-beta.0_MacOS_arm64_R-4-5-2.JASPModule",
+            "checksum": "011d85fecce69b4afd29165fcc2bd2a0df1b6126e2a442a3363767e04f802760"
         },
         {
             "url": "https://github.com/jasp-stats-modules/jaspFactor/releases/download/0.97.1-beta.504_R-4-5-2_Beta/jaspFactor_0.97.1-beta.504_MacOS_arm64_R-4-5-2.JASPModule",
@@ -61,12 +61,12 @@
     ],
     "MacOS-x86_64": [
         {
-            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.33_R-4-5-2_Beta/jaspAnova_0.96.6-beta.33_MacOS_x86_64_R-4-5-2.JASPModule",
-            "checksum": "890d587b0753b1e4dddd8b2b86887a1dedb6016cf22d6f5acc911cdfe23f320e"
+            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.34_R-4-5-2_Beta/jaspAnova_0.96.6-beta.34_MacOS_x86_64_R-4-5-2.JASPModule",
+            "checksum": "3f0292a1ca6842925937eaeb5e58c874735260b277e6f29b3655868dd8e83d76"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.96.5-beta.32_R-4-5-2_Beta/jaspDescriptives_0.96.5-beta.32_MacOS_x86_64_R-4-5-2.JASPModule",
-            "checksum": "651d21eaada2a644bf24eafcb563482d784cbdf6c41da4e8dc384437d32369d3"
+            "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.98.1-beta.0_R-4-5-2_Beta/jaspDescriptives_0.98.1-beta.0_MacOS_x86_64_R-4-5-2.JASPModule",
+            "checksum": "8ecea2d14153186535556cdd5c7ee6c508d77759022270a272c322006d407bcd"
         },
         {
             "url": "https://github.com/jasp-stats-modules/jaspFactor/releases/download/0.97.1-beta.8_R-4-5-2_Beta/jaspFactor_0.97.1-beta.8_MacOS_x86_64_R-4-5-2.JASPModule",
