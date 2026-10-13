@@ -1,8 +1,8 @@
 {
     "Windows-x86_64": [
         {
-            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.703_R-4-5-2_Beta/jaspAnova_0.96.6-beta.703_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "9036bea7c99780cdef1680ec703f23a124945f4e35a7f558d186ff34199da4c2"
+            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.704_R-4-5-2_Beta/jaspAnova_0.96.6-beta.704_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "1f8887892c63be018fd9d7da514b6d2966346353f4f2fbe9756916c796e085e9"
         },
         {
             "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.98.1-beta.702_R-4-5-2_Beta/jaspDescriptives_0.98.1-beta.702_Windows_x86-64_R-4-5-2.JASPModule",
@@ -31,8 +31,8 @@
     ],
     "MacOS-arm64": [
         {
-            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.703_R-4-5-2_Beta/jaspAnova_0.96.6-beta.703_MacOS_arm64_R-4-5-2.JASPModule",
-            "checksum": "ddd7e1bb5c595f8670fd72de6db1240512c9a6092869ad3ae7bc386ba40ca8e5"
+            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.704_R-4-5-2_Beta/jaspAnova_0.96.6-beta.704_MacOS_arm64_R-4-5-2.JASPModule",
+            "checksum": "4d64f7e90a776b75c096918d34dd14baa56603f2834f26d061428c76d7c82735"
         },
         {
             "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.98.1-beta.702_R-4-5-2_Beta/jaspDescriptives_0.98.1-beta.702_MacOS_arm64_R-4-5-2.JASPModule",
@@ -61,8 +61,8 @@
     ],
     "MacOS-x86_64": [
         {
-            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.703_R-4-5-2_Beta/jaspAnova_0.96.6-beta.703_MacOS_x86_64_R-4-5-2.JASPModule",
-            "checksum": "cb2d8551e488462e17921122e130b76e63c2d6a68e04a883c989df0e03078e1d"
+            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.6-beta.704_R-4-5-2_Beta/jaspAnova_0.96.6-beta.704_MacOS_x86_64_R-4-5-2.JASPModule",
+            "checksum": "f03db144cbead5eca676a2c20d52492219f31cb88ab627849dcbad6bf597fedd"
         },
         {
             "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.98.1-beta.702_R-4-5-2_Beta/jaspDescriptives_0.98.1-beta.702_MacOS_x86_64_R-4-5-2.JASPModule",
