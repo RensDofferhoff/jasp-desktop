@@ -1,32 +1,32 @@
 {
     "Windows-x86_64": [
         {
-            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.7-beta.0_R-4-5-2_Beta/jaspAnova_0.96.7-beta.0_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "c72ac8d8d1e46f89c6276e5fdcddd2325bd4904919e6d4e8143408cee93ec4e0"
+            "url": "https://github.com/jasp-stats-modules/jaspAnova/releases/download/0.96.7-beta.1_R-4-5-2_Beta/jaspAnova_0.96.7-beta.1_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "5abab4254e43399ad68f28ef56b2b01e3ba4ea529bd3ffa5a4336c470d6a4698"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.98.1-beta.706_R-4-5-2_Beta/jaspDescriptives_0.98.1-beta.706_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "3424ca76b6698976b9640480aa2eedff9dbe9cbf526a2822adf55c0d362bcdb7"
+            "url": "https://github.com/jasp-stats-modules/jaspDescriptives/releases/download/0.98.1-beta.707_R-4-5-2_Beta/jaspDescriptives_0.98.1-beta.707_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "d063de2e49be573ec1304f3f9f1be5f648d020bf7aa90972ffef70107a244a76"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspFactor/releases/download/0.98.0-beta.2_R-4-5-2_Beta/jaspFactor_0.98.0-beta.2_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "745c48f922f64976533cace90faf0200c68384cde031eea2d7072f6a624bc1b8"
+            "url": "https://github.com/jasp-stats-modules/jaspFactor/releases/download/0.98.0-beta.3_R-4-5-2_Beta/jaspFactor_0.98.0-beta.3_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "4a0fdcbb76465deb03f094f421fb795307ad05aa6ec5203aa4dd3643f99867ba"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspFrequencies/releases/download/0.96.5-beta.705_R-4-5-2_Beta/jaspFrequencies_0.96.5-beta.705_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "3f656498de9118999ebeaba86d1e787602075ddefc5b84ab057b9686e24b012b"
+            "url": "https://github.com/jasp-stats-modules/jaspFrequencies/releases/download/0.96.5-beta.706_R-4-5-2_Beta/jaspFrequencies_0.96.5-beta.706_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "8072c130a3c20a0ee0ba0d265621b2508627858ff2aef385a504a1b64b4ac60b"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspMixedModels/releases/download/0.95.5-release.803_R-4-5-2_Release/jaspMixedModels_0.95.5-release.803_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "26d29d936d9f175bdc25a063e1a03866ffbc291d980a59d5875e2fd878bc787c"
+            "url": "https://github.com/jasp-stats-modules/jaspMixedModels/releases/download/0.96.4-beta.509_R-4-5-2_Beta/jaspMixedModels_0.96.4-beta.509_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "21ea8ae6e97067e602bee7413e26ab08809aa4aec0d75d1622fa5a8fbd9522a3"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspRegression/releases/download/0.96.5-beta.708_R-4-5-2_Beta/jaspRegression_0.96.5-beta.708_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "bd6b9f3b442c0b8022e6cb532ab6cb88a9bf10c85bc2898a7ecf6da92521e538"
+            "url": "https://github.com/jasp-stats-modules/jaspRegression/releases/download/0.96.5-beta.709_R-4-5-2_Beta/jaspRegression_0.96.5-beta.709_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "7c86ed82101088be20cc99913619829e245ff8beb9fe1a7882f7b468b4de61d3"
         },
         {
-            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.95.5-release.803_R-4-5-2_Release/jaspTTests_0.95.5-release.803_Windows_x86-64_R-4-5-2.JASPModule",
-            "checksum": "5febb4853d34d50ee8afc8f76ec05e41aa4b5cee48ee458afa131a9b58cc8cf0"
+            "url": "https://github.com/jasp-stats-modules/jaspTTests/releases/download/0.96.5-beta.509_R-4-5-2_Beta/jaspTTests_0.96.5-beta.509_Windows_x86-64_R-4-5-2.JASPModule",
+            "checksum": "fa51bda2c9dae4462e8b2338918f776deebceee7fc1c7fa062a478e757488854"
         }
     ],
     "MacOS-arm64": [
